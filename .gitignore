@@ -4,5 +4,9 @@ dist
 .dev.vars
 test-results
 playwright-report
-tmp
+tmp/*
+!tmp/reviews/
+tmp/reviews/*
+!tmp/reviews/PROGRESS.md
+!tmp/reviews/build-report.md
 .DS_Store
