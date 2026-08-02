@@ -51,3 +51,32 @@ The interface is calm, friends-only, and does not introduce ratings, feeds, stre
 - Real notification delivery on iOS/Android still needs human device verification.
 - The review did not rerun the app or create new mobile screenshots, per the no-code-change review request.
 - Accessibility was reviewed from source and screenshots, not with a screen reader.
+
+## Re-review Addendum
+
+### Verdict
+
+Approve
+
+The previous UX blockers are resolved for this focused pass. The product remains calm and friends-only, the notification copy now discloses the exact three allowed push categories before permission, the mobile screenshots are visually usable, resign is implemented as a two-step action, labels and focus states are improved, schedule status no longer exposes `fired`, and clocks now use tabular numerals. No regressions were found in the touched areas.
+
+### Evidence
+
+- `src/main.tsx:257-266`, `tmp/reviews/screens/01-alice-account.png`, `tmp/reviews/screens/15-mobile-home-ready-schedule.png` - Pre-permission install copy says notifications are only for friend requests, game challenges, and scheduled games starting. This matches the requirements invariant and appears before the `Enable notifications` button on desktop and mobile.
+- `src/main.tsx:561-574` - Resign is now two-step: first tap sets `confirmResign`, then the terminal request is only sent from `Confirm resign`; `Cancel` backs out.
+- `src/main.tsx:320-324`, `src/main.tsx:379-386`, `src/main.tsx:430-440`, `tmp/reviews/screens/01-alice-account.png`, `tmp/reviews/screens/15-mobile-home-ready-schedule.png` - Friend handle, challenge friend/time control, and schedule friend/time/start fields now have visible labels.
+- `src/main.tsx:643-646`, `tmp/reviews/screens/13-scheduled-push-fired.png`, `tmp/reviews/screens/15-mobile-home-ready-schedule.png` - Scheduled game `fired` status is rendered as `ready`; the implementation-shaped word is no longer visible.
+- `src/styles.css:57-62` - Buttons, inputs, and selects now have intentional `:focus-visible` outlines.
+- `src/styles.css:288-292` - Clock numerals use `font-variant-numeric: tabular-nums`.
+- `tmp/reviews/screens/15-mobile-home-ready-schedule.png` - Mobile dashboard is readable at `390px` wide. Sections stack cleanly; install text, friend controls, challenge, schedule, ready scheduled game, and game history are visible without overlap.
+- `tmp/reviews/screens/16-mobile-game-board.png` - Mobile game board is readable at `390px` wide. Board, pieces, clocks, opponent state, and resign action fit the viewport width without horizontal overflow.
+- `npm run typecheck` - Passes, covering the touched TypeScript areas including the live clock data shape.
+
+### Remaining Findings
+
+- `tmp/reviews/screens/16-mobile-game-board.png`, `src/main.tsx:561-574` - Non-blocking evidence gap: the screenshot set shows the initial `Resign` button and terminal resigned state, but does not include the intermediate `Confirm resign` / `Cancel` UI. Source verifies the two-step behavior.
+
+### Residual Risks
+
+- Real iPhone add-to-home-screen and push delivery still require hand verification on device.
+- This re-review did not rerun the end-to-end browser suite; it inspected source, current screenshots, and typecheck output only.
