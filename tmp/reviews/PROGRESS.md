@@ -9,6 +9,8 @@
 - `npm run typecheck` passed after the client logic file.
 - Added responsive CSS for the PWA shell, forms, friend/challenge/schedule panels, board, clocks, move list, and connection states.
 - `npm run typecheck && npm run build` passed after CSS.
+- Added `scripts/generate-vapid.mjs` for Web Push VAPID key generation without committing private keys.
+- Added `scripts/verify-push-policy.mjs`; `npm run test:push && npm run typecheck && npm run build` passed.
 
 ## Current constraints
 - Work lean due to machine memory pressure.
@@ -16,7 +18,6 @@
 - Run at most one headless browser instance during testing and close it promptly.
 
 ## Next
-- Add push VAPID setup helper/policy verifier and commit it.
 - Add lean Playwright two-client automation with screenshots under `tmp/reviews/screens/`.
 - Build/typecheck/test, deploy with Wrangler, then run independent reviewer agents.
 - Write `tmp/reviews/build-report.md` with deployed URL, test commands, screenshot inventory, known gaps, and human verification items.

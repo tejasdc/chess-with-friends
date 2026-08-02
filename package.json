@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "deploy": "npm run build && wrangler deploy",
     "test:e2e": "playwright test",
-    "test:push": "node scripts/verify-push-policy.mjs"
+    "test:push": "node scripts/verify-push-policy.mjs",
+    "vapid:generate": "node scripts/generate-vapid.mjs"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
