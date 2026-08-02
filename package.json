@@ -1,0 +1,33 @@
+{
+  "name": "chess-with-friends",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "worker:dev": "npm run build && wrangler dev --local --persist-to=.wrangler/state --port 8787",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "deploy": "npm run build && wrangler deploy",
+    "test:e2e": "playwright test",
+    "test:push": "node scripts/verify-push-policy.mjs"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "chess.js": "^1.4.0",
+    "lucide-react": "^0.468.0",
+    "vite": "^7.0.0",
+    "wrangler": "^4.26.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "@playwright/test": "^1.54.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.8.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

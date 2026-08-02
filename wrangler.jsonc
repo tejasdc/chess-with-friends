@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "chess-with-friends",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "APP_NAME": "Chess with Friends",
+    "VAPID_PUBLIC_KEY": ""
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "APP_DO", "class_name": "AppDO" },
+      { "name": "GAME_DO", "class_name": "GameDO" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AppDO", "GameDO"]
+    }
+  ]
+}

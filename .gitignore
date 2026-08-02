@@ -1,2 +1,8 @@
-tmp/
-node_modules/
+node_modules
+dist
+.wrangler
+.dev.vars
+test-results
+playwright-report
+tmp
+.DS_Store
