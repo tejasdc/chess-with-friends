@@ -10,7 +10,7 @@
   },
   "vars": {
     "APP_NAME": "Chess with Friends",
-    "VAPID_PUBLIC_KEY": ""
+    "VAPID_PUBLIC_KEY": "BDtx_9EucoyV7Dvn4nXvliLMzGuf2wIHm9PMmuyZIm66sDXRRqhQGCjPGEZNezfrE--mi5YJnJi3XdbiLghZFfE"
   },
   "durable_objects": {
     "bindings": [
