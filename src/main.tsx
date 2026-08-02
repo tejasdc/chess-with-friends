@@ -74,6 +74,7 @@ interface GameState {
   moves: Array<{ from: string; to: string; san: string; by: string; at: number; fen: string }>;
   whiteMs: number;
   blackMs: number;
+  lastTickAt: number;
   turn: "w" | "b";
   status: GameStatus;
   result?: string;
@@ -257,7 +258,7 @@ function InstallPanel({ home, setMessage }: { home: HomeData; setMessage: (value
     <section className="panel install">
       <div>
         <h2>Install</h2>
-        <p>On iPhone, open Share and choose Add to Home Screen before enabling notifications.</p>
+        <p>On iPhone, open Share and choose Add to Home Screen before enabling notifications. Notifications are only for friend requests, game challenges, and scheduled games starting.</p>
       </div>
       <button onClick={enablePush}>
         <Bell size={18} />
@@ -317,7 +318,10 @@ function FriendPanel({ home, refresh, setMessage }: { home: HomeData; refresh: (
         </button>
       </div>
       <div className="inline-form">
-        <input value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="friend_handle" />
+        <label>
+          Friend handle
+          <input value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="friend_handle" />
+        </label>
         <button onClick={requestFriend} disabled={!handle}>
           <Plus size={18} />
           Add
@@ -372,8 +376,14 @@ function ChallengePanel({ home, refresh, setMessage }: { home: HomeData; refresh
     <section className="panel">
       <h2>Challenge</h2>
       <div className="inline-form">
-        <FriendSelect friends={home.friends} value={friendId} onChange={setFriendId} />
-        <TimeSelect value={timeControl} onChange={setTimeControl} />
+        <label>
+          Friend
+          <FriendSelect friends={home.friends} value={friendId} onChange={setFriendId} />
+        </label>
+        <label>
+          Time control
+          <TimeSelect value={timeControl} onChange={setTimeControl} />
+        </label>
         <button onClick={challenge} disabled={!friendId}>
           <Sword size={18} />
           Send
@@ -417,10 +427,16 @@ function SchedulePanel({ home, refresh, setMessage }: { home: HomeData; refresh:
     <section className="panel">
       <h2>Schedule</h2>
       <div className="inline-form">
-        <FriendSelect friends={home.friends} value={friendId} onChange={setFriendId} />
-        <TimeSelect value={timeControl} onChange={setTimeControl} />
+        <label>
+          Friend
+          <FriendSelect friends={home.friends} value={friendId} onChange={setFriendId} />
+        </label>
+        <label>
+          Time control
+          <TimeSelect value={timeControl} onChange={setTimeControl} />
+        </label>
         <label className="compact-label">
-          Minutes
+          Start in minutes
           <input value={minutes} onChange={(event) => setMinutes(event.target.value)} inputMode="decimal" />
         </label>
         <button onClick={create} disabled={!friendId}>
@@ -431,7 +447,7 @@ function SchedulePanel({ home, refresh, setMessage }: { home: HomeData; refresh:
       {home.schedules.map((schedule) => (
         <div className="list-row" key={schedule.id}>
           <span>
-            @{schedule.fromHandle} → @{schedule.toHandle}, {new Date(schedule.startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}, {schedule.status}
+            @{schedule.fromHandle} → @{schedule.toHandle}, {new Date(schedule.startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}, {scheduleStatus(schedule.status)}
           </span>
           {schedule.toId === home.user.id && schedule.status === "pending" ? <button onClick={() => void accept(schedule.id)}>Accept</button> : null}
           {schedule.gameId ? <button onClick={() => navigate(`/game/${schedule.gameId}`)}>Open</button> : null}
@@ -464,6 +480,8 @@ function GamesPanel({ home, refresh }: { home: HomeData; refresh: () => void }) 
 function GameScreen({ gameId, home, onHome, setMessage }: { gameId: string; home: HomeData; onHome: () => void; setMessage: (value: string) => void }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [selected, setSelected] = useState<Square | null>(null);
+  const [confirmResign, setConfirmResign] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const myColor = game?.whiteId === home.user.id ? "w" : "b";
   const opponentId = game ? (game.whiteId === home.user.id ? game.blackId : game.whiteId) : "";
   const opponentState = game?.connectionState?.[opponentId] || "gone";
@@ -484,6 +502,11 @@ function GameScreen({ gameId, home, onHome, setMessage }: { gameId: string; home
     socket.addEventListener("open", () => socket.send("sync"));
     return () => socket.close();
   }, [gameId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function choose(square: Square) {
     if (!game || game.status !== "active") return;
@@ -516,12 +539,12 @@ function GameScreen({ gameId, home, onHome, setMessage }: { gameId: string; home
         <div className="board-wrap">
           <div className="clock-row">
             <strong>@{game.blackHandle}</strong>
-            <time>{formatClock(game.blackMs)}</time>
+            <time>{formatClock(liveClock(game, "b", now))}</time>
           </div>
           <Board fen={game.fen} orientation={myColor || "w"} selected={selected} onSquare={choose} />
           <div className="clock-row">
             <strong>@{game.whiteHandle}</strong>
-            <time>{formatClock(game.whiteMs)}</time>
+            <time>{formatClock(liveClock(game, "w", now))}</time>
           </div>
         </div>
         <aside className="game-side">
@@ -534,10 +557,20 @@ function GameScreen({ gameId, home, onHome, setMessage }: { gameId: string; home
             <span>Opponent</span>
             <strong className={`connection ${opponentState}`}>{opponentState}</strong>
           </div>
-          <button className="danger" onClick={() => void resign()} disabled={game.status !== "active"}>
-            <Flag size={18} />
-            Resign
-          </button>
+          {confirmResign ? (
+            <div className="confirm-row">
+              <button className="danger" onClick={() => void resign()} disabled={game.status !== "active"}>
+                <Flag size={18} />
+                Confirm resign
+              </button>
+              <button className="secondary" onClick={() => setConfirmResign(false)}>Cancel</button>
+            </div>
+          ) : (
+            <button className="danger" onClick={() => setConfirmResign(true)} disabled={game.status !== "active"}>
+              <Flag size={18} />
+              Resign
+            </button>
+          )}
           <ol className="moves">
             {game.moves.map((move, index) => <li key={`${move.at}-${index}`}>{move.san}</li>)}
           </ol>
@@ -599,6 +632,16 @@ function formatClock(ms: number) {
   const minutes = Math.floor(total / 60).toString();
   const seconds = (total % 60).toString().padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function liveClock(game: GameState, color: "w" | "b", now: number) {
+  if (game.status !== "active" || game.turn !== color) return color === "w" ? game.whiteMs : game.blackMs;
+  return (color === "w" ? game.whiteMs : game.blackMs) - Math.max(0, now - game.lastTickAt);
+}
+
+function scheduleStatus(status: Schedule["status"]) {
+  if (status === "fired") return "ready";
+  return status;
 }
 
 function urlBase64ToUint8Array(value: string) {

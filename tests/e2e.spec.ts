@@ -59,6 +59,7 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await expect(alice.page.getByText("connected")).toBeVisible();
   await shot(alice.page, "09-opponent-reconnected");
   await alice.page.getByRole("button", { name: "Resign" }).click();
+  await alice.page.getByRole("button", { name: "Confirm resign" }).click();
   await expect(alice.page.getByText("resigned")).toBeVisible();
   await shot(alice.page, "10-resign-terminal");
 
@@ -79,8 +80,18 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await waitForPush(alice.page, "scheduled_start", 15_000);
   await waitForPush(bob.page, "scheduled_start", 15_000);
   await alice.page.reload();
-  await expect(alice.page.getByText("fired")).toBeVisible();
+  await expect(alice.page.getByText("ready")).toBeVisible();
   await shot(alice.page, "13-scheduled-push-fired");
+  await alice.page.setViewportSize({ width: 390, height: 844 });
+  await shot(alice.page, "15-mobile-home-ready-schedule");
+  const scheduledGameId = await alice.page.evaluate(async () => {
+    const response = await fetch("/api/me");
+    const data = (await response.json()) as { schedules: Array<{ status: string; gameId?: string }> };
+    return data.schedules.find((schedule: { status: string; gameId?: string }) => schedule.status === "fired")?.gameId;
+  });
+  if (!scheduledGameId) throw new Error("Scheduled game did not become available.");
+  await openGame(alice.page, scheduledGameId);
+  await shot(alice.page, "16-mobile-game-board");
 
   await alice.context.close();
   await bob.context.close();
@@ -199,7 +210,7 @@ async function expireClock(page: Page, gameId: string) {
 async function scheduleSoon(page: Page, friendHandle: string) {
   await page.locator(".friend-card", { hasText: friendHandle }).waitFor();
   await page.getByLabel("Time control").nth(1).selectOption("10|0");
-  await page.getByLabel("Minutes").fill("0.03");
+  await page.getByLabel("Start in minutes").fill("0.03");
   await page.getByRole("button", { name: "Propose" }).click();
 }
 

@@ -399,7 +399,7 @@ export class AppDO extends DurableObject<Env> {
       userID: new TextEncoder().encode(userId),
       timeout: 60000,
       attestationType: "none",
-      authenticatorSelection: { residentKey: "preferred", userVerification: "preferred" },
+      authenticatorSelection: { residentKey: "required", userVerification: "required" },
     });
     db.registrationChallenges[handle] = { handle, userId, challenge: options.challenge, createdAt: Date.now() };
     await this.save(db);
@@ -459,7 +459,7 @@ export class AppDO extends DurableObject<Env> {
         id: credential.id,
         transports: credential.transports as never,
       })),
-      userVerification: "preferred",
+      userVerification: "required",
       timeout: 60000,
     });
     db.authenticationChallenges[user.id] = { userId: user.id, challenge: options.challenge, createdAt: Date.now() };
@@ -491,6 +491,7 @@ export class AppDO extends DurableObject<Env> {
         counter: credential.counter,
         transports: credential.transports as never,
       },
+      requireUserVerification: true,
     });
     if (!verification.verified) throw new Error("Passkey login failed.");
     credential.counter = verification.authenticationInfo.newCounter;

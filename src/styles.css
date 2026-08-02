@@ -54,6 +54,13 @@ button:disabled {
   opacity: 0.5;
 }
 
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 2px;
+}
+
 input,
 select {
   min-height: 42px;
@@ -281,6 +288,7 @@ h2 {
 .clock-row time {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 22px;
+  font-variant-numeric: tabular-nums;
 }
 
 .board {
@@ -323,6 +331,12 @@ h2 {
 .game-side {
   display: grid;
   gap: 12px;
+}
+
+.confirm-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
 }
 
 .connection {
@@ -372,5 +386,9 @@ h2 {
 
   .moves {
     columns: 1;
+  }
+
+  .confirm-row {
+    grid-template-columns: 1fr;
   }
 }
