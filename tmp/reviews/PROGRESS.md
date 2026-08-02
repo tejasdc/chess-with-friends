@@ -23,6 +23,7 @@
 - Seventh `npm run test:e2e` advanced to scheduling and failed on another strict handle locator; narrowed `scheduleSoon()` to `.friend-card`. `npm run typecheck` passed.
 - Eighth `npm run test:e2e` proved scheduled pushes fired but Bob had older challenge pushes queued first; changed push assertions to drain until the expected allowed type. `npm run typecheck` passed.
 - Ninth `npm run test:e2e` passed end-to-end with one Chromium browser process and screenshots written to `tmp/reviews/screens/`.
+- Visual inspection found screenshot `14-invite-link-friend-accepted` still showed the pre-accept request row and `13-scheduled-push-fired` needed a refreshed page state; tightened both waits. `npm run typecheck` passed.
 
 ## Current constraints
 - Work lean due to machine memory pressure.

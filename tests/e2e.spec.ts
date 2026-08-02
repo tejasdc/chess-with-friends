@@ -78,6 +78,8 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await shot(bob.page, "12-schedule-accepted");
   await waitForPush(alice.page, "scheduled_start", 15_000);
   await waitForPush(bob.page, "scheduled_start", 15_000);
+  await alice.page.reload();
+  await expect(alice.page.getByText("fired")).toBeVisible();
   await shot(alice.page, "13-scheduled-push-fired");
 
   await alice.context.close();
@@ -93,7 +95,7 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await waitForPush(clara.page, "friend_request");
   await clara.page.reload();
   await clara.page.getByRole("button", { name: "Accept" }).first().click();
-  await expect(clara.page.getByText(`@${dev.handle}`)).toBeVisible();
+  await expect(clara.page.locator(".friend-card", { hasText: dev.handle })).toBeVisible();
   await shot(clara.page, "14-invite-link-friend-accepted");
   await clara.context.close();
   await dev.context.close();
