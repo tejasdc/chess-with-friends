@@ -26,6 +26,7 @@
 - Visual inspection found screenshot `14-invite-link-friend-accepted` still showed the pre-accept request row and `13-scheduled-push-fired` needed a refreshed page state; tightened both waits. `npm run typecheck` passed.
 - Regenerated screenshots with `npm run test:e2e` passing; visually inspected the evidence, including corrected `13-scheduled-push-fired` and `14-invite-link-friend-accepted`.
 - Generated Web Push VAPID keys, wrote the public key to `wrangler.jsonc`, and set `VAPID_PRIVATE_KEY` as a Wrangler secret for Worker `chess-with-friends`.
+- Full local verification passed: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`.
 
 ## Current constraints
 - Work lean due to machine memory pressure.
