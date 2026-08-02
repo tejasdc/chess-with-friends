@@ -35,6 +35,8 @@
 - Full verification passed after review fixes. Visual inspection of new screenshots confirmed mobile home/board coverage and notification copy; found stale confirm controls after resign terminal and cleared confirm state after resign. `npm run typecheck` passed.
 - Final local verification after resign cleanup passed: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`. Visually confirmed `10-resign-terminal.png` after regeneration.
 - Deployed reviewed fixes to `https://chess-with-friends.thnkring.workers.dev`, version `edd56469-4645-475b-b283-0e28abb264c1`; remote smoke checks passed for `/api/health`, `/manifest.webmanifest`, and production `/api/debug/push-log` returns 404.
+- Reviewer re-review loop completed: correctness and UX re-reviews approved; invariants review had already approved.
+- Wrote final report to `tmp/reviews/build-report.md`.
 
 ## Current constraints
 - Work lean due to machine memory pressure.
