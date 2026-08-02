@@ -530,6 +530,7 @@ function GameScreen({ gameId, home, onHome, setMessage }: { gameId: string; home
   async function resign() {
     const next = await api<GameState>(`/api/games/${gameId}/resign`, { method: "POST", body: "{}" });
     setGame(next);
+    setConfirmResign(false);
   }
 
   if (!game) return <Shell home={home} message="Loading game..." />;
