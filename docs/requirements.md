@@ -25,9 +25,12 @@ constraints).
   (games have persistent state; "live" is a policy, not an architecture).
 
 **Identity & friends**
-- Handle-based identity. No email, no phone number. Account is device-bound in v1;
-  losing the device means friends re-add you (documented, acceptable). Recovery
-  (passkey/export) is a later addition.
+- Handle-based identity. No email, no phone number. The account credential is a
+  **passkey** (WebAuthn): created at signup, it syncs via iCloud Keychain on
+  Apple and Google Password Manager on Android — free multi-device access and
+  recovery with no identifier collected. A session cookie keeps day-to-day use
+  frictionless; the passkey is the anchor when the session is gone. Losing ALL
+  devices in an ecosystem loses the account (acceptable, documented).
 - Add friends by handle search or shareable invite link. Friend requests require
   acceptance.
 - Groups: shelved. Data model may anticipate them; no UI.
@@ -36,6 +39,9 @@ constraints).
 - Presence (which friends are online) is visible ONLY when you open the app.
   There is NO notification for a friend coming online — that is a re-engagement
   hook and is permanently out, not deferred.
+- During an active game, the opponent's connection state (connected / reconnecting
+  / gone) is shown as an in-game UI indicator. This is game state, not a push —
+  you're already looking at the board.
 - Challenge flow: pick a friend, send an invite → they get a push notification →
   accept starts the game.
 - Scheduling: propose a game time to a friend → they accept → both get a push
@@ -72,9 +78,25 @@ game is a natural fit; $5 Workers Paid is acceptable when needed). The app will
 live on a tejas.nyc subdomain (app-like tenants get subdomains per
 chann.app/docs/runbooks/publish-subdomain.md). Zone web-analytics beacon applies.
 
+## Definition of done (v1)
+
+The build is not done until two simulated clients have played through EVERY
+mechanic end-to-end — account creation, friend request via handle and via invite
+link, challenge → accept → full game to each terminal state (checkmate, resign,
+timeout), clock correctness, mid-game disconnect + reconnect with the indicator
+showing, schedule → accept → notification fire — with screenshots captured at
+each step and visually verified. Self-review by independent reviewer agents
+happens BEFORE reporting back; the report includes the screenshot evidence.
+
+## Decided (2026-08-02 round 2)
+
+- In-game chat: NO for v1.
+- Groups: shelved (data model may anticipate; no UI).
+- Working subdomain: antichess.tejas.nyc — PROVISIONAL. Flagged: "antichess" is
+  an existing chess variant (losing chess); rename candidates before launch.
+
 ## Open items (Tejas)
 
-- Real name for the app/domain (e.g. <name>.tejas.nyc).
-- In-game chat: lean NO for v1 (friends already have channels; less to moderate).
+- Final name (pre-launch decision, not blocking the build).
 - Spectating friends' live games: nice-to-have, not v1.
 - Sound/haptics on moves: implementer's taste, keep it calm.
