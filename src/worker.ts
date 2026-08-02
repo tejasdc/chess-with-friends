@@ -244,6 +244,15 @@ async function currentUser(request: Request, env: Env) {
   return (await response.json()) as Pick<User, "id" | "handle">;
 }
 
+async function requestForDo(request: Request, url = request.url) {
+  const headers = new Headers(request.headers);
+  const init: RequestInit = { method: request.method, headers };
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    init.body = await request.text();
+  }
+  return new Request(url, init);
+}
+
 async function signVapidJwt(audience: string, subject: string, privateJwk: JsonWebKey) {
   const now = Math.floor(Date.now() / 1000);
   const header = base64UrlUtf8(JSON.stringify({ typ: "JWT", alg: "ES256" }));
@@ -758,8 +767,7 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async debugPushLog(request: Request) {
-    const host = new URL(request.url).hostname;
-    if (!["127.0.0.1", "localhost"].includes(host)) throw new Error("Debug endpoint is local only.");
+    if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
     const db = await this.db();
     return json({ pushTypes: PUSH_TYPES, pushLog: db.pushLog, pendingPushes: db.pendingPushes });
   }
@@ -1032,15 +1040,18 @@ async function gameRequest(request: Request, env: Env, path: string) {
   const headers = new Headers(request.headers);
   headers.set("x-user-id", user.id);
   headers.set("x-handle", user.handle);
+  if (action.startsWith("debug/") && ["127.0.0.1", "localhost"].includes(new URL(request.url).hostname)) {
+    headers.set("x-debug-local", "true");
+  }
   const stub = env.GAME_DO.get(env.GAME_DO.idFromName(gameId));
-  return stub.fetch(new Request(target, { method: request.method, headers, body: request.body }));
+  return stub.fetch(await requestForDo(new Request(request, { headers }), target.toString()));
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/games/")) return gameRequest(request, env, url.pathname);
-    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/_auth/")) return appStub(env).fetch(request);
+    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/_auth/")) return appStub(env).fetch(await requestForDo(request));
 
     const asset = await env.ASSETS.fetch(request);
     if (asset.status !== 404) return asset;
