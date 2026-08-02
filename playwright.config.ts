@@ -8,7 +8,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   use: {
     ...devices["Desktop Chrome"],
-    baseURL: "http://127.0.0.1:8787",
+    baseURL: "http://localhost:8787",
     headless: true,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
@@ -16,7 +16,7 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run worker:dev",
-    url: "http://127.0.0.1:8787/api/health",
+    url: "http://localhost:8787/api/health",
     reuseExistingServer: false,
     timeout: 60_000,
   },
