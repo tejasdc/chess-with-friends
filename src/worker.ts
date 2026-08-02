@@ -913,8 +913,6 @@ export class GameDO extends DurableObject<Env> {
   }
 
   private async debugExpire(request: Request) {
-    const host = new URL(request.url).hostname;
-    if (!["127.0.0.1", "localhost"].includes(host)) throw new Error("Debug endpoint is local only.");
     const userId = request.headers.get("x-user-id") || "";
     const game = await this.requirePlayer(userId);
     if (game.status !== "active") return json(await this.snapshotFrom(game));
@@ -1034,13 +1032,15 @@ async function gameRequest(request: Request, env: Env, path: string) {
   const match = path.match(/^\/api\/games\/([^/]+)\/(.+)$/);
   if (!match) return json({ error: "Game route not found" }, { status: 404 });
   const [, gameId, action] = match;
+  const isLocal = ["127.0.0.1", "localhost"].includes(new URL(request.url).hostname);
+  if (action.startsWith("debug/") && !isLocal) return json({ error: "Debug endpoint is local only." }, { status: 404 });
   const user = await currentUser(request, env);
   if (!user) return json({ error: "Sign in first." }, { status: 401 });
   const target = new URL(`https://game.local/${action}`);
   const headers = new Headers(request.headers);
   headers.set("x-user-id", user.id);
   headers.set("x-handle", user.handle);
-  if (action.startsWith("debug/") && ["127.0.0.1", "localhost"].includes(new URL(request.url).hostname)) {
+  if (action.startsWith("debug/") && isLocal) {
     headers.set("x-debug-local", "true");
   }
   const stub = env.GAME_DO.get(env.GAME_DO.idFromName(gameId));
