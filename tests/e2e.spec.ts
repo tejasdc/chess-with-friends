@@ -22,7 +22,7 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await alice.page.getByPlaceholder("friend_handle").fill(bob.handle);
   await alice.page.getByRole("button", { name: "Add" }).click();
   await expect(alice.page.getByText("Friend request sent.")).toBeVisible();
-  await expect(await pendingPush(bob.page)).toMatchObject({ type: "friend_request" });
+  await waitForPush(bob.page, "friend_request");
   await shot(alice.page, "03-handle-friend-request-sent");
 
   await bob.page.reload();
@@ -36,7 +36,7 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await shot(alice.page, "05-presence-visible-in-app");
 
   const mateGame = await challengeAndAccept(alice.page, bob.page, "10|0");
-  await expect(await pendingPush(bob.page)).toMatchObject({ type: "challenge" });
+  await waitForPush(bob.page, "challenge");
   await openGame(alice.page, mateGame);
   await openGame(bob.page, mateGame);
   await shot(alice.page, "06-challenge-game-started");
@@ -76,13 +76,8 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await bob.page.getByRole("button", { name: "Accept" }).first().click();
   await expect(bob.page.getByText("accepted")).toBeVisible();
   await shot(bob.page, "12-schedule-accepted");
-  await expect
-    .poll(async () => {
-      const pending = await pendingPush(alice.page);
-      return pending?.type;
-    }, { timeout: 15_000 })
-    .toBe("scheduled_start");
-  await expect(await pendingPush(bob.page)).toMatchObject({ type: "scheduled_start" });
+  await waitForPush(alice.page, "scheduled_start", 15_000);
+  await waitForPush(bob.page, "scheduled_start", 15_000);
   await shot(alice.page, "13-scheduled-push-fired");
 
   await alice.context.close();
@@ -95,7 +90,7 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   const inviteUrl = await clara.page.locator(".break-all").first().textContent();
   await dev.page.goto(inviteUrl || "/");
   await dev.page.getByRole("button", { name: "Send friend request" }).click();
-  await expect(await pendingPush(clara.page)).toMatchObject({ type: "friend_request" });
+  await waitForPush(clara.page, "friend_request");
   await clara.page.reload();
   await clara.page.getByRole("button", { name: "Accept" }).first().click();
   await expect(clara.page.getByText(`@${dev.handle}`)).toBeVisible();
@@ -152,6 +147,15 @@ async function pendingPush(page: Page): Promise<{ type?: string } | null> {
     const response = await fetch("/api/push/pending");
     return response.json();
   });
+}
+
+async function waitForPush(page: Page, type: string, timeout = 10_000) {
+  await expect
+    .poll(async () => {
+      const pending = await pendingPush(page);
+      return pending?.type === type ? type : pending?.type || null;
+    }, { timeout })
+    .toBe(type);
 }
 
 async function challengeAndAccept(alice: Page, bob: Page, timeControl: "10|0" | "5|0") {
