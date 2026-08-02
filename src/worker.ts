@@ -117,6 +117,7 @@ interface AppDb {
   presence: Record<string, number>;
   pushSubscriptions: Record<string, StoredSubscription[]>;
   pendingPushes: Record<string, PendingPush[]>;
+  pendingPushesByEndpoint: Record<string, PendingPush[]>;
   pushLog: Array<{ type: PushType; userId: string; createdAt: number; delivered: boolean; status?: number }>;
 }
 
@@ -163,6 +164,7 @@ function emptyDb(): AppDb {
     presence: {},
     pushSubscriptions: {},
     pendingPushes: {},
+    pendingPushesByEndpoint: {},
     pushLog: [],
   };
 }
@@ -316,7 +318,7 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname === "/api/me" && request.method === "GET") return this.me(user);
       if (url.pathname === "/api/presence/heartbeat" && request.method === "POST") return this.heartbeat(user);
       if (url.pathname === "/api/push/subscribe" && request.method === "POST") return this.subscribe(request, user);
-      if (url.pathname === "/api/push/pending" && request.method === "GET") return this.pendingPush(user);
+      if (url.pathname === "/api/push/pending" && (request.method === "GET" || request.method === "POST")) return this.pendingPush(request, user);
       if (url.pathname === "/api/friends/request" && request.method === "POST") return this.requestFriend(request, user);
       if (url.pathname === "/api/friends/invite" && request.method === "POST") return this.requestByInvite(request, user);
       if (url.pathname.match(/^\/api\/friends\/[^/]+\/accept$/) && request.method === "POST") {
@@ -577,9 +579,16 @@ export class AppDO extends DurableObject<Env> {
     return json({ ok: true, pushTypes: PUSH_TYPES });
   }
 
-  private async pendingPush(user: User) {
+  private async pendingPush(request: Request, user: User) {
     const db = await this.db();
-    const pending = db.pendingPushes[user.id]?.shift() || null;
+    db.pendingPushesByEndpoint ||= {};
+    let endpoint = "";
+    if (request.method === "POST") {
+      const body = await readJson<{ endpoint?: string }>(request);
+      endpoint = body.endpoint || "";
+    }
+    const ownsEndpoint = endpoint && (db.pushSubscriptions[user.id] || []).some((subscription) => subscription.endpoint === endpoint);
+    const pending = ownsEndpoint ? db.pendingPushesByEndpoint[endpoint]?.shift() || null : db.pendingPushes[user.id]?.shift() || null;
     await this.save(db);
     return json(pending);
   }
@@ -736,13 +745,15 @@ export class AppDO extends DurableObject<Env> {
   private async enqueuePush(db: AppDb, userId: string, type: PushType, body: string, url: string) {
     if (!PUSH_TYPES.includes(type)) throw new Error("Push type is not allowed.");
     const pending: PendingPush = { id: newId("psh"), type, body, url, createdAt: Date.now() };
-    db.pendingPushes[userId] = [...(db.pendingPushes[userId] || []), pending].slice(-20);
+    db.pendingPushesByEndpoint ||= {};
     const subscriptions = db.pushSubscriptions[userId] || [];
     for (const subscription of subscriptions) {
+      db.pendingPushesByEndpoint[subscription.endpoint] = [...(db.pendingPushesByEndpoint[subscription.endpoint] || []), pending].slice(-20);
       const result = await sendWebPush(subscription, this.env);
       db.pushLog.push({ type, userId, createdAt: Date.now(), delivered: result.delivered, status: result.status });
     }
     if (subscriptions.length === 0) {
+      db.pendingPushes[userId] = [...(db.pendingPushes[userId] || []), pending].slice(-20);
       db.pushLog.push({ type, userId, createdAt: Date.now(), delivered: false });
     }
     db.pushLog = db.pushLog.slice(-100);
@@ -1051,6 +1062,12 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/games/")) return gameRequest(request, env, url.pathname);
+    if (url.pathname === "/api/debug/push-log") {
+      if (!["127.0.0.1", "localhost"].includes(url.hostname)) return json({ error: "Not found" }, { status: 404 });
+      const headers = new Headers(request.headers);
+      headers.set("x-debug-local", "true");
+      return appStub(env).fetch(await requestForDo(new Request(request, { headers })));
+    }
     if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/_auth/")) return appStub(env).fetch(await requestForDo(request));
 
     const asset = await env.ASSETS.fetch(request);

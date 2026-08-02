@@ -131,12 +131,14 @@ async function register(page: Page, handle: string) {
 
 async function fakePushSubscribe(page: Page) {
   await page.evaluate(async () => {
+    const endpoint = `https://push.invalid/${Math.random()}`;
+    (window as unknown as { __pushEndpoint: string }).__pushEndpoint = endpoint;
     await fetch("/api/push/subscribe", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         subscription: {
-          endpoint: `https://push.invalid/${Math.random()}`,
+          endpoint,
           keys: { p256dh: "test", auth: "test" },
         },
       }),
@@ -146,7 +148,12 @@ async function fakePushSubscribe(page: Page) {
 
 async function pendingPush(page: Page): Promise<{ type?: string } | null> {
   return page.evaluate(async () => {
-    const response = await fetch("/api/push/pending");
+    const endpoint = (window as unknown as { __pushEndpoint?: string }).__pushEndpoint || "";
+    const response = await fetch("/api/push/pending", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    });
     return response.json();
   });
 }

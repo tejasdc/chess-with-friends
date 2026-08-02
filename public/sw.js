@@ -36,7 +36,13 @@ async function showPolicyNotification(event) {
 
   if (!payload) {
     try {
-      const response = await fetch("/api/push/pending", { credentials: "include" });
+      const subscription = await self.registration.pushManager.getSubscription();
+      const response = await fetch("/api/push/pending", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription?.endpoint || "" }),
+      });
       payload = response.ok ? await response.json() : null;
     } catch {
       payload = null;
