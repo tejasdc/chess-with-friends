@@ -31,7 +31,7 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await shot(bob.page, "04-friend-request-accepted");
 
   await alice.page.reload();
-  await expect(alice.page.getByText(`@${bob.handle}`)).toBeVisible();
+  await expect(alice.page.locator(".friend-card", { hasText: bob.handle })).toBeVisible();
   await expect(alice.page.locator(".friend-card", { hasText: bob.handle }).getByText(/online|offline/)).toBeVisible();
   await shot(alice.page, "05-presence-visible-in-app");
 
