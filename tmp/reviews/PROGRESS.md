@@ -20,6 +20,7 @@
 - Fourth `npm run test:e2e` advanced through acceptance and failed on a strict locator ambiguity for a friend handle; narrowed the assertion to `.friend-card`. `npm run typecheck` passed.
 - Fifth `npm run test:e2e` advanced through checkmate, reconnect, and resign, then failed because the timeout debug route saw the DO-internal `game.local` host; added a local-only debug header from the public Worker and buffered DO proxy request bodies. `npm run test:push && npm run typecheck` passed.
 - Sixth `npm run test:e2e` showed Miniflare still presented `game.local` inside `GameDO`; moved the local-only debug guard fully to the public Worker boundary. `npm run test:push && npm run typecheck` passed.
+- Seventh `npm run test:e2e` advanced to scheduling and failed on another strict handle locator; narrowed `scheduleSoon()` to `.friend-card`. `npm run typecheck` passed.
 
 ## Current constraints
 - Work lean due to machine memory pressure.

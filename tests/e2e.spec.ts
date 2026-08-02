@@ -184,7 +184,7 @@ async function expireClock(page: Page, gameId: string) {
 }
 
 async function scheduleSoon(page: Page, friendHandle: string) {
-  await page.getByText(`@${friendHandle}`).waitFor();
+  await page.locator(".friend-card", { hasText: friendHandle }).waitFor();
   await page.getByLabel("Time control").nth(1).selectOption("10|0");
   await page.getByLabel("Minutes").fill("0.03");
   await page.getByRole("button", { name: "Propose" }).click();
