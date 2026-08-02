@@ -7,6 +7,8 @@
 - `npm run typecheck` passed after the backend implementation.
 - Added React client logic for passkey signup/login, invite links, friend requests, challenge accept/start, schedule proposal/accept, notification opt-in, game list, live board, WebSocket reconnect state, clocks, moves, and resign.
 - `npm run typecheck` passed after the client logic file.
+- Added responsive CSS for the PWA shell, forms, friend/challenge/schedule panels, board, clocks, move list, and connection states.
+- `npm run typecheck && npm run build` passed after CSS.
 
 ## Current constraints
 - Work lean due to machine memory pressure.
@@ -14,7 +16,6 @@
 - Run at most one headless browser instance during testing and close it promptly.
 
 ## Next
-- Add focused CSS and commit it.
 - Add push VAPID setup helper/policy verifier and commit it.
 - Add lean Playwright two-client automation with screenshots under `tmp/reviews/screens/`.
 - Build/typecheck/test, deploy with Wrangler, then run independent reviewer agents.
