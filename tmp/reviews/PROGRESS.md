@@ -31,6 +31,7 @@
 - Redeployed version `5d38ee36-3a14-449e-9c95-4fa326005faa` to `https://chess-with-friends.thnkring.workers.dev`; remote smoke checks passed for `/`, `/manifest.webmanifest`, and `/api/health` with exactly `friend_request`, `challenge`, `scheduled_start`.
 - Correctness review blocked on production debug leakage and multi-device empty-push payload consumption. Fixed `/api/debug/push-log` to be allowed only at the public Worker boundary on localhost, and changed pending push payloads to queue per subscription endpoint with service-worker endpoint lookup. `npm run test:push && npm run typecheck` passed.
 - Addressed UX/correctness polish: required resident/user-verified passkeys, exact notification-policy copy before permission, visible labels, two-step resign, friendlier schedule status text, stable ticking clocks, focus styles, and mobile screenshot coverage in e2e. `npm run test:push && npm run typecheck` passed.
+- Full verification after review fixes failed in e2e because fake push endpoints were stored on `window` and lost across reload; moved the test endpoint to `localStorage`. `npm run typecheck` passed.
 
 ## Current constraints
 - Work lean due to machine memory pressure.

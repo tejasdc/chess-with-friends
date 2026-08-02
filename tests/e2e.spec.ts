@@ -143,7 +143,7 @@ async function register(page: Page, handle: string) {
 async function fakePushSubscribe(page: Page) {
   await page.evaluate(async () => {
     const endpoint = `https://push.invalid/${Math.random()}`;
-    (window as unknown as { __pushEndpoint: string }).__pushEndpoint = endpoint;
+    window.localStorage.setItem("testPushEndpoint", endpoint);
     await fetch("/api/push/subscribe", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -159,7 +159,7 @@ async function fakePushSubscribe(page: Page) {
 
 async function pendingPush(page: Page): Promise<{ type?: string } | null> {
   return page.evaluate(async () => {
-    const endpoint = (window as unknown as { __pushEndpoint?: string }).__pushEndpoint || "";
+    const endpoint = window.localStorage.getItem("testPushEndpoint") || "";
     const response = await fetch("/api/push/pending", {
       method: "POST",
       headers: { "content-type": "application/json" },
