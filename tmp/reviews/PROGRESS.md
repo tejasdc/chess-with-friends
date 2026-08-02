@@ -11,6 +11,9 @@
 - `npm run typecheck && npm run build` passed after CSS.
 - Added `scripts/generate-vapid.mjs` for Web Push VAPID key generation without committing private keys.
 - Added `scripts/verify-push-policy.mjs`; `npm run test:push && npm run typecheck && npm run build` passed.
+- Added lean Playwright config and e2e scenario using one Chromium browser instance with two contexts, virtual WebAuthn authenticators, API-level push checks, and screenshots under `tmp/reviews/screens/`.
+- Hardened Web Push sending so bad/stale subscriptions cannot break friend/challenge/schedule flows.
+- `npm run test:push && npm run typecheck` passed after adding the e2e harness.
 
 ## Current constraints
 - Work lean due to machine memory pressure.
@@ -18,6 +21,5 @@
 - Run at most one headless browser instance during testing and close it promptly.
 
 ## Next
-- Add lean Playwright two-client automation with screenshots under `tmp/reviews/screens/`.
 - Build/typecheck/test, deploy with Wrangler, then run independent reviewer agents.
 - Write `tmp/reviews/build-report.md` with deployed URL, test commands, screenshot inventory, known gaps, and human verification items.

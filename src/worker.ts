@@ -265,20 +265,24 @@ function base64UrlUtf8(value: string) {
 }
 
 async function sendWebPush(subscription: StoredSubscription, env: Env) {
-  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return { delivered: false };
-  const endpoint = new URL(subscription.endpoint);
-  const jwt = await signVapidJwt(endpoint.origin, "mailto:hello@example.com", JSON.parse(env.VAPID_PRIVATE_KEY));
-  const response = await fetch(subscription.endpoint, {
-    method: "POST",
-    headers: {
-      TTL: "300",
-      Urgency: "normal",
-      Authorization: `WebPush ${jwt}`,
-      "Crypto-Key": `p256ecdsa=${env.VAPID_PUBLIC_KEY}`,
-      "Content-Length": "0",
-    },
-  });
-  return { delivered: response.ok, status: response.status };
+  try {
+    if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return { delivered: false };
+    const endpoint = new URL(subscription.endpoint);
+    const jwt = await signVapidJwt(endpoint.origin, "mailto:hello@example.com", JSON.parse(env.VAPID_PRIVATE_KEY));
+    const response = await fetch(subscription.endpoint, {
+      method: "POST",
+      headers: {
+        TTL: "300",
+        Urgency: "normal",
+        Authorization: `WebPush ${jwt}`,
+        "Crypto-Key": `p256ecdsa=${env.VAPID_PUBLIC_KEY}`,
+        "Content-Length": "0",
+      },
+    });
+    return { delivered: response.ok, status: response.status };
+  } catch {
+    return { delivered: false };
+  }
 }
 
 export class AppDO extends DurableObject<Env> {

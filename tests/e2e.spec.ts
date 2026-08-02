@@ -1,0 +1,195 @@
+import { expect, test, type Browser, type Page } from "@playwright/test";
+import { mkdirSync } from "node:fs";
+
+const screenDir = "tmp/reviews/screens";
+
+test.describe.configure({ mode: "serial" });
+
+test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
+  mkdirSync(screenDir, { recursive: true });
+  const suffix = Date.now().toString(36).slice(-6);
+  const alice = await client(browser, `alice_${suffix}`);
+  const bob = await client(browser, `bob_${suffix}`);
+
+  await register(alice.page, alice.handle);
+  await shot(alice.page, "01-alice-account");
+  await register(bob.page, bob.handle);
+  await shot(bob.page, "02-bob-account");
+
+  await fakePushSubscribe(alice.page);
+  await fakePushSubscribe(bob.page);
+
+  await alice.page.getByPlaceholder("friend_handle").fill(bob.handle);
+  await alice.page.getByRole("button", { name: "Add" }).click();
+  await expect(alice.page.getByText("Friend request sent.")).toBeVisible();
+  await expect(await pendingPush(bob.page)).toMatchObject({ type: "friend_request" });
+  await shot(alice.page, "03-handle-friend-request-sent");
+
+  await bob.page.reload();
+  await bob.page.getByRole("button", { name: "Accept" }).first().click();
+  await expect(bob.page.getByText(`@${alice.handle}`)).toBeVisible();
+  await shot(bob.page, "04-friend-request-accepted");
+
+  await alice.page.reload();
+  await expect(alice.page.getByText(`@${bob.handle}`)).toBeVisible();
+  await expect(alice.page.locator(".friend-card", { hasText: bob.handle }).getByText(/online|offline/)).toBeVisible();
+  await shot(alice.page, "05-presence-visible-in-app");
+
+  const mateGame = await challengeAndAccept(alice.page, bob.page, "10|0");
+  await expect(await pendingPush(bob.page)).toMatchObject({ type: "challenge" });
+  await openGame(alice.page, mateGame);
+  await openGame(bob.page, mateGame);
+  await shot(alice.page, "06-challenge-game-started");
+  await move(alice.page, "f2", "f3");
+  await move(bob.page, "e7", "e5");
+  await move(alice.page, "g2", "g4");
+  await move(bob.page, "d8", "h4");
+  await expect(alice.page.getByText("checkmate")).toBeVisible();
+  await shot(alice.page, "07-checkmate-terminal");
+
+  const resignGame = await challengeAndAccept(alice.page, bob.page, "5|0");
+  await openGame(alice.page, resignGame);
+  await openGame(bob.page, resignGame);
+  await bob.page.close();
+  await expect(alice.page.getByText("reconnecting")).toBeVisible();
+  await shot(alice.page, "08-opponent-reconnecting");
+  bob.page = await bob.context.newPage();
+  await addAuthenticator(bob.page);
+  await openGame(bob.page, resignGame);
+  await expect(alice.page.getByText("connected")).toBeVisible();
+  await shot(alice.page, "09-opponent-reconnected");
+  await alice.page.getByRole("button", { name: "Resign" }).click();
+  await expect(alice.page.getByText("resigned")).toBeVisible();
+  await shot(alice.page, "10-resign-terminal");
+
+  const timeoutGame = await challengeAndAccept(alice.page, bob.page, "5|0");
+  await openGame(alice.page, timeoutGame);
+  await openGame(bob.page, timeoutGame);
+  await expireClock(alice.page, timeoutGame);
+  await expect(alice.page.getByText("timeout")).toBeVisible();
+  await shot(alice.page, "11-timeout-terminal");
+
+  await alice.page.getByRole("button", { name: "Home" }).click();
+  await bob.page.getByRole("button", { name: "Home" }).click();
+  await scheduleSoon(alice.page, bob.handle);
+  await bob.page.reload();
+  await bob.page.getByRole("button", { name: "Accept" }).first().click();
+  await expect(bob.page.getByText("accepted")).toBeVisible();
+  await shot(bob.page, "12-schedule-accepted");
+  await expect
+    .poll(async () => {
+      const pending = await pendingPush(alice.page);
+      return pending?.type;
+    }, { timeout: 15_000 })
+    .toBe("scheduled_start");
+  await expect(await pendingPush(bob.page)).toMatchObject({ type: "scheduled_start" });
+  await shot(alice.page, "13-scheduled-push-fired");
+
+  await alice.context.close();
+  await bob.context.close();
+
+  const clara = await client(browser, `clara_${suffix}`);
+  const dev = await client(browser, `dev_${suffix}`);
+  await register(clara.page, clara.handle);
+  await register(dev.page, dev.handle);
+  const inviteUrl = await clara.page.locator(".break-all").first().textContent();
+  await dev.page.goto(inviteUrl || "/");
+  await dev.page.getByRole("button", { name: "Send friend request" }).click();
+  await expect(await pendingPush(clara.page)).toMatchObject({ type: "friend_request" });
+  await clara.page.reload();
+  await clara.page.getByRole("button", { name: "Accept" }).first().click();
+  await expect(clara.page.getByText(`@${dev.handle}`)).toBeVisible();
+  await shot(clara.page, "14-invite-link-friend-accepted");
+  await clara.context.close();
+  await dev.context.close();
+});
+
+async function client(browser: Browser, handle: string) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await addAuthenticator(page);
+  await page.goto("/");
+  return { context, page, handle };
+}
+
+async function addAuthenticator(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+    },
+  });
+}
+
+async function register(page: Page, handle: string) {
+  await page.getByPlaceholder("your_handle").fill(handle);
+  await page.getByRole("button", { name: "Create passkey" }).click();
+  await expect(page.getByText(`@${handle}`)).toBeVisible();
+}
+
+async function fakePushSubscribe(page: Page) {
+  await page.evaluate(async () => {
+    await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        subscription: {
+          endpoint: `https://push.invalid/${Math.random()}`,
+          keys: { p256dh: "test", auth: "test" },
+        },
+      }),
+    });
+  });
+}
+
+async function pendingPush(page: Page): Promise<{ type?: string } | null> {
+  return page.evaluate(async () => {
+    const response = await fetch("/api/push/pending");
+    return response.json();
+  });
+}
+
+async function challengeAndAccept(alice: Page, bob: Page, timeControl: "10|0" | "5|0") {
+  await alice.goto("/");
+  await bob.goto("/");
+  await alice.getByLabel("Time control").first().selectOption(timeControl);
+  await alice.getByRole("button", { name: "Send" }).click();
+  await bob.reload();
+  await bob.getByRole("button", { name: "Accept" }).first().click();
+  await expect(bob).toHaveURL(/\/game\/gam_/);
+  return bob.url().split("/game/")[1];
+}
+
+async function openGame(page: Page, gameId: string) {
+  await page.goto(`/game/${gameId}`);
+  await expect(page.locator(".board")).toBeVisible();
+}
+
+async function move(page: Page, from: string, to: string) {
+  await page.locator(`[data-square="${from}"]`).click();
+  await page.locator(`[data-square="${to}"]`).click();
+}
+
+async function expireClock(page: Page, gameId: string) {
+  await page.evaluate(async (id) => {
+    await fetch(`/api/games/${id}/debug/expire`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  }, gameId);
+  await page.waitForTimeout(700);
+  await page.reload();
+}
+
+async function scheduleSoon(page: Page, friendHandle: string) {
+  await page.getByText(`@${friendHandle}`).waitFor();
+  await page.getByLabel("Time control").nth(1).selectOption("10|0");
+  await page.getByLabel("Minutes").fill("0.03");
+  await page.getByRole("button", { name: "Propose" }).click();
+}
+
+async function shot(page: Page, name: string) {
+  await page.screenshot({ path: `${screenDir}/${name}.png`, fullPage: true });
+}
