@@ -34,6 +34,7 @@
 - Full verification after review fixes failed in e2e because fake push endpoints were stored on `window` and lost across reload; moved the test endpoint to `localStorage`. `npm run typecheck` passed.
 - Full verification passed after review fixes. Visual inspection of new screenshots confirmed mobile home/board coverage and notification copy; found stale confirm controls after resign terminal and cleared confirm state after resign. `npm run typecheck` passed.
 - Final local verification after resign cleanup passed: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`. Visually confirmed `10-resign-terminal.png` after regeneration.
+- Deployed reviewed fixes to `https://chess-with-friends.thnkring.workers.dev`, version `edd56469-4645-475b-b283-0e28abb264c1`; remote smoke checks passed for `/api/health`, `/manifest.webmanifest`, and production `/api/debug/push-log` returns 404.
 
 ## Current constraints
 - Work lean due to machine memory pressure.
