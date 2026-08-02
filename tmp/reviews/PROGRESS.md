@@ -16,6 +16,7 @@
 - `npm run test:push && npm run typecheck` passed after adding the e2e harness.
 - First `npm run test:e2e` failed immediately because Playwright had no `baseURL`; added `baseURL: http://127.0.0.1:8787`.
 - Second `npm run test:e2e` reached passkey registration but failed because WebAuthn rejects `127.0.0.1` as an RP ID; switched Playwright to `http://localhost:8787`.
+- Third `npm run test:e2e` showed friend request succeeded but the client cleared the success message during refresh; fixed `refresh()` to preserve status text. `npm run typecheck` passed.
 
 ## Current constraints
 - Work lean due to machine memory pressure.

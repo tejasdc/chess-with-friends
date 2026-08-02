@@ -111,7 +111,6 @@ function App() {
     try {
       const data = await api<HomeData>("/api/me");
       setHome(data);
-      setMessage("");
     } catch {
       setHome(null);
     } finally {
