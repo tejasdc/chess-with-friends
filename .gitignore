@@ -34,6 +34,11 @@ tmp/reviews/screens-r2/*
 !tmp/reviews/screens-r2/toast-info-fresh.png
 !tmp/reviews/screens-r2/toast-info-scrolled.png
 !tmp/reviews/screens-r2/toast-error.png
+!tmp/reviews/screens-r2/prod-ugly-auth-row-BEFORE.png
+!tmp/reviews/screens-r2/prod-auth-AFTER.png
+!tmp/reviews/screens-r2/auth-state-1-empty.png
+!tmp/reviews/screens-r2/auth-state-2-free-handle.png
+!tmp/reviews/screens-r2/auth-state-3-taken-handle.png
 # Round-3 iPhone-test-fix evidence
 !tmp/reviews/screens-r2/fix2-install-with-dismiss.png
 !tmp/reviews/screens-r2/fix2-install-after-dismiss.png
