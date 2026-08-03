@@ -1,38 +1,44 @@
 <!doctype html>
 <!--
-  Tumble prototype v2 — the delight budget of the landing shelf.
+  Tumble prototype v3 — the delight budget of the landing shelf.
 
-  Two rules Tejas made hard:
-    1) MOVE MECHANICS ARE TAP-TAP. Tap a piece, tap a destination. No
-       drag. Identical to the production game screen. While a position
-       is live the board behaves like a real board — no wobble, no
-       physics, no ambiguity between "is this a move or a toy".
-    2) PHYSICS IS THE TRANSITION.
-       (a) TOPPLE with weight — pieces get an impulse, gravity pulls
-           them down, they slide, rotate, collide with each other and
-           with the board's walls/floor, and COME TO REST ON THE BOARD
-           in visible chaos. NOTHING DISAPPEARS off-screen.
-       (b) WALK BACK — each piece travels visibly across the board
-           into its square in the next position. Same pieces where the
-           types match (a tumbled white rook walks over to become the
-           next position's white rook); any next-position piece with
-           no leftover match walks in from the bottom edge; any
-           tumbled leftover walks off. Settle with a tiny arrival beat.
+  Rules Tejas made hard (unchanged from v2, tightened in v3):
 
-  Self-contained; open via file:// from any browser. Cycles through
-  five public-domain positions with credit lines.
+    1) TAP-TAP MECHANICS. Tap a piece, tap a destination. Zero drag,
+       zero wobble while a position is live. chess.js legality (falls
+       back to permissive if the CDN can't reach us).
 
-  Palette LOCKED to the approved mockup D/E/F tokens (celadon ground,
-  buff + teal-dark board, navy ink, cream chip). No red.
+    2) TUMBLE with weight — a shove hits the board, pieces slide out
+       and rotate, collide with each other, bounce off the teak wall,
+       come to rest as a visible spilled picture. Nothing exits the
+       screen. Some pieces come to rest LYING ON THEIR SIDE (rotation
+       held at ±90°) so the picture reads as chess pieces spilled, not
+       chess pieces scattered.
+
+    3) WALK-BACK — each piece stands up from its fallen angle, then
+       WALKS across the board to its next-position square. Not a CSS
+       tween. Each piece has a per-frame gait: gentle vertical bob at
+       walking cadence, a curved (slightly arced) path, a rotation
+       tilt that swings with the bob, a micro-pause + small overshoot
+       + recover at the arrival square. Pieces the next position
+       doesn't need walk OFF THE BOARD to a captured tray beside it,
+       and rest there visibly (never off-screen).
+
+  Five real, cited positions with credit lines. Cycles on completed
+  move, on Skip, or after ~25s idle. Self-contained; open via file://.
+
+  Palette LOCKED to mockup D/E/F: celadon ground, buff + teal-dark
+  squares, navy ink + cream chip, teak frame. No red.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>tumble — chess with friends landing prototype (v2)</title>
+<title>tumble — chess with friends landing prototype (v3)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
+<script src="https://cdn.jsdelivr.net/npm/chess.js@0.13.4/chess.min.js"></script>
 <style>
   :root {
     --ground:   #7CA898;
@@ -41,6 +47,7 @@
     --ink:      #2E2A3D;
     --cream:    #EEE3C4;
     --teak:     #8C5A2E;
+    --teak-dk:  #5f3d1e;
     --stone-on-ground: rgba(46, 42, 61, 0.55);
     --mono: "IBM Plex Mono", ui-monospace, monospace;
     --sans: "IBM Plex Sans", -apple-system, sans-serif;
@@ -54,15 +61,16 @@
     overflow: hidden;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
+    -webkit-user-select: none;
   }
   body { display: grid; place-items: center; padding: 16px; }
 
   .frame {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: stretch;
     gap: 12px;
-    width: min(92vw, 92vh, 640px);
+    width: min(96vw, 96vh, 740px);
   }
   .wordmark {
     font-family: var(--mono);
@@ -72,7 +80,6 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    align-self: flex-start;
   }
   .wordmark::before {
     content: "";
@@ -80,22 +87,43 @@
     background: var(--cream);
     display: inline-block;
     transform: translateY(-1px);
+    border: 1px solid var(--ink);
   }
+
+  /* The stage is a square that holds the whole physics world: the
+     board (sub-region, teak-framed) sits in the middle, and the
+     celadon-ground perimeter is where stragglers walk to rest in the
+     captured tray. Pieces are absolutely positioned within .stage and
+     can travel anywhere within it. */
   .stage {
     position: relative;
-    width: min(92vw, 92vh, 640px);
+    width: 100%;
     aspect-ratio: 1 / 1;
-    box-shadow: 0 0 0 5px var(--teak), 0 8px 22px rgba(46, 42, 61, 0.22);
+  }
+  .board-frame {
+    position: absolute;
+    /* Board occupies 82% of the stage, centered. The remaining 9% of
+       each side is celadon ground that stragglers walk onto. */
+    left: 9%;
+    top:  9%;
+    width:  82%;
+    height: 82%;
+    background: var(--teak);
+    padding: 2%;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.08),
+      inset 0 -2px 0 rgba(0,0,0,0.18),
+      0 12px 24px -8px rgba(46, 42, 61, 0.32);
   }
   .board {
-    position: absolute;
-    inset: 0;
+    position: relative;
+    width: 100%;
+    height: 100%;
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     grid-template-rows: repeat(8, 1fr);
-    border: 1px solid var(--ink);
-    z-index: 1;
-    touch-action: none;
+    outline: 1px solid rgba(0,0,0,0.28);
+    touch-action: manipulation;
   }
   .sq {
     position: relative;
@@ -117,9 +145,19 @@
     width: 22%; height: 22%;
     border-radius: 50%;
     background: var(--ink);
-    opacity: 0.85;
+    opacity: 0.72;
+    pointer-events: none;
   }
-  .sq.dark.legal::before { background: var(--cream); }
+  .sq.dark.legal::before { background: var(--cream); opacity: 0.80; }
+  .sq.legal.capture::before {
+    width: 88%; height: 88%;
+    background: transparent;
+    border: 2.5px solid rgba(46, 42, 61, 0.6);
+    border-radius: 50%;
+  }
+  .sq.dark.legal.capture::before {
+    border-color: rgba(238, 227, 196, 0.68);
+  }
   .coord {
     position: absolute;
     font-family: var(--mono);
@@ -132,10 +170,12 @@
   .coord-rank { top: 2px; left: 4px; }
   .coord-file { bottom: 2px; right: 5px; text-transform: lowercase; }
 
+  /* Pieces live above the board AND above the ground. They can
+     translate anywhere within .stage. */
   .pieces {
     position: absolute;
     inset: 0;
-    z-index: 2;
+    z-index: 3;
     pointer-events: none;
   }
   .piece {
@@ -143,26 +183,31 @@
     top: 0; left: 0;
     display: grid;
     place-items: center;
-    font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", sans-serif;
+    font-family: "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols2", "Arial Unicode MS", sans-serif;
     line-height: 1;
     user-select: none;
     will-change: transform;
-    transform-origin: 50% 50%;
+    /* Rotate about a point just below center — pieces tip about their
+       base, not their middle. Reads as "toppling", not "spinning". */
+    transform-origin: 50% 58%;
   }
+  .piece.live { pointer-events: auto; cursor: pointer; }
   .piece.pw {
     color: var(--paper);
     text-shadow:
       -1px -1px 0 var(--ink), 1px -1px 0 var(--ink),
-      -1px  1px 0 var(--ink), 1px  1px 0 var(--ink);
+      -1px  1px 0 var(--ink), 1px  1px 0 var(--ink),
+      0 2px 4px rgba(46, 42, 61, 0.20);
   }
   .piece.pb {
     color: var(--ink);
     text-shadow:
       -1px -1px 0 var(--cream), 1px -1px 0 var(--cream),
-      -1px  1px 0 var(--cream), 1px  1px 0 var(--cream);
+      -1px  1px 0 var(--cream), 1px  1px 0 var(--cream),
+      0 2px 4px rgba(46, 42, 61, 0.20);
   }
   .piece.selected {
-    filter: drop-shadow(0 0 3px var(--cream));
+    filter: drop-shadow(0 0 6px rgba(238, 227, 196, 0.9));
   }
 
   .credit {
@@ -171,7 +216,6 @@
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--stone-on-ground);
-    align-self: flex-end;
     padding: 4px 2px;
   }
   .foot {
@@ -179,13 +223,13 @@
     justify-content: space-between;
     width: 100%;
     align-items: center;
-    padding-top: 4px;
+    padding-top: 2px;
   }
   .foot-hint {
     font-family: var(--sans);
     font-size: 13px;
     color: var(--stone-on-ground);
-    max-width: 60%;
+    max-width: 65%;
   }
   .skip {
     font-family: var(--mono);
@@ -204,9 +248,11 @@
 </head>
 <body>
   <div class="frame">
-    <div class="wordmark">chess with friends · tumble prototype v2</div>
+    <div class="wordmark">chess with friends · tumble prototype v3</div>
     <div class="stage" id="stage">
-      <div class="board" id="board"></div>
+      <div class="board-frame">
+        <div class="board" id="board"></div>
+      </div>
       <div class="pieces" id="pieces"></div>
     </div>
     <div class="foot">
@@ -219,30 +265,181 @@
 <script>
 'use strict';
 
+// -------------------------------------------------------------------------
+// Positions: real, cited chess history. Each is a public-domain fact
+// from a published game or study. Credit lines are shown after the
+// walk-back settles.
+// -------------------------------------------------------------------------
 const FILLED = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 const FILES = ['a','b','c','d','e','f','g','h'];
 
-// Five public-domain positions (facts about published games).
 const POSITIONS = [
-  { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR', credit: 'Starting position' },
-  { fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR', credit: "Fool's mate, 1836" },
-  { fen: '4rrk1/pR5p/6p1/8/1n2Q3/8/PP4PP/6K1', credit: "Anastasia's mate — pattern" },
-  { fen: 'r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR', credit: "Scholar's mate, from 1656" },
-  { fen: '7K/8/k1P5/7p/8/8/8/8', credit: 'Réti, 1921 (endgame study)' },
+  { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    credit: 'Starting position' },
+  { fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3',
+    credit: "Fool's mate — 1836" },
+  { fen: 'r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4',
+    credit: "Scholar's mate — 1656 pattern" },
+  { fen: '4rrk1/pR5p/6p1/8/1n2Q3/8/PP4PP/6K1 w - - 0 1',
+    credit: "Anastasia's mate — pattern" },
+  { fen: '7K/8/k1P5/7p/8/8/8/8 w - - 0 1',
+    credit: 'Réti, 1921 — endgame study' },
 ];
 
-const board = document.getElementById('board');
+// -------------------------------------------------------------------------
+// DOM handles.
+// -------------------------------------------------------------------------
+const stage      = document.getElementById('stage');
+const board      = document.getElementById('board');
 const piecesLayer = document.getElementById('pieces');
-const creditEl = document.getElementById('credit');
-const skipBtn = document.getElementById('skip');
-const stage = document.getElementById('stage');
+const creditEl   = document.getElementById('credit');
+const skipBtn    = document.getElementById('skip');
 
+// -------------------------------------------------------------------------
+// Layout metrics. All in stage-pixel units. The board is a sub-rect of
+// the stage; the tray is the celadon strip along the top edge, where
+// captured stragglers walk to rest.
+// -------------------------------------------------------------------------
+let stageW = 0, stageH = 0;
+let boardX = 0, boardY = 0, boardW = 0, boardH = 0;
+let sqSize = 0;
+
+function measure() {
+  const r = stage.getBoundingClientRect();
+  stageW = r.width;
+  stageH = r.height;
+  // CSS: board-frame at 9% margin, 82% size, 2% inner padding. Recompute
+  // in JS so board-square math never drifts from CSS pixel rounding.
+  const frameLeft = stageW * 0.09;
+  const frameTop  = stageH * 0.09;
+  const frameW    = stageW * 0.82;
+  const frameH    = stageH * 0.82;
+  const framePad  = stageW * 0.02;
+  boardX = frameLeft + framePad;
+  boardY = frameTop  + framePad;
+  boardW = frameW - 2 * framePad;
+  boardH = frameH - 2 * framePad;
+  sqSize = boardW / 8;
+}
+
+// Convert a square name like "e4" to its top-left corner in stage-px
+// coordinates. Board is oriented white-at-bottom.
+function squareToXY(sq) {
+  const f = sq.charCodeAt(0) - 97;
+  const r = Number(sq[1]);
+  return { x: boardX + f * sqSize, y: boardY + (8 - r) * sqSize };
+}
+function squareCenter(sq) {
+  const { x, y } = squareToXY(sq);
+  return { x: x + sqSize / 2, y: y + sqSize / 2 };
+}
+function xyToSquare(cx, cy) {
+  const f = Math.floor((cx - boardX) / sqSize);
+  const r = 8 - Math.floor((cy - boardY) / sqSize);
+  if (f < 0 || f > 7 || r < 1 || r > 8) return null;
+  return FILES[f] + r;
+}
+
+// -------------------------------------------------------------------------
+// chess.js legality engine. Fall back to a permissive "any different-
+// color square" stand-in only if the CDN failed (still ships a working
+// prototype offline).
+// -------------------------------------------------------------------------
+const HAS_CHESS_JS = (typeof Chess === 'function');
+let game = null;   // Chess instance for the live position
+
+function newGame(fen) {
+  if (HAS_CHESS_JS) {
+    try { return new Chess(fen); } catch (e) { /* fall through */ }
+  }
+  return makeFallbackGame(fen);
+}
+
+function makeFallbackGame(initialFen) {
+  // Minimal shim so the rest of the code doesn't care whether chess.js
+  // loaded. Interface: fen(), turn(), get(sq), moves({square,verbose}),
+  // move({from,to,promotion}).
+  let arr = fenToBoardArray(initialFen);   // [{ file, rank, char }]
+  let turn = initialFen.split(' ')[1] || 'w';
+  const at = (sq) => arr.find(p => p.file + p.rank === sq);
+  return {
+    fen: () => initialFen,
+    turn: () => turn,
+    get: (sq) => {
+      const p = at(sq);
+      if (!p) return null;
+      return { color: p.char === p.char.toUpperCase() ? 'w' : 'b',
+               type:  p.char.toLowerCase() };
+    },
+    moves: ({ square, verbose }) => {
+      const p = at(square);
+      if (!p) return [];
+      const myColor = p.char === p.char.toUpperCase() ? 'w' : 'b';
+      const out = [];
+      for (let f = 0; f < 8; f++) {
+        for (let r = 1; r <= 8; r++) {
+          const to = FILES[f] + r;
+          if (to === square) continue;
+          const there = at(to);
+          if (there) {
+            const theirColor = there.char === there.char.toUpperCase() ? 'w' : 'b';
+            if (theirColor === myColor) continue;
+            out.push({ from: square, to, flags: 'c', color: myColor,
+                       piece: p.char.toLowerCase(), captured: there.char.toLowerCase() });
+          } else {
+            out.push({ from: square, to, flags: '', color: myColor,
+                       piece: p.char.toLowerCase() });
+          }
+        }
+      }
+      return verbose ? out : out.map(m => m.to);
+    },
+    move: ({ from, to }) => {
+      const p = at(from);
+      if (!p) return null;
+      const cap = at(to);
+      if (cap) arr = arr.filter(x => x !== cap);
+      const [f, rStr] = [to[0], to[1]];
+      p.file = f;
+      p.rank = Number(rStr);
+      turn = turn === 'w' ? 'b' : 'w';
+      return { from, to, color: p.char === p.char.toUpperCase() ? 'w' : 'b',
+               piece: p.char.toLowerCase(),
+               captured: cap ? cap.char.toLowerCase() : undefined,
+               flags: cap ? 'c' : '' };
+    },
+  };
+}
+
+// -------------------------------------------------------------------------
+// State.
+// -------------------------------------------------------------------------
 let posIndex = 0;
 let animating = false;
-let livePieces = [];   // { el, sq, color, type, char, x, y, rot }
-let sqSize = 0;
-let selected = null;
+let livePieces = [];    // { el, sq, color, type, char, x, y, rot }
+let trayPieces = [];    // stragglers resting in the captured tray
+let selected = null;    // currently selected square name
 
+// -------------------------------------------------------------------------
+// FEN → array of { file, rank, char }.
+// -------------------------------------------------------------------------
+function fenToBoardArray(fen) {
+  const rows = fen.split(' ')[0].split('/');
+  const arr = [];
+  for (let r = 0; r < 8; r++) {
+    let expanded = '';
+    for (const ch of rows[r]) expanded += /\d/.test(ch) ? ' '.repeat(+ch) : ch;
+    for (let f = 0; f < 8; f++) {
+      const ch = expanded[f];
+      if (ch !== ' ') arr.push({ file: FILES[f], rank: 8 - r, char: ch });
+    }
+  }
+  return arr;
+}
+
+// -------------------------------------------------------------------------
+// Build board squares (one-time).
+// -------------------------------------------------------------------------
 function buildBoardSquares() {
   board.innerHTML = '';
   for (let r = 8; r >= 1; r--) {
@@ -267,150 +464,136 @@ function buildBoardSquares() {
       board.appendChild(cell);
     }
   }
+  // Listen on .stage (not .board): pieces sit in a sibling layer, so
+  // clicks on pieces would otherwise never reach .board.
+  stage.addEventListener('click', onBoardClick);
 }
-
-function expandFenRow(row) {
-  let out = '';
-  for (const ch of row) {
-    if (/\d/.test(ch)) out += ' '.repeat(Number(ch));
-    else out += ch;
-  }
-  return out;
-}
-function fenToBoardArray(fen) {
-  const rows = fen.split(' ')[0].split('/');
-  const arr = [];
-  for (let r = 0; r < 8; r++) {
-    const line = expandFenRow(rows[r]);
-    for (let f = 0; f < 8; f++) {
-      const ch = line[f];
-      if (ch === ' ') continue;
-      arr.push({ file: FILES[f], rank: 8 - r, char: ch });
-    }
-  }
-  return arr;
-}
-
-function squareToXY(sq) {
-  const f = sq.charCodeAt(0) - 97;
-  const r = Number(sq[1]);
-  return { x: f * sqSize, y: (8 - r) * sqSize };
-}
-
-function updateSqSize() {
-  const rect = stage.getBoundingClientRect();
-  sqSize = rect.width / 8;
-  for (const p of livePieces) {
-    p.el.style.width = sqSize + 'px';
-    p.el.style.height = sqSize + 'px';
-    p.el.style.fontSize = Math.round(sqSize * 0.74) + 'px';
-    const { x, y } = squareToXY(p.sq);
-    p.x = x; p.y = y; p.rot = 0;
-    p.el.style.transform = `translate(${x}px, ${y}px) rotate(0rad)`;
-  }
-}
-window.addEventListener('resize', updateSqSize);
 
 function createPieceEl(char) {
   const el = document.createElement('div');
   const isWhite = char === char.toUpperCase();
   el.className = 'piece ' + (isWhite ? 'pw' : 'pb');
   el.textContent = FILLED[char.toLowerCase()];
-  el.style.width = sqSize + 'px';
+  el.style.width  = sqSize + 'px';
   el.style.height = sqSize + 'px';
-  el.style.fontSize = Math.round(sqSize * 0.74) + 'px';
+  el.style.fontSize = Math.round(sqSize * 0.82) + 'px';
   return el;
+}
+
+function placeLiveAtSquare(p) {
+  const { x, y } = squareToXY(p.sq);
+  p.x = x; p.y = y; p.rot = 0;
+  p.el.style.transform = `translate(${x}px, ${y}px) rotate(0deg)`;
 }
 
 function renderPosition(idx) {
   const pos = POSITIONS[idx];
+  game = newGame(pos.fen);
   creditEl.textContent = pos.credit;
-  const arr = fenToBoardArray(pos.fen);
   piecesLayer.innerHTML = '';
   livePieces = [];
-  for (const p of arr) {
-    const el = createPieceEl(p.char);
-    const { x, y } = squareToXY(p.file + p.rank);
-    el.style.transform = `translate(${x}px, ${y}px) rotate(0rad)`;
+  trayPieces = [];
+  const arr = fenToBoardArray(pos.fen);
+  for (const item of arr) {
+    const el = createPieceEl(item.char);
+    el.classList.add('live');
+    const p = {
+      el,
+      sq: item.file + item.rank,
+      color: item.char === item.char.toUpperCase() ? 'w' : 'b',
+      type: item.char.toLowerCase(),
+      char: item.char,
+      x: 0, y: 0, rot: 0,
+    };
+    placeLiveAtSquare(p);
     piecesLayer.appendChild(el);
-    livePieces.push({
-      el, sq: p.file + p.rank,
-      color: p.char === p.char.toUpperCase() ? 'w' : 'b',
-      type: p.char.toLowerCase(),
-      char: p.char,
-      x, y, rot: 0,
-    });
+    livePieces.push(p);
   }
+  clearSelection();
 }
 
-function pieceAt(sq) {
-  return livePieces.find(p => p.sq === sq);
-}
+// -------------------------------------------------------------------------
+// Tap-tap interaction. Legality from chess.js (or the fallback shim).
+// -------------------------------------------------------------------------
 function clearSelection() {
   if (selected) {
     board.querySelector(`[data-sq="${selected}"]`)?.classList.remove('selected');
-    for (const el of board.querySelectorAll('.legal')) el.classList.remove('legal');
-    const p = pieceAt(selected);
+    for (const el of board.querySelectorAll('.legal, .capture')) {
+      el.classList.remove('legal', 'capture');
+    }
+    const p = livePieces.find(x => x.sq === selected);
     if (p) p.el.classList.remove('selected');
   }
   selected = null;
 }
-function markLegalMovesFrom(sq) {
-  const from = pieceAt(sq);
-  if (!from) return;
-  for (let r = 1; r <= 8; r++) {
-    for (let f = 0; f < 8; f++) {
-      const target = FILES[f] + r;
-      if (target === sq) continue;
-      const there = pieceAt(target);
-      if (!there || there.color !== from.color) {
-        board.querySelector(`[data-sq="${target}"]`)?.classList.add('legal');
-      }
+
+function selectSquare(sq) {
+  const moves = game.moves({ square: sq, verbose: true });
+  if (!moves.length) { clearSelection(); return false; }
+  clearSelection();
+  selected = sq;
+  const cell = board.querySelector(`[data-sq="${sq}"]`);
+  cell?.classList.add('selected');
+  const piece = livePieces.find(p => p.sq === sq);
+  piece?.el.classList.add('selected');
+  for (const m of moves) {
+    const target = board.querySelector(`[data-sq="${m.to}"]`);
+    if (!target) continue;
+    target.classList.add('legal');
+    if (m.flags && (m.flags.includes('c') || m.flags.includes('e'))) {
+      target.classList.add('capture');
     }
   }
+  return true;
 }
 
-// TAP-TAP mechanics (identical to production game screen).
-board.addEventListener('click', (e) => {
+function onBoardClick(e) {
   if (animating) return;
-  const cell = e.target.closest('.sq');
-  if (!cell) return;
-  const sq = cell.dataset.sq;
-  if (!selected) {
-    if (!pieceAt(sq)) return;
-    selected = sq;
-    cell.classList.add('selected');
-    pieceAt(sq).el.classList.add('selected');
-    markLegalMovesFrom(sq);
-    return;
+  bumpIdle();
+  const r = stage.getBoundingClientRect();
+  const cx = e.clientX - r.left;
+  const cy = e.clientY - r.top;
+  const sq = xyToSquare(cx, cy);
+  if (!sq) { clearSelection(); return; }
+
+  if (selected) {
+    if (sq === selected) { clearSelection(); return; }
+    // Is this a legal target?
+    const moves = game.moves({ square: selected, verbose: true });
+    const legal = moves.find(m => m.to === sq);
+    if (legal) {
+      const from = selected;
+      const move = game.move({ from, to: sq, promotion: 'q' });
+      applyMoveVisually(from, sq, move);
+      clearSelection();
+      // Small beat so the completed move reads before it all tumbles.
+      setTimeout(() => transitionToNext(), 320);
+      return;
+    }
+    // Fall through: maybe we're re-selecting a different piece.
   }
-  if (sq === selected) { clearSelection(); return; }
-  const there = pieceAt(sq);
-  const from = pieceAt(selected);
-  if (there && there.color === from.color) {
-    clearSelection();
-    selected = sq;
-    cell.classList.add('selected');
-    there.el.classList.add('selected');
-    markLegalMovesFrom(sq);
-    return;
+
+  const p = game.get(sq);
+  if (!p || p.color !== game.turn()) { clearSelection(); return; }
+  selectSquare(sq);
+}
+
+function applyMoveVisually(fromSq, toSq, move) {
+  const mover = livePieces.find(p => p.sq === fromSq);
+  if (!mover) return;
+  // Capture: remove any piece currently on target square.
+  const captured = livePieces.find(p => p.sq === toSq && p !== mover);
+  if (captured) {
+    captured.el.remove();
+    livePieces = livePieces.filter(p => p !== captured);
   }
-  const fromPiece = pieceAt(selected);
-  if (there) {
-    there.el.remove();
-    livePieces = livePieces.filter(p => p !== there);
-  }
-  fromPiece.sq = sq;
-  const { x, y } = squareToXY(sq);
-  fromPiece.x = x; fromPiece.y = y;
-  fromPiece.el.style.transition = 'transform 180ms cubic-bezier(0.16, 1, 0.3, 1)';
-  fromPiece.el.style.transform = `translate(${x}px, ${y}px) rotate(0rad)`;
-  clearSelection();
-  setTimeout(() => {
-    fromPiece.el.style.transition = '';
-    transitionToNext();
-  }, 220);
-});
+  mover.sq = toSq;
+  const { x, y } = squareToXY(toSq);
+  mover.x = x; mover.y = y;
+  mover.el.style.transition = 'transform 220ms cubic-bezier(0.16, 1, 0.3, 1)';
+  mover.el.style.transform = `translate(${x}px, ${y}px) rotate(0deg)`;
+  setTimeout(() => { mover.el.style.transition = ''; }, 260);
+}
 
 skipBtn.addEventListener('click', () => {
   if (animating) return;
@@ -418,49 +601,96 @@ skipBtn.addEventListener('click', () => {
   transitionToNext();
 });
 
-// ---- Physics tumble — TOP-DOWN spilled-marbles model.
+// -------------------------------------------------------------------------
+// PHYSICS TUMBLE — top-down "spilled marbles" model.
 //
-// The board is viewed from above, so "gravity" is not the physics that
-// makes pieces topple. What we want is a shove — the board gets a jolt,
-// pieces slide across the wood, collide with each other and with the
-// frame, and drag brings them to rest scattered across all eight ranks
-// (NOT piled at one edge like the first attempt).
-//
-// Impulse composition per piece:
-//   outward-radial from board center  — the "explosion" moment
-//   large random tangential jitter    — nothing lines up too neatly
-//   angular velocity                  — visible tumble on the way out
-// Friction is high (0.984 per ms) so motion visibly slows and stops
-// within ~1500ms. Bounces on all four walls (they are the teak frame).
+// Refinements over v2:
+//   • Impulse magnitude scales with distance from the shove origin
+//     (near = harder), so corner pieces get real energy — v2 gave
+//     h1/a8 too little because it used a constant magnitude.
+//   • Very brief ease-in on the impulse (80ms ramp) so the burst reads
+//     as "the board just got shoved" rather than "the pieces
+//     spontaneously exploded".
+//   • At rest, pieces whose angle wound up between 55° and 90° snap
+//     to ±90° — they LIE ON THEIR SIDE, held. Reads as weight.
+//   • Physics bounds = the full stage (with a small pad). Pieces can
+//     travel off the board onto the celadon ground and rest there.
+// -------------------------------------------------------------------------
 function tumble() {
   return new Promise((resolve) => {
-    const bounds = { w: sqSize * 8, h: sqSize * 8 };
-    const cx = bounds.w / 2, cy = bounds.h / 2;
+    // Radial impulse from BOARD CENTER — every piece flies outward in
+    // its own direction, so pieces spread across all eight ranks
+    // instead of piling on one wall. Magnitude scales with distance
+    // from center so corner pieces (which were starved by v2's
+    // constant magnitude) get enough energy to travel.
+    const cx = boardX + boardW / 2;
+    const cy = boardY + boardH / 2;
+
     const state = livePieces.map(p => {
-      const px = p.x + sqSize / 2, py = p.y + sqSize / 2;
-      const dx = px - cx, dy = py - cy;
-      const dist = Math.max(sqSize * 0.5, Math.sqrt(dx * dx + dy * dy));
-      const nx = dx / dist, ny = dy / dist;
-      const impulseOut = sqSize * (0.028 + Math.random() * 0.020);
-      const jitterMag  = sqSize * 0.022;
+      const pcx = p.x + sqSize / 2;
+      const pcy = p.y + sqSize / 2;
+      const dx = pcx - cx, dy = pcy - cy;
+      const dist = Math.max(sqSize * 0.5, Math.hypot(dx, dy));
+      const rnx = dx / dist, rny = dy / dist;
+      // Farther from center = more impulse (corner rooks fly harder).
+      // Impulse composition. All starting-position pieces begin on
+      // the outer ranks (1,2,7,8), so a radial-outward push slams
+      // every piece into its nearest wall and leaves the middle
+      // empty. Instead we give each piece a mostly-RANDOM direction
+      // (uniform angle) plus a small radial-INWARD bias so the
+      // empty middle gets populated. Board-edge walls (see PAD)
+      // catch pieces that would otherwise leave; wall restitution
+      // sends them back into play with some remaining energy.
+      const farness = Math.min(1, dist / (boardW * 0.5));
+      // With less-aggressive damping (time constant ~200ms), the
+      // impulse budget is much smaller: v0 * 200 = travel. We want
+      // 1.5–3 squares of travel, so v0 ≈ 0.5–1.1 px/ms.
+      // Inward bias: pushes outer pieces toward the empty middle.
+      const inwardMag = sqSize * 0.008 * (0.5 + 0.6 * farness);
+      // Random direction (uniform angle), varied magnitude.
+      const randAngle = Math.random() * Math.PI * 2;
+      const randMag = sqSize * (0.010 + Math.random() * 0.008);
+      const jx = Math.cos(randAngle) * randMag;
+      const jy = Math.sin(randAngle) * randMag;
+      // Radial component is NEGATIVE (inward): rnx points away from
+      // center, so we subtract to move toward center.
+      const mag = -inwardMag;
       return {
-        p, x: px, y: py,
-        vx: nx * impulseOut + (Math.random() - 0.5) * jitterMag,
-        vy: ny * impulseOut + (Math.random() - 0.5) * jitterMag,
+        p,
+        x: pcx, y: pcy,
+        // Target velocity (ramped in via ease-in over first 80ms).
+        // Positive rnx*mag = radial OUTWARD; jitter breaks the
+        // perfect radial symmetry.
+        tvx: rnx * mag + jx,
+        tvy: rny * mag + jy,
+        vx: 0, vy: 0,
         rot: p.rot,
-        vr: (Math.random() - 0.5) * 0.020,
+        vr: (Math.random() - 0.5) * 0.020,  // rad/ms
         r: sqSize * 0.34,
+        mass: 1 + (p.type === 'k' || p.type === 'q' ? 0.5 : 0),
       };
     });
 
-    // Per-MS damping. Want energy to visibly decay across ~1500ms of
-    // tumble, so a piece that starts fast is still moving when it hits
-    // its second neighbour. LINEAR^1500 ≈ 0.03 → LINEAR ≈ 0.9977.
-    const LINEAR_DAMPING = 0.9977;
-    const ANGULAR_DAMPING = 0.9968;
+    // Physics constants (units: px, ms). Less aggressive damping
+    // (time constant ~200ms) so pieces that hit the teak wall have
+    // energy left to travel back into the board interior — otherwise
+    // everything settles at the walls and the middle stays empty.
+    const LINEAR_DAMPING   = 0.9950;
+    const ANGULAR_DAMPING  = 0.9910;
     const WALL_RESTITUTION = 0.62;
-    const REST_SPEED = sqSize * 0.0004;
-    const DURATION = 1700;
+    const IMPULSE_RAMP_MS = 80;
+    const DURATION = 1650;
+    const REST_HOLD = 550;
+
+    // Physics bounds = the BOARD interior (the teak frame is the
+    // physical wall). Pieces bounce off the frame and stay on the
+    // playing surface in visible chaos. Straggler pieces walk out to
+    // the captured tray during walk-back; nobody flies off the board
+    // during tumble. This mirrors v2's stage-fills-board layout, which
+    // spread pieces evenly across the board without corner-pileups.
+    const PAD = sqSize * 0.08;
+    const minX = boardX + PAD, maxX = boardX + boardW - PAD;
+    const minY = boardY + PAD, maxY = boardY + boardH - PAD;
 
     const start = performance.now();
     let last = start;
@@ -468,159 +698,431 @@ function tumble() {
     function step(now) {
       const dt = Math.min(32, now - last);
       last = now;
+      const t = now - start;
 
-      // Per-ms friction: use LINEAR_DAMPING^dt so friction scales with
-      // frame time rather than jumping every render.
+      // Ease-in ramp: 0 → 1 over IMPULSE_RAMP_MS (cubic ease-out feel).
+      const rampT = Math.min(1, t / IMPULSE_RAMP_MS);
+      const ramp = 1 - Math.pow(1 - rampT, 3);
+      for (const s of state) {
+        s.vx = s.tvx * ramp;
+        s.vy = s.tvy * ramp;
+      }
+      // Once the ramp completes, we stop overwriting velocity — from
+      // this point forward, damping and collisions take over.
+      // (After ramp, the assignments above are still needed on the last
+      // ramping frame but harmless.)
+
       const frameDamp = Math.pow(LINEAR_DAMPING, dt);
       const frameAngDamp = Math.pow(ANGULAR_DAMPING, dt);
-      for (const s of state) {
-        s.vx *= frameDamp;
-        s.vy *= frameDamp;
-        s.vr *= frameAngDamp;
-        s.x  += s.vx * dt;
-        s.y  += s.vy * dt;
-        s.rot += s.vr * dt;
 
-        if (s.x - s.r < 0)          { s.x = s.r;             s.vx = -s.vx * WALL_RESTITUTION; }
-        if (s.x + s.r > bounds.w)   { s.x = bounds.w - s.r;  s.vx = -s.vx * WALL_RESTITUTION; }
-        if (s.y - s.r < 0)          { s.y = s.r;             s.vy = -s.vy * WALL_RESTITUTION; }
-        if (s.y + s.r > bounds.h)   { s.y = bounds.h - s.r;  s.vy = -s.vy * WALL_RESTITUTION; }
+      // Substep collisions/motion for stability under high initial vel.
+      const SUBSTEPS = 3;
+      const sdt = dt / SUBSTEPS;
 
-        // Hard rest snap once motion falls under threshold — no jitter.
-        if (Math.abs(s.vx) < REST_SPEED && Math.abs(s.vy) < REST_SPEED) {
-          s.vx = 0; s.vy = 0;
+      for (let step = 0; step < SUBSTEPS; step++) {
+        for (const s of state) {
+          if (t > IMPULSE_RAMP_MS) {
+            s.vx *= Math.pow(LINEAR_DAMPING, sdt);
+            s.vy *= Math.pow(LINEAR_DAMPING, sdt);
+          }
+          s.vr *= Math.pow(ANGULAR_DAMPING, sdt);
+          s.x  += s.vx * sdt;
+          s.y  += s.vy * sdt;
+          s.rot += s.vr * sdt;
+
+          // Cap total rotation at ±π so we don't spin arbitrarily.
+          if (s.rot >  Math.PI) s.rot -= Math.PI * 2;
+          if (s.rot < -Math.PI) s.rot += Math.PI * 2;
+
+          if (s.x - s.r < minX) { s.x = minX + s.r; s.vx = -s.vx * WALL_RESTITUTION; }
+          if (s.x + s.r > maxX) { s.x = maxX - s.r; s.vx = -s.vx * WALL_RESTITUTION; }
+          if (s.y - s.r < minY) { s.y = minY + s.r; s.vy = -s.vy * WALL_RESTITUTION; }
+          if (s.y + s.r > maxY) { s.y = maxY - s.r; s.vy = -s.vy * WALL_RESTITUTION; }
+
+          // Hard rest snap: below threshold, kill motion so nothing
+          // jitters at the sub-pixel scale.
+          if (Math.abs(s.vx) < baseRest() && Math.abs(s.vy) < baseRest()) {
+            s.vx = 0; s.vy = 0;
+          }
         }
-      }
 
-      // Pairwise collisions (32 bodies = ~500 pair checks, trivial).
-      for (let i = 0; i < state.length; i++) {
-        for (let j = i + 1; j < state.length; j++) {
-          const a = state[i], b = state[j];
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const minDist = a.r + b.r;
-          if (dist < minDist && dist > 0.001) {
-            const overlap = (minDist - dist) / 2;
-            const nx = dx / dist, ny = dy / dist;
-            a.x -= nx * overlap; a.y -= ny * overlap;
-            b.x += nx * overlap; b.y += ny * overlap;
-            const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
-            const vn = rvx * nx + rvy * ny;
-            if (vn < 0) {
-              const restitution = 0.35;
-              const jimp = -(1 + restitution) * vn / 2;
-              a.vx -= jimp * nx; a.vy -= jimp * ny;
-              b.vx += jimp * nx; b.vy += jimp * ny;
-              a.vr -= (Math.random() - 0.5) * 0.003;
-              b.vr += (Math.random() - 0.5) * 0.003;
+        // Pairwise circle collisions (32 bodies → ~500 pair checks).
+        for (let i = 0; i < state.length; i++) {
+          for (let j = i + 1; j < state.length; j++) {
+            const a = state[i], b = state[j];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const dist = Math.hypot(dx, dy);
+            const minDist = a.r + b.r;
+            if (dist < minDist && dist > 0.001) {
+              const overlap = (minDist - dist);
+              const nx = dx / dist, ny = dy / dist;
+              const totalM = a.mass + b.mass;
+              a.x -= nx * overlap * (b.mass / totalM);
+              a.y -= ny * overlap * (b.mass / totalM);
+              b.x += nx * overlap * (a.mass / totalM);
+              b.y += ny * overlap * (a.mass / totalM);
+              const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+              const vn = rvx * nx + rvy * ny;
+              if (vn < 0) {
+                const restitution = 0.32;
+                const jimp = -(1 + restitution) * vn / (1/a.mass + 1/b.mass);
+                a.vx -= jimp * nx / a.mass;
+                a.vy -= jimp * ny / a.mass;
+                b.vx += jimp * nx / b.mass;
+                b.vy += jimp * ny / b.mass;
+                // Impact-induced spin.
+                const impact = Math.abs(vn);
+                const spin = impact * 0.0012;
+                a.vr -= spin * (Math.random() - 0.5) * 2;
+                b.vr += spin * (Math.random() - 0.5) * 2;
+              }
             }
           }
         }
       }
 
+      // Render.
       for (const s of state) {
         const tx = s.x - sqSize / 2;
         const ty = s.y - sqSize / 2;
-        s.p.el.style.transform = `translate(${tx}px, ${ty}px) rotate(${s.rot}rad)`;
+        const deg = s.rot * 180 / Math.PI;
+        s.p.el.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(${deg.toFixed(2)}deg)`;
         s.p.x = tx; s.p.y = ty; s.p.rot = s.rot;
       }
 
-      const elapsed = now - start;
-      if (elapsed < DURATION) requestAnimationFrame(step);
-      else resolve();
+      if (t < DURATION) requestAnimationFrame(step);
+      else {
+        // At rest: snap pieces whose rotation ended in the "fallen"
+        // zone to exactly ±90°. Reads as "lying on its side, held".
+        for (const s of state) {
+          const abs = Math.abs(s.rot);
+          if (abs > (55 * Math.PI / 180)) {
+            const signed = Math.sign(s.rot) * (Math.PI / 2);
+            s.rot = signed;
+            const tx = s.x - sqSize / 2;
+            const ty = s.y - sqSize / 2;
+            const deg = s.rot * 180 / Math.PI;
+            // Brief settle to the locked angle (200ms) so the snap
+            // itself has a beat instead of jumping.
+            s.p.el.style.transition = 'transform 200ms cubic-bezier(0.34, 1.5, 0.64, 1)';
+            s.p.el.style.transform = `translate(${tx}px, ${ty}px) rotate(${deg.toFixed(2)}deg)`;
+            s.p.rot = s.rot;
+          }
+        }
+        // After a hold beat (letting the picture read), resolve.
+        setTimeout(() => {
+          // Clear any settle-snap transitions so the walk-back can
+          // drive transforms every frame without interference.
+          for (const s of state) s.p.el.style.transition = '';
+          resolve();
+        }, REST_HOLD);
+      }
     }
+    function baseRest() { return sqSize * 0.00035; }
     requestAnimationFrame(step);
   });
 }
 
-// ---- Walk back: tumbled pieces travel to next-position squares ---------
+// -------------------------------------------------------------------------
+// WALK-BACK — every piece walks to its next-position square (or to a
+// slot in the captured tray, if the next position doesn't need it).
+//
+// v3 replaces the CSS-tween of v2 with a rAF-driven per-piece animation
+// that gives every piece a walk:
+//
+//   Phase 1 (0 → STAND_MS):   rotate from fallen angle back to 0 with
+//                             an ease-out. The piece "stands up".
+//   Phase 2 (STAND_MS → END): travel from fallen center to destination
+//                             center along a slightly curved bezier
+//                             (per-piece perpendicular offset), with:
+//                             • vertical bob at footstep cadence
+//                               (2.5 steps per second-of-travel),
+//                               tapered at both ends of the trip
+//                             • rotation tilt swinging with the bob,
+//                               tapered at both ends
+//   Phase 3 (last SETTLE_MS): scale beats 96% → 100% (arrival settle).
+//
+// Stagger is by rank: far rank starts first so pieces on nearer ranks
+// don't obscure a piece walking behind them. Small per-piece jitter
+// keeps the crowd from marching in lockstep.
+//
+// Stragglers (pieces the next position doesn't need) walk to the
+// captured tray, which is the celadon strip above the board (the y
+// coordinate is boardY - sqSize * 0.6, cream in one row, navy in
+// another). They stay visible on the ground — never off-screen.
+// -------------------------------------------------------------------------
 function walkBack() {
   return new Promise((resolve) => {
     const pos = POSITIONS[posIndex];
     creditEl.textContent = pos.credit;
     const arr = fenToBoardArray(pos.fen);
 
-    const targets = arr.map(p => ({
-      sq: p.file + p.rank,
-      color: p.char === p.char.toUpperCase() ? 'w' : 'b',
-      type: p.char.toLowerCase(),
-      char: p.char,
-      end: squareToXY(p.file + p.rank),
+    // Build target list.
+    const targets = arr.map(item => ({
+      sq: item.file + item.rank,
+      color: item.char === item.char.toUpperCase() ? 'w' : 'b',
+      type: item.char.toLowerCase(),
+      char: item.char,
+      end: squareCenter(item.file + item.rank),
       assigned: null,
     }));
 
-    const available = livePieces.slice();
+    // Assign nearest-of-kind fallen piece to each target (greedy).
+    const pool = livePieces.slice();
     for (const t of targets) {
-      let bestIdx = -1, bestDist = Infinity;
-      for (let i = 0; i < available.length; i++) {
-        const p = available[i];
+      let bestI = -1, bestD = Infinity;
+      for (let i = 0; i < pool.length; i++) {
+        const p = pool[i];
         if (!p || p.color !== t.color || p.type !== t.type) continue;
-        const dx = (p.x + sqSize/2) - (t.end.x + sqSize/2);
-        const dy = (p.y + sqSize/2) - (t.end.y + sqSize/2);
-        const d = dx*dx + dy*dy;
-        if (d < bestDist) { bestDist = d; bestIdx = i; }
+        const pcx = p.x + sqSize / 2, pcy = p.y + sqSize / 2;
+        const d = (pcx - t.end.x) ** 2 + (pcy - t.end.y) ** 2;
+        if (d < bestD) { bestD = d; bestI = i; }
       }
-      if (bestIdx >= 0) {
-        t.assigned = available[bestIdx];
-        available[bestIdx] = null;
-      }
+      if (bestI >= 0) { t.assigned = pool[bestI]; pool[bestI] = null; }
     }
 
-    // Spawn new pieces for targets with no leftover match.
-    const spawnY = sqSize * 8 + sqSize * 0.6;
+    // Spawn any missing kinds from the nearest stage edge.
     for (const t of targets) {
       if (t.assigned) continue;
       const el = createPieceEl(t.char);
-      el.style.transform = `translate(${t.end.x}px, ${spawnY}px) rotate(0rad)`;
+      const spawn = pickEdgeSpawn(t.end);
+      el.style.opacity = '0';
+      el.style.transform = `translate(${spawn.x - sqSize/2}px, ${spawn.y - sqSize/2}px) rotate(0deg)`;
       piecesLayer.appendChild(el);
-      const spawned = {
-        el, sq: null, color: t.color, type: t.type, char: t.char,
-        x: t.end.x, y: spawnY, rot: 0,
+      const p = {
+        el, sq: t.sq, color: t.color, type: t.type, char: t.char,
+        x: spawn.x - sqSize/2, y: spawn.y - sqSize/2, rot: 0,
       };
-      livePieces.push(spawned);
-      t.assigned = spawned;
+      livePieces.push(p);
+      t.assigned = p;
+      t._fadeIn = true;
     }
 
-    const stragglers = livePieces.filter(p => !targets.some(t => t.assigned === p));
+    // Stragglers: everything left in pool.
+    const stragglers = pool.filter(Boolean);
+    // Sort tray slots: cream row above navy row on the celadon strip
+    // above the board. Cap the row at 12 slots per color; if we ever
+    // exceed that, wrap (won't happen with real chess positions).
+    const trayGap = sqSize * 0.55;
+    const trayYWhite = boardY - sqSize * 0.72;
+    const trayYBlack = boardY - sqSize * 1.44;
+    const whiteQueue = stragglers.filter(p => p.color === 'w');
+    const blackQueue = stragglers.filter(p => p.color === 'b');
 
-    const rowDelay = (rank) => (8 - rank) * 55;
-    const fileDelay = (file) => (file.charCodeAt(0) - 97) * 10;
-    const WALK_MS = 950;
+    // Build the walk list. Each entry: piece + startFrame + duration +
+    // curve control point + destination + endAngle.
+    const now = performance.now();
+    const walks = [];
+    function pushWalk(piece, endCX, endCY, isTray, rankHint) {
+      const startCX = piece.x + sqSize / 2;
+      const startCY = piece.y + sqSize / 2;
+      const dist = Math.hypot(endCX - startCX, endCY - startCY);
+      const speed = boardW * 1.15;   // px per second, walking pace
+      const duration = Math.max(560, Math.min(1150, (dist / speed) * 1000));
+      const rankDelay = (8 - (rankHint ?? 4)) * 55;
+      const jitter = Math.random() * 90;
+      const startAt = now + rankDelay + jitter;
 
-    for (const t of targets) t.assigned.el.style.transition = 'none';
-    for (const p of stragglers) p.el.style.transition = 'none';
-    void piecesLayer.offsetHeight;
+      // Curve: bezier control point offset perpendicular to travel. Per
+      // piece deterministic-ish jitter so paths look individual, not
+      // parallel. Bias so that pieces coming from the LEFT curve one
+      // way and pieces from the RIGHT curve the other — reduces
+      // criss-cross visual chaos.
+      const dx = endCX - startCX;
+      const dy = endCY - startCY;
+      const px = -dy, py = dx;
+      const perpLen = Math.hypot(px, py) || 1;
+      const curveSign = dx < 0 ? -1 : 1;
+      const curveAmt = curveSign * dist * (0.06 + Math.random() * 0.10);
+      const cx = (startCX + endCX) / 2 + (px / perpLen) * curveAmt;
+      const cy = (startCY + endCY) / 2 + (py / perpLen) * curveAmt;
+
+      walks.push({
+        piece,
+        startCX, startCY, startAngle: piece.rot,
+        endCX, endCY, endAngle: 0,
+        ctrlX: cx, ctrlY: cy,
+        startAt, duration,
+        isTray,
+        fadeIn: false,
+      });
+    }
 
     for (const t of targets) {
       const p = t.assigned;
-      const delay = rowDelay(Number(t.sq[1])) + fileDelay(t.sq[0]);
-      p.el.style.transition = `transform ${WALK_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1) ${delay}ms`;
-      p.el.style.transform = `translate(${t.end.x}px, ${t.end.y}px) rotate(0rad)`;
-      p.x = t.end.x; p.y = t.end.y; p.rot = 0; p.sq = t.sq;
+      pushWalk(p, t.end.x, t.end.y, false, Number(t.sq[1]));
+      // Update logical square immediately so subsequent live state is
+      // correct once the walk settles.
+      p.sq = t.sq;
+      if (t._fadeIn) walks[walks.length - 1].fadeIn = true;
     }
-    for (const p of stragglers) {
-      p.el.style.transition = `transform ${WALK_MS}ms cubic-bezier(0.4, 0, 0.9, 0.4) 0ms`;
-      p.el.style.transform = `translate(${p.x}px, ${spawnY + sqSize * 2}px) rotate(${p.rot + 0.5}rad)`;
+    whiteQueue.forEach((p, i) => {
+      const endCX = boardX + sqSize * 0.5 + i * trayGap;
+      const endCY = trayYWhite;
+      pushWalk(p, endCX, endCY, true, 8);
+      p.sq = null;
+    });
+    blackQueue.forEach((p, i) => {
+      const endCX = boardX + sqSize * 0.5 + i * trayGap;
+      const endCY = trayYBlack;
+      pushWalk(p, endCX, endCY, true, 8);
+      p.sq = null;
+    });
+
+    // Update livePieces / trayPieces registers ahead of the animation
+    // so the state is consistent immediately after walk-back completes.
+    livePieces = walks.filter(w => !w.isTray).map(w => w.piece);
+    trayPieces = walks.filter(w => w.isTray).map(w => w.piece);
+
+    // Ensure no lingering CSS transitions interfere with rAF driving.
+    for (const w of walks) w.piece.el.style.transition = 'none';
+    // Force reflow before we start.
+    void piecesLayer.offsetHeight;
+
+    // Animation constants.
+    const STAND_MS = 220;
+    const SETTLE_MS = 130;
+    const BOB_HZ = 2.6;                 // footsteps per second
+    const BOB_AMP = sqSize * 0.09;
+    const TILT_AMP = 0.055;              // radians (~3.2°)
+
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+    function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+    function bezier(t, x0, y0, xc, yc, x1, y1) {
+      const it = 1 - t;
+      return {
+        x: it*it*x0 + 2*it*t*xc + t*t*x1,
+        y: it*it*y0 + 2*it*t*yc + t*t*y1,
+      };
     }
 
-    const maxDelay = 8 * 55 + 8 * 10 + WALK_MS + 60;
-    setTimeout(() => {
-      for (const p of stragglers) p.el.remove();
-      livePieces = livePieces.filter(p => !stragglers.includes(p));
-      for (const p of livePieces) p.el.style.transition = '';
-      resolve();
-    }, maxDelay);
+    // Global end frame — a bit after the latest piece finishes.
+    const globalEnd = walks.reduce((acc, w) => Math.max(acc, w.startAt + w.duration + STAND_MS + SETTLE_MS), now) + 120;
+
+    function frame(tNow) {
+      for (const w of walks) {
+        const t = tNow - w.startAt;
+        if (t < 0) continue;    // hasn't started yet
+        const totalW = STAND_MS + w.duration + SETTLE_MS;
+        if (t >= totalW) {
+          // Snap to final resting transform.
+          const tx = w.endCX - sqSize / 2;
+          const ty = w.endCY - sqSize / 2;
+          w.piece.el.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(0deg) scale(1)`;
+          w.piece.el.style.opacity = '1';
+          w.piece.x = tx; w.piece.y = ty; w.piece.rot = 0;
+          continue;
+        }
+
+        // Phase 1: stand-up rotation.
+        let currentAngle;
+        if (t < STAND_MS) {
+          const st = t / STAND_MS;
+          const e = easeOutCubic(st);
+          currentAngle = w.startAngle * (1 - e);
+        } else {
+          currentAngle = 0;
+        }
+
+        // Phase 2: travel with bob + tilt.
+        const travelT = Math.max(0, Math.min(1, (t - STAND_MS) / w.duration));
+        const travelE = easeInOutCubic(travelT);
+        const pt = bezier(travelE, w.startCX, w.startCY, w.ctrlX, w.ctrlY, w.endCX, w.endCY);
+        // Bob taper: hats-shape (rise, hold, fall) so bob is strongest
+        // in the middle third of the walk, gone at start and end.
+        const bobTaper = smoothTaper(travelT, 0.15, 0.85);
+        const bobPhase = travelT * (w.duration / 1000) * BOB_HZ * Math.PI * 2;
+        const bob = -Math.abs(Math.sin(bobPhase)) * BOB_AMP * bobTaper;
+        const tilt = Math.sin(bobPhase * 0.5) * TILT_AMP * bobTaper;
+
+        // Fade-in for spawned pieces.
+        if (w.fadeIn) w.piece.el.style.opacity = String(Math.min(1, t / 220));
+
+        // Phase 3: settle. Scale beats 1 → 0.94 → 1 in the last SETTLE_MS.
+        let scale = 1;
+        const settleStart = STAND_MS + w.duration;
+        if (t >= settleStart) {
+          const s = (t - settleStart) / SETTLE_MS;
+          scale = 1 - 0.06 * Math.sin(s * Math.PI);
+        }
+
+        const totalAngle = (currentAngle + tilt);
+        const cx = pt.x;
+        const cy = pt.y + bob;
+        const tx = cx - sqSize / 2;
+        const ty = cy - sqSize / 2;
+        const deg = totalAngle * 180 / Math.PI;
+        w.piece.el.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(${deg.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+      }
+
+      if (tNow < globalEnd) requestAnimationFrame(frame);
+      else {
+        // Reset transitions so live moves can use them again.
+        for (const w of walks) w.piece.el.style.transition = '';
+        // Live pieces get their tap-tap behavior back; tray pieces do
+        // not (they're captured).
+        for (const p of livePieces) p.el.classList.add('live');
+        for (const p of trayPieces) p.el.classList.remove('live');
+        resolve();
+      }
+    }
+    requestAnimationFrame(frame);
   });
 }
 
+// Bob taper: 0 at both ends of [0,1], 1 in the middle. Uses a smooth
+// hat function that ramps up over [0, a], holds 1 over [a, 1-a] tail,
+// and ramps down over [1-a, 1].
+function smoothTaper(t, a, b) {
+  if (t < a) return smoothstep(0, a, t);
+  if (t > b) return smoothstep(1, b, t);
+  return 1;
+}
+function smoothstep(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+// Pick the stage-edge point nearest to a destination — for spawning
+// pieces that the fallen pool couldn't supply.
+function pickEdgeSpawn(dest) {
+  const opts = [
+    { x: -sqSize * 0.5, y: dest.y },
+    { x: stageW + sqSize * 0.5, y: dest.y },
+    { x: dest.x, y: -sqSize * 0.5 },
+    { x: dest.x, y: stageH + sqSize * 0.5 },
+  ];
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < opts.length; i++) {
+    const d = Math.hypot(opts[i].x - dest.x, opts[i].y - dest.y);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return opts[best];
+}
+
+// -------------------------------------------------------------------------
+// Orchestrator: live → tumble → walk-back → live.
+// -------------------------------------------------------------------------
 async function transitionToNext() {
   if (animating) return;
   animating = true;
   skipBtn.disabled = true;
+  clearSelection();
+
+  // Any tray pieces from the previous cycle fold into the tumble too —
+  // they're on the stage, they should tumble along with everything
+  // else. Merge them into livePieces so they participate.
+  if (trayPieces.length) {
+    for (const p of trayPieces) livePieces.push(p);
+    trayPieces = [];
+  }
+
+  // Live pieces can't be tapped mid-transition.
+  for (const p of livePieces) p.el.classList.remove('live');
 
   await tumble();
-  await new Promise(r => setTimeout(r, 240));   // beat between tumble-rest + walk-back
   posIndex = (posIndex + 1) % POSITIONS.length;
+  game = newGame(POSITIONS[posIndex].fen);
   await walkBack();
 
   animating = false;
@@ -628,10 +1130,9 @@ async function transitionToNext() {
   bumpIdle();
 }
 
-buildBoardSquares();
-updateSqSize();
-renderPosition(0);
-
+// -------------------------------------------------------------------------
+// Idle auto-advance.
+// -------------------------------------------------------------------------
 let idleTimer = null;
 const IDLE_MS = 25_000;
 function bumpIdle() {
@@ -640,8 +1141,26 @@ function bumpIdle() {
     if (!animating) transitionToNext();
   }, IDLE_MS);
 }
-document.addEventListener('pointerdown', bumpIdle);
-bumpIdle();
+
+// -------------------------------------------------------------------------
+// Boot + resize handling.
+// -------------------------------------------------------------------------
+function boot() {
+  measure();
+  buildBoardSquares();
+  renderPosition(0);
+  bumpIdle();
+}
+window.addEventListener('resize', () => {
+  measure();
+  for (const p of [...livePieces, ...trayPieces]) {
+    p.el.style.width  = sqSize + 'px';
+    p.el.style.height = sqSize + 'px';
+    p.el.style.fontSize = Math.round(sqSize * 0.82) + 'px';
+    if (p.sq) placeLiveAtSquare(p);
+  }
+});
+window.addEventListener('load', boot);
 </script>
 </body>
 </html>
