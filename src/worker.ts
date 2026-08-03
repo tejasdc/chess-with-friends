@@ -304,35 +304,35 @@ export class AppDO extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     try {
-      if (url.pathname === "/_auth/session") return this.session(request);
-      if (url.pathname === "/_internal/game-status" && request.method === "POST") return this.updateGameStatus(request);
+      if (url.pathname === "/_auth/session") return await this.session(request);
+      if (url.pathname === "/_internal/game-status" && request.method === "POST") return await this.updateGameStatus(request);
       if (url.pathname === "/api/health") return json({ ok: true, pushTypes: PUSH_TYPES });
       if (url.pathname === "/api/push/policy") return json({ pushTypes: PUSH_TYPES });
-      if (url.pathname === "/api/auth/register/options" && request.method === "POST") return this.registrationOptions(request);
-      if (url.pathname === "/api/auth/register/verify" && request.method === "POST") return this.registrationVerify(request);
-      if (url.pathname === "/api/auth/login/options" && request.method === "POST") return this.loginOptions(request);
-      if (url.pathname === "/api/auth/login/verify" && request.method === "POST") return this.loginVerify(request);
-      if (url.pathname === "/api/auth/logout" && request.method === "POST") return this.logout(request);
+      if (url.pathname === "/api/auth/register/options" && request.method === "POST") return await this.registrationOptions(request);
+      if (url.pathname === "/api/auth/register/verify" && request.method === "POST") return await this.registrationVerify(request);
+      if (url.pathname === "/api/auth/login/options" && request.method === "POST") return await this.loginOptions(request);
+      if (url.pathname === "/api/auth/login/verify" && request.method === "POST") return await this.loginVerify(request);
+      if (url.pathname === "/api/auth/logout" && request.method === "POST") return await this.logout(request);
 
       const user = await this.requireUser(request);
-      if (url.pathname === "/api/me" && request.method === "GET") return this.me(user);
-      if (url.pathname === "/api/presence/heartbeat" && request.method === "POST") return this.heartbeat(user);
-      if (url.pathname === "/api/push/subscribe" && request.method === "POST") return this.subscribe(request, user);
-      if (url.pathname === "/api/push/pending" && (request.method === "GET" || request.method === "POST")) return this.pendingPush(request, user);
-      if (url.pathname === "/api/friends/request" && request.method === "POST") return this.requestFriend(request, user);
-      if (url.pathname === "/api/friends/invite" && request.method === "POST") return this.requestByInvite(request, user);
+      if (url.pathname === "/api/me" && request.method === "GET") return await this.me(user);
+      if (url.pathname === "/api/presence/heartbeat" && request.method === "POST") return await this.heartbeat(user);
+      if (url.pathname === "/api/push/subscribe" && request.method === "POST") return await this.subscribe(request, user);
+      if (url.pathname === "/api/push/pending" && (request.method === "GET" || request.method === "POST")) return await this.pendingPush(request, user);
+      if (url.pathname === "/api/friends/request" && request.method === "POST") return await this.requestFriend(request, user);
+      if (url.pathname === "/api/friends/invite" && request.method === "POST") return await this.requestByInvite(request, user);
       if (url.pathname.match(/^\/api\/friends\/[^/]+\/accept$/) && request.method === "POST") {
-        return this.acceptFriend(url.pathname.split("/")[3], user);
+        return await this.acceptFriend(url.pathname.split("/")[3], user);
       }
-      if (url.pathname === "/api/challenges" && request.method === "POST") return this.createChallenge(request, user);
+      if (url.pathname === "/api/challenges" && request.method === "POST") return await this.createChallenge(request, user);
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/accept$/) && request.method === "POST") {
-        return this.acceptChallenge(url.pathname.split("/")[3], user);
+        return await this.acceptChallenge(url.pathname.split("/")[3], user);
       }
-      if (url.pathname === "/api/schedules" && request.method === "POST") return this.createSchedule(request, user);
+      if (url.pathname === "/api/schedules" && request.method === "POST") return await this.createSchedule(request, user);
       if (url.pathname.match(/^\/api\/schedules\/[^/]+\/accept$/) && request.method === "POST") {
-        return this.acceptSchedule(url.pathname.split("/")[3], user);
+        return await this.acceptSchedule(url.pathname.split("/")[3], user);
       }
-      if (url.pathname === "/api/debug/push-log" && request.method === "GET") return this.debugPushLog(request);
+      if (url.pathname === "/api/debug/push-log" && request.method === "GET") return await this.debugPushLog(request);
 
       return json({ error: "Not found" }, { status: 404 });
     } catch (error) {
@@ -567,7 +567,7 @@ export class AppDO extends DurableObject<Env> {
     const db = await this.db();
     db.presence[user.id] = Date.now();
     await this.save(db);
-    return this.me(user);
+    return await this.me(user);
   }
 
   private async subscribe(request: Request, user: User) {
@@ -601,7 +601,7 @@ export class AppDO extends DurableObject<Env> {
     const targetId = db.handleToUserId[targetHandle];
     const target = targetId ? db.users[targetId] : undefined;
     if (!target) throw new Error("No account with that handle.");
-    return this.createFriendRequest(db, user, target);
+    return await this.createFriendRequest(db, user, target);
   }
 
   private async requestByInvite(request: Request, user: User) {
@@ -609,7 +609,7 @@ export class AppDO extends DurableObject<Env> {
     const { token } = await readJson<{ token: string }>(request);
     const target = Object.values(db.users).find((candidate) => candidate.inviteToken === token);
     if (!target) throw new Error("Invite link not found.");
-    return this.createFriendRequest(db, user, target);
+    return await this.createFriendRequest(db, user, target);
   }
 
   private async createFriendRequest(db: AppDb, user: User, target: User) {
@@ -645,7 +645,7 @@ export class AppDO extends DurableObject<Env> {
       createdAt: Date.now(),
     };
     await this.save(db);
-    return this.me(user);
+    return await this.me(user);
   }
 
   private async createChallenge(request: Request, user: User) {
@@ -797,12 +797,12 @@ export class GameDO extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     try {
-      if (url.pathname === "/init" && request.method === "POST") return this.init(request);
-      if (url.pathname === "/socket") return this.socket(request);
-      if (url.pathname === "/state") return this.stateResponse();
-      if (url.pathname === "/move" && request.method === "POST") return this.move(request);
-      if (url.pathname === "/resign" && request.method === "POST") return this.resign(request);
-      if (url.pathname === "/debug/expire" && request.method === "POST") return this.debugExpire(request);
+      if (url.pathname === "/init" && request.method === "POST") return await this.init(request);
+      if (url.pathname === "/socket") return await this.socket(request);
+      if (url.pathname === "/state") return await this.stateResponse();
+      if (url.pathname === "/move" && request.method === "POST") return await this.move(request);
+      if (url.pathname === "/resign" && request.method === "POST") return await this.resign(request);
+      if (url.pathname === "/debug/expire" && request.method === "POST") return await this.debugExpire(request);
       return json({ error: "Not found" }, { status: 404 });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "Game request failed" }, { status: 400 });
@@ -969,7 +969,7 @@ export class GameDO extends DurableObject<Env> {
     this.applyClock(game, Date.now());
     await this.putGame(game);
     if (game.status !== "active") await this.reportStatus(game);
-    return this.snapshotFrom(game);
+    return await this.snapshotFrom(game);
   }
 
   private async snapshotFrom(game: GameState) {
