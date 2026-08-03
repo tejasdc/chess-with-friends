@@ -19,9 +19,13 @@ tmp/reviews/moodboard/*
 !tmp/reviews/moodboard/final/
 !tmp/reviews/moodboard/contact-sheet.jpg
 !tmp/reviews/composites/
-# Two specific screens-r2 files kept as bar-fix evidence
+# Specific screens-r2 files kept as bar-fix evidence
 !tmp/reviews/screens-r2/
 tmp/reviews/screens-r2/*
 !tmp/reviews/screens-r2/piece-legibility-grid.png
 !tmp/reviews/screens-r2/prod-landing-mobile.png
+!tmp/reviews/screens-r2/fix-mobile-friend-online-green-dot.png
+!tmp/reviews/screens-r2/fix-mobile-game-dot-presence.png
+!tmp/reviews/screens-r2/fix-mobile-opponent-piece-tap-no-dots.png
+!tmp/reviews/screens-r2/fix-mobile-own-piece-tap-shows-dots.png
 .DS_Store
