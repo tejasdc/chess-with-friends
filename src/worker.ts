@@ -324,10 +324,6 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname === "/api/auth/login/options" && request.method === "POST") return await this.loginOptions(request);
       if (url.pathname === "/api/auth/login/verify" && request.method === "POST") return await this.loginVerify(request);
       if (url.pathname === "/api/auth/logout" && request.method === "POST") return await this.logout(request);
-      // ONE-OFF ADMIN WIPE — Tejas-ordered destructive reset before the
-      // twochairs.club cutover so fresh signups start empty. Guarded by
-      // a shared secret; removed in the immediately-following commit.
-      if (url.pathname === "/api/admin/wipe" && request.method === "POST") return await this.wipe(request);
 
       const user = await this.requireUser(request);
       if (url.pathname === "/api/me" && request.method === "GET") return await this.me(user);
@@ -833,39 +829,6 @@ export class AppDO extends DurableObject<Env> {
     return json({ pushTypes: PUSH_TYPES, pushLog: db.pushLog, pendingPushes: db.pendingPushes });
   }
 
-  // ONE-OFF ADMIN WIPE (Tejas-ordered, 2026-08-03). Replaces the entire
-  // AppDO KV state with emptyDb(). Guarded by a fixed shared secret in
-  // the Authorization header — this endpoint MUST be removed in the
-  // immediately-following commit. Any residual value in git history is
-  // moot because the surface will no longer exist.
-  private async wipe(request: Request) {
-    const WIPE_TOKEN = "Bearer 9f3e7c1b4a8d2e6f5c9b0a7d4e1f8c2b6a3d9e0f5c8b2a1d4e7f0c9b6a3d5e2f";
-    if (request.headers.get("authorization") !== WIPE_TOKEN) {
-      return json({ ok: false, error: "Unauthorized." }, { status: 401 });
-    }
-    const before = await this.db();
-    const beforeCounts = {
-      users: Object.keys(before.users).length,
-      sessions: Object.keys(before.sessions).length,
-      friendships: Object.keys(before.friendships).length,
-      challenges: Object.keys(before.challenges).length,
-      schedules: Object.keys(before.schedules).length,
-      games: Object.keys(before.games).length,
-      pushSubscriptions: Object.keys(before.pushSubscriptions).length,
-    };
-    await this.save(emptyDb());
-    const after = await this.db();
-    const afterCounts = {
-      users: Object.keys(after.users).length,
-      sessions: Object.keys(after.sessions).length,
-      friendships: Object.keys(after.friendships).length,
-      challenges: Object.keys(after.challenges).length,
-      schedules: Object.keys(after.schedules).length,
-      games: Object.keys(after.games).length,
-      pushSubscriptions: Object.keys(after.pushSubscriptions).length,
-    };
-    return json({ ok: true, before: beforeCounts, after: afterCounts });
-  }
 }
 
 export class GameDO extends DurableObject<Env> {
