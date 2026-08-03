@@ -1,47 +1,49 @@
 <!doctype html>
 <!--
-  Tumble prototype — landing shelf transition.
+  Tumble prototype v2 — the delight budget of the landing shelf.
 
-  What Tejas approves here: the FEEL of the animation between positions.
-  On the real landing this will trigger on solve or long idle; here it
-  triggers on any drag-drop (any piece to any square). No chess.js, no
-  legality — the prototype is the animation, not the puzzle.
+  Two rules Tejas made hard:
+    1) MOVE MECHANICS ARE TAP-TAP. Tap a piece, tap a destination. No
+       drag. Identical to the production game screen. While a position
+       is live the board behaves like a real board — no wobble, no
+       physics, no ambiguity between "is this a move or a toy".
+    2) PHYSICS IS THE TRANSITION.
+       (a) TOPPLE with weight — pieces get an impulse, gravity pulls
+           them down, they slide, rotate, collide with each other and
+           with the board's walls/floor, and COME TO REST ON THE BOARD
+           in visible chaos. NOTHING DISAPPEARS off-screen.
+       (b) WALK BACK — each piece travels visibly across the board
+           into its square in the next position. Same pieces where the
+           types match (a tumbled white rook walks over to become the
+           next position's white rook); any next-position piece with
+           no leftover match walks in from the bottom edge; any
+           tumbled leftover walks off. Settle with a tiny arrival beat.
 
-  Physics only lives in the TRANSITION. While a position is live it
-  behaves like a real board: tap/drag identical to game screen, no
-  flick gestures, no wobble. On trigger the pieces tumble with weight,
-  then the next position's pieces walk themselves onto their squares
-  (each staggered from the closest board edge).
+  Self-contained; open via file:// from any browser. Cycles through
+  five public-domain positions with credit lines.
 
-  Villalba palette: mid-teal ground, cream + deep-teal squares, cream
-  chip identity, deep-ink text. No red anywhere.
-
-  Open via file:// on a Mac (Safari/Chrome/Firefox) — mouse or trackpad.
-  For phone play, `nohup python3 -m http.server 8000 --directory .` in
-  this dir and hit the LAN address — later, not required.
+  Palette LOCKED to the approved mockup D/E/F tokens (celadon ground,
+  buff + teal-dark board, navy ink, cream chip). No red.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>tumble — chess with friends landing prototype</title>
+<title>tumble — chess with friends landing prototype (v2)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
 <style>
   :root {
-    --ground: #3E8C82;
-    --paper: #E9DFA0;
-    --ink: #081a18;
-    --ink-2: #0F201E;
-    --walnut: #0F201E;
-    --walnut-2: #081a18;
-    --stone-on-ground: rgba(8, 26, 24, 0.55);
+    --ground:   #7CA898;
+    --paper:    #E8DBBE;
+    --walnut:   #5F8A7A;
+    --ink:      #2E2A3D;
+    --cream:    #EEE3C4;
+    --teak:     #8C5A2E;
+    --stone-on-ground: rgba(46, 42, 61, 0.55);
     --mono: "IBM Plex Mono", ui-monospace, monospace;
     --sans: "IBM Plex Sans", -apple-system, sans-serif;
-    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-    --ease-emp: cubic-bezier(0.34, 1.56, 0.64, 1);      /* slight overshoot */
-    --ease-in:  cubic-bezier(0.4, 0, 1, 1);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -59,7 +61,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     width: min(92vw, 92vh, 640px);
   }
   .wordmark {
@@ -75,7 +77,7 @@
   .wordmark::before {
     content: "";
     width: 9px; height: 9px;
-    background: var(--paper);
+    background: var(--cream);
     display: inline-block;
     transform: translateY(-1px);
   }
@@ -83,8 +85,7 @@
     position: relative;
     width: min(92vw, 92vh, 640px);
     aspect-ratio: 1 / 1;
-    /* stage is the animation coordinate system — pieces are absolutely
-       positioned within it. */
+    box-shadow: 0 0 0 5px var(--teak), 0 8px 22px rgba(46, 42, 61, 0.22);
   }
   .board {
     position: absolute;
@@ -92,9 +93,9 @@
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     grid-template-rows: repeat(8, 1fr);
-    border: 1px solid var(--walnut);
+    border: 1px solid var(--ink);
     z-index: 1;
-    touch-action: none;   /* pointer events, no browser gestures */
+    touch-action: none;
   }
   .sq {
     position: relative;
@@ -103,16 +104,31 @@
   }
   .sq.light { background: var(--paper); }
   .sq.dark  { background: var(--walnut); }
+  .sq.selected::after {
+    content: "";
+    position: absolute; inset: 2px;
+    border: 1.5px solid var(--ink);
+    pointer-events: none;
+  }
+  .sq.dark.selected::after { border-color: var(--cream); }
+  .sq.legal::before {
+    content: "";
+    position: absolute;
+    width: 22%; height: 22%;
+    border-radius: 50%;
+    background: var(--ink);
+    opacity: 0.85;
+  }
+  .sq.dark.legal::before { background: var(--cream); }
   .coord {
     position: absolute;
     font-family: var(--mono);
     font-size: 9px;
-    color: var(--stone-on-ground);
     pointer-events: none;
     letter-spacing: 0.04em;
   }
-  .sq.dark .coord { color: rgba(233, 223, 160, 0.7); }
-  .sq.light .coord { color: rgba(8, 26, 24, 0.55); }
+  .sq.dark .coord { color: rgba(238, 227, 196, 0.7); }
+  .sq.light .coord { color: rgba(46, 42, 61, 0.55); }
   .coord-rank { top: 2px; left: 4px; }
   .coord-file { bottom: 2px; right: 5px; text-transform: lowercase; }
 
@@ -120,32 +136,34 @@
     position: absolute;
     inset: 0;
     z-index: 2;
-    pointer-events: none;   /* board handles pointer down/up */
+    pointer-events: none;
   }
   .piece {
     position: absolute;
-    top: 0;
-    left: 0;
+    top: 0; left: 0;
     display: grid;
     place-items: center;
     font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", sans-serif;
     line-height: 1;
     user-select: none;
-    will-change: transform, opacity;
+    will-change: transform;
     transform-origin: 50% 50%;
   }
   .piece.pw {
     color: var(--paper);
     text-shadow:
-      -1px -1px 0 var(--walnut-2), 1px -1px 0 var(--walnut-2),
-      -1px  1px 0 var(--walnut-2), 1px  1px 0 var(--walnut-2);
+      -1px -1px 0 var(--ink), 1px -1px 0 var(--ink),
+      -1px  1px 0 var(--ink), 1px  1px 0 var(--ink);
   }
-  .piece.pb { color: var(--ink); }
-  .piece.walking {
-    transition: transform 900ms var(--ease-emp), opacity 400ms var(--ease-out);
+  .piece.pb {
+    color: var(--ink);
+    text-shadow:
+      -1px -1px 0 var(--cream), 1px -1px 0 var(--cream),
+      -1px  1px 0 var(--cream), 1px  1px 0 var(--cream);
   }
-  .piece.dragging { cursor: grabbing; z-index: 20; }
-  .piece[data-live="1"] { cursor: grab; }
+  .piece.selected {
+    filter: drop-shadow(0 0 3px var(--cream));
+  }
 
   .credit {
     font-family: var(--mono);
@@ -161,6 +179,7 @@
     justify-content: space-between;
     width: 100%;
     align-items: center;
+    padding-top: 4px;
   }
   .foot-hint {
     font-family: var(--sans);
@@ -172,26 +191,26 @@
     font-family: var(--mono);
     font-size: 12px;
     letter-spacing: 0.06em;
-    color: var(--ink);
-    background: transparent;
+    color: var(--paper);
+    background: var(--ink);
     border: 1px solid var(--ink);
-    padding: 8px 12px;
+    padding: 8px 14px;
     cursor: pointer;
-    transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out);
+    transition: background-color 120ms ease-out;
   }
-  .skip:hover { background: var(--ink); color: var(--paper); }
+  .skip:hover { background: #0f0d1a; }
   .skip:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
 </head>
 <body>
   <div class="frame">
-    <div class="wordmark">chess with friends · tumble prototype</div>
+    <div class="wordmark">chess with friends · tumble prototype v2</div>
     <div class="stage" id="stage">
       <div class="board" id="board"></div>
       <div class="pieces" id="pieces"></div>
     </div>
     <div class="foot">
-      <p class="foot-hint">Drag any piece to any square. Or hit Skip.</p>
+      <p class="foot-hint">Tap a piece, tap a square. Or hit Skip.</p>
       <button class="skip" id="skip">Skip →</button>
     </div>
     <div class="credit" id="credit">Starting position</div>
@@ -200,10 +219,10 @@
 <script>
 'use strict';
 
-// ---- Public-domain positions (facts about published games) ------------
 const FILLED = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 const FILES = ['a','b','c','d','e','f','g','h'];
 
+// Five public-domain positions (facts about published games).
 const POSITIONS = [
   { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR', credit: 'Starting position' },
   { fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR', credit: "Fool's mate, 1836" },
@@ -220,11 +239,10 @@ const stage = document.getElementById('stage');
 
 let posIndex = 0;
 let animating = false;
-let livePieces = [];              // { el, sq, color, type, x, y }
-let sqSize = 0;                   // computed
-let dragState = null;             // { el, offsetX, offsetY, startSq }
+let livePieces = [];   // { el, sq, color, type, char, x, y, rot }
+let sqSize = 0;
+let selected = null;
 
-// ---- Setup board squares ------------------------------------------------
 function buildBoardSquares() {
   board.innerHTML = '';
   for (let r = 8; r >= 1; r--) {
@@ -234,15 +252,13 @@ function buildBoardSquares() {
       const cell = document.createElement('div');
       cell.className = 'sq ' + (dark ? 'dark' : 'light');
       cell.dataset.sq = file + r;
-      const showFile = r === 1;
-      const showRank = f === 0;
-      if (showRank) {
+      if (f === 0) {
         const c = document.createElement('span');
         c.className = 'coord coord-rank';
         c.textContent = String(r);
         cell.appendChild(c);
       }
-      if (showFile) {
+      if (r === 1) {
         const c = document.createElement('span');
         c.className = 'coord coord-file';
         c.textContent = file;
@@ -253,7 +269,6 @@ function buildBoardSquares() {
   }
 }
 
-// FEN row -> array of 8 chars (spaces for empty).
 function expandFenRow(row) {
   let out = '';
   for (const ch of row) {
@@ -264,7 +279,7 @@ function expandFenRow(row) {
 }
 function fenToBoardArray(fen) {
   const rows = fen.split(' ')[0].split('/');
-  const arr = [];       // [{ file, rank, char }]
+  const arr = [];
   for (let r = 0; r < 8; r++) {
     const line = expandFenRow(rows[r]);
     for (let f = 0; f < 8; f++) {
@@ -276,50 +291,37 @@ function fenToBoardArray(fen) {
   return arr;
 }
 
-// Given a square (e.g. "e4"), return {x, y} at the square's top-left in
-// stage coordinates. Board is (0,0) to (8*sqSize, 8*sqSize).
 function squareToXY(sq) {
-  const file = sq.charCodeAt(0) - 97; // a=0
-  const rank = Number(sq[1]);          // 1..8
-  return { x: file * sqSize, y: (8 - rank) * sqSize };
-}
-function xyToSquare(x, y) {
-  const file = Math.max(0, Math.min(7, Math.floor(x / sqSize)));
-  const rank = 8 - Math.max(0, Math.min(7, Math.floor(y / sqSize)));
-  return FILES[file] + rank;
+  const f = sq.charCodeAt(0) - 97;
+  const r = Number(sq[1]);
+  return { x: f * sqSize, y: (8 - r) * sqSize };
 }
 
 function updateSqSize() {
   const rect = stage.getBoundingClientRect();
   sqSize = rect.width / 8;
-  document.documentElement.style.setProperty('--sq-size', sqSize + 'px');
-  // Update all pieces' size + font-size
   for (const p of livePieces) {
     p.el.style.width = sqSize + 'px';
     p.el.style.height = sqSize + 'px';
     p.el.style.fontSize = Math.round(sqSize * 0.74) + 'px';
-    // Update transform to reflect new xy for its square
     const { x, y } = squareToXY(p.sq);
-    p.x = x; p.y = y;
-    p.el.style.transform = `translate(${x}px, ${y}px) rotate(0deg)`;
+    p.x = x; p.y = y; p.rot = 0;
+    p.el.style.transform = `translate(${x}px, ${y}px) rotate(0rad)`;
   }
 }
 window.addEventListener('resize', updateSqSize);
 
-// ---- Piece factory ------------------------------------------------------
 function createPieceEl(char) {
   const el = document.createElement('div');
   const isWhite = char === char.toUpperCase();
   el.className = 'piece ' + (isWhite ? 'pw' : 'pb');
   el.textContent = FILLED[char.toLowerCase()];
-  el.dataset.live = '1';
   el.style.width = sqSize + 'px';
   el.style.height = sqSize + 'px';
   el.style.fontSize = Math.round(sqSize * 0.74) + 'px';
   return el;
 }
 
-// ---- Render position ----------------------------------------------------
 function renderPosition(idx) {
   const pos = POSITIONS[idx];
   creditEl.textContent = pos.credit;
@@ -329,215 +331,316 @@ function renderPosition(idx) {
   for (const p of arr) {
     const el = createPieceEl(p.char);
     const { x, y } = squareToXY(p.file + p.rank);
-    el.style.transform = `translate(${x}px, ${y}px) rotate(0deg)`;
+    el.style.transform = `translate(${x}px, ${y}px) rotate(0rad)`;
     piecesLayer.appendChild(el);
-    livePieces.push({ el, sq: p.file + p.rank, color: p.char === p.char.toUpperCase() ? 'w' : 'b', type: p.char.toLowerCase(), x, y });
+    livePieces.push({
+      el, sq: p.file + p.rank,
+      color: p.char === p.char.toUpperCase() ? 'w' : 'b',
+      type: p.char.toLowerCase(),
+      char: p.char,
+      x, y, rot: 0,
+    });
   }
-}
-
-// ---- Drag interaction ---------------------------------------------------
-board.addEventListener('pointerdown', onPointerDown);
-window.addEventListener('pointermove', onPointerMove);
-window.addEventListener('pointerup',   onPointerUp);
-window.addEventListener('pointercancel', onPointerUp);
-
-function stageXY(e) {
-  const r = stage.getBoundingClientRect();
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
 function pieceAt(sq) {
   return livePieces.find(p => p.sq === sq);
 }
+function clearSelection() {
+  if (selected) {
+    board.querySelector(`[data-sq="${selected}"]`)?.classList.remove('selected');
+    for (const el of board.querySelectorAll('.legal')) el.classList.remove('legal');
+    const p = pieceAt(selected);
+    if (p) p.el.classList.remove('selected');
+  }
+  selected = null;
+}
+function markLegalMovesFrom(sq) {
+  const from = pieceAt(sq);
+  if (!from) return;
+  for (let r = 1; r <= 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      const target = FILES[f] + r;
+      if (target === sq) continue;
+      const there = pieceAt(target);
+      if (!there || there.color !== from.color) {
+        board.querySelector(`[data-sq="${target}"]`)?.classList.add('legal');
+      }
+    }
+  }
+}
 
-function onPointerDown(e) {
+// TAP-TAP mechanics (identical to production game screen).
+board.addEventListener('click', (e) => {
   if (animating) return;
-  const { x, y } = stageXY(e);
-  if (x < 0 || y < 0 || x >= sqSize * 8 || y >= sqSize * 8) return;
-  const sq = xyToSquare(x, y);
-  const p = pieceAt(sq);
-  if (!p) return;
-  e.preventDefault();
-  dragState = {
-    piece: p,
-    grabDX: x - p.x,   // where inside the piece the finger grabbed
-    grabDY: y - p.y,
-  };
-  p.el.classList.add('dragging');
-  p.el.style.zIndex = '20';
-}
-
-function onPointerMove(e) {
-  if (!dragState) return;
-  const { x, y } = stageXY(e);
-  const nx = x - dragState.grabDX;
-  const ny = y - dragState.grabDY;
-  dragState.piece.el.style.transform = `translate(${nx}px, ${ny}px) rotate(0deg)`;
-}
-
-function onPointerUp(e) {
-  if (!dragState) return;
-  const { x, y } = stageXY(e);
-  const p = dragState.piece;
-  p.el.classList.remove('dragging');
-  dragState = null;
-  // Drop target (any square counts as "solved" for prototype).
-  const inside = x >= 0 && y >= 0 && x < sqSize * 8 && y < sqSize * 8;
-  if (!inside) {
-    // snap back
-    p.el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(0deg)`;
+  const cell = e.target.closest('.sq');
+  if (!cell) return;
+  const sq = cell.dataset.sq;
+  if (!selected) {
+    if (!pieceAt(sq)) return;
+    selected = sq;
+    cell.classList.add('selected');
+    pieceAt(sq).el.classList.add('selected');
+    markLegalMovesFrom(sq);
     return;
   }
-  const targetSq = xyToSquare(x, y);
-  if (targetSq === p.sq) {
-    // returned to origin — no-op
-    p.el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(0deg)`;
+  if (sq === selected) { clearSelection(); return; }
+  const there = pieceAt(sq);
+  const from = pieceAt(selected);
+  if (there && there.color === from.color) {
+    clearSelection();
+    selected = sq;
+    cell.classList.add('selected');
+    there.el.classList.add('selected');
+    markLegalMovesFrom(sq);
     return;
   }
-  // "Solved" — snap to target then trigger transition.
-  const { x: tx, y: ty } = squareToXY(targetSq);
-  p.el.classList.add('walking');
-  p.el.style.transform = `translate(${tx}px, ${ty}px) rotate(0deg)`;
-  p.x = tx; p.y = ty; p.sq = targetSq;
-  setTimeout(() => transitionToNext(), 380);
-}
+  const fromPiece = pieceAt(selected);
+  if (there) {
+    there.el.remove();
+    livePieces = livePieces.filter(p => p !== there);
+  }
+  fromPiece.sq = sq;
+  const { x, y } = squareToXY(sq);
+  fromPiece.x = x; fromPiece.y = y;
+  fromPiece.el.style.transition = 'transform 180ms cubic-bezier(0.16, 1, 0.3, 1)';
+  fromPiece.el.style.transform = `translate(${x}px, ${y}px) rotate(0rad)`;
+  clearSelection();
+  setTimeout(() => {
+    fromPiece.el.style.transition = '';
+    transitionToNext();
+  }, 220);
+});
 
 skipBtn.addEventListener('click', () => {
   if (animating) return;
+  clearSelection();
   transitionToNext();
 });
 
-// ---- Tumble + walk transition -------------------------------------------
-async function transitionToNext() {
-  if (animating) return;
-  animating = true;
-  skipBtn.disabled = true;
-
-  await tumbleCurrent();
-  posIndex = (posIndex + 1) % POSITIONS.length;
-  await walkInNext();
-
-  animating = false;
-  skipBtn.disabled = false;
-}
-
-// Tumble: each piece gets random velocity + rotation, gravity pulls down,
-// fades to 0 as it falls off. Duration ~900ms.
-function tumbleCurrent() {
+// ---- Physics tumble — TOP-DOWN spilled-marbles model.
+//
+// The board is viewed from above, so "gravity" is not the physics that
+// makes pieces topple. What we want is a shove — the board gets a jolt,
+// pieces slide across the wood, collide with each other and with the
+// frame, and drag brings them to rest scattered across all eight ranks
+// (NOT piled at one edge like the first attempt).
+//
+// Impulse composition per piece:
+//   outward-radial from board center  — the "explosion" moment
+//   large random tangential jitter    — nothing lines up too neatly
+//   angular velocity                  — visible tumble on the way out
+// Friction is high (0.984 per ms) so motion visibly slows and stops
+// within ~1500ms. Bounces on all four walls (they are the teak frame).
+function tumble() {
   return new Promise((resolve) => {
-    const start = performance.now();
-    const DURATION = 900;
-    const GRAV = 0.0018;    // px per ms^2 (scaled to sq units)
-    const g = GRAV * sqSize * 8; // gravity in stage units
+    const bounds = { w: sqSize * 8, h: sqSize * 8 };
+    const cx = bounds.w / 2, cy = bounds.h / 2;
     const state = livePieces.map(p => {
-      // Random horizontal spread; downward + slight up initial (like tipped)
-      const vx = (Math.random() - 0.5) * sqSize * 0.008;
-      const vy = -sqSize * 0.002 * Math.random();
-      const vr = (Math.random() - 0.5) * 0.008;   // radians per ms
-      // Remove transitions so we can drive transform directly.
-      p.el.classList.remove('walking');
-      p.el.style.transition = 'none';
-      return { p, vx, vy, vr, x: p.x, y: p.y, r: 0 };
+      const px = p.x + sqSize / 2, py = p.y + sqSize / 2;
+      const dx = px - cx, dy = py - cy;
+      const dist = Math.max(sqSize * 0.5, Math.sqrt(dx * dx + dy * dy));
+      const nx = dx / dist, ny = dy / dist;
+      const impulseOut = sqSize * (0.028 + Math.random() * 0.020);
+      const jitterMag  = sqSize * 0.022;
+      return {
+        p, x: px, y: py,
+        vx: nx * impulseOut + (Math.random() - 0.5) * jitterMag,
+        vy: ny * impulseOut + (Math.random() - 0.5) * jitterMag,
+        rot: p.rot,
+        vr: (Math.random() - 0.5) * 0.020,
+        r: sqSize * 0.34,
+      };
     });
 
-    function frame(now) {
-      const t = now - start;
-      const dt = Math.min(32, t - (frame.last ?? start));
-      frame.last = now;
+    // Per-MS damping. Want energy to visibly decay across ~1500ms of
+    // tumble, so a piece that starts fast is still moving when it hits
+    // its second neighbour. LINEAR^1500 ≈ 0.03 → LINEAR ≈ 0.9977.
+    const LINEAR_DAMPING = 0.9977;
+    const ANGULAR_DAMPING = 0.9968;
+    const WALL_RESTITUTION = 0.62;
+    const REST_SPEED = sqSize * 0.0004;
+    const DURATION = 1700;
+
+    const start = performance.now();
+    let last = start;
+
+    function step(now) {
+      const dt = Math.min(32, now - last);
+      last = now;
+
+      // Per-ms friction: use LINEAR_DAMPING^dt so friction scales with
+      // frame time rather than jumping every render.
+      const frameDamp = Math.pow(LINEAR_DAMPING, dt);
+      const frameAngDamp = Math.pow(ANGULAR_DAMPING, dt);
       for (const s of state) {
-        s.vy += g * dt / 1000;   // gravity in px/s
+        s.vx *= frameDamp;
+        s.vy *= frameDamp;
+        s.vr *= frameAngDamp;
         s.x  += s.vx * dt;
         s.y  += s.vy * dt;
-        s.r  += s.vr * dt;
-        s.p.el.style.transform = `translate(${s.x}px, ${s.y}px) rotate(${s.r}rad)`;
+        s.rot += s.vr * dt;
+
+        if (s.x - s.r < 0)          { s.x = s.r;             s.vx = -s.vx * WALL_RESTITUTION; }
+        if (s.x + s.r > bounds.w)   { s.x = bounds.w - s.r;  s.vx = -s.vx * WALL_RESTITUTION; }
+        if (s.y - s.r < 0)          { s.y = s.r;             s.vy = -s.vy * WALL_RESTITUTION; }
+        if (s.y + s.r > bounds.h)   { s.y = bounds.h - s.r;  s.vy = -s.vy * WALL_RESTITUTION; }
+
+        // Hard rest snap once motion falls under threshold — no jitter.
+        if (Math.abs(s.vx) < REST_SPEED && Math.abs(s.vy) < REST_SPEED) {
+          s.vx = 0; s.vy = 0;
+        }
       }
-      // Fade in the last third
-      if (t > DURATION * 0.4) {
-        const fadeT = (t - DURATION * 0.4) / (DURATION * 0.6);
-        for (const s of state) s.p.el.style.opacity = String(Math.max(0, 1 - fadeT));
+
+      // Pairwise collisions (32 bodies = ~500 pair checks, trivial).
+      for (let i = 0; i < state.length; i++) {
+        for (let j = i + 1; j < state.length; j++) {
+          const a = state[i], b = state[j];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const minDist = a.r + b.r;
+          if (dist < minDist && dist > 0.001) {
+            const overlap = (minDist - dist) / 2;
+            const nx = dx / dist, ny = dy / dist;
+            a.x -= nx * overlap; a.y -= ny * overlap;
+            b.x += nx * overlap; b.y += ny * overlap;
+            const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+            const vn = rvx * nx + rvy * ny;
+            if (vn < 0) {
+              const restitution = 0.35;
+              const jimp = -(1 + restitution) * vn / 2;
+              a.vx -= jimp * nx; a.vy -= jimp * ny;
+              b.vx += jimp * nx; b.vy += jimp * ny;
+              a.vr -= (Math.random() - 0.5) * 0.003;
+              b.vr += (Math.random() - 0.5) * 0.003;
+            }
+          }
+        }
       }
-      if (t < DURATION) requestAnimationFrame(frame);
-      else {
-        // Clean up: hide all
-        for (const s of state) s.p.el.remove();
-        livePieces = [];
-        resolve();
+
+      for (const s of state) {
+        const tx = s.x - sqSize / 2;
+        const ty = s.y - sqSize / 2;
+        s.p.el.style.transform = `translate(${tx}px, ${ty}px) rotate(${s.rot}rad)`;
+        s.p.x = tx; s.p.y = ty; s.p.rot = s.rot;
       }
+
+      const elapsed = now - start;
+      if (elapsed < DURATION) requestAnimationFrame(step);
+      else resolve();
     }
-    requestAnimationFrame(frame);
+    requestAnimationFrame(step);
   });
 }
 
-// Walk-in: for each piece in the next position, spawn at the CLOSEST board
-// edge and animate to the target square with a small overshoot. Stagger by
-// distance from that edge so bottom-rank arrivals settle first.
-function walkInNext() {
+// ---- Walk back: tumbled pieces travel to next-position squares ---------
+function walkBack() {
   return new Promise((resolve) => {
     const pos = POSITIONS[posIndex];
     creditEl.textContent = pos.credit;
     const arr = fenToBoardArray(pos.fen);
 
-    // Compute for each piece: startXY (edge), endXY (target square), delay.
-    const specs = arr.map(p => {
-      const sq = p.file + p.rank;
-      const end = squareToXY(sq);
-      // Enter from bottom edge (like players setting up a physical set).
-      // startX = target column, startY = below board
-      const start = { x: end.x, y: sqSize * 9 };
-      // Delay: bottom-rank first (higher rank number = later)
-      const delay = (8 - p.rank) * 60 + (p.file.charCodeAt(0) - 97) * 8;
-      return { p, sq, start, end, delay };
-    });
-
-    // Insert pieces at their start positions with 0 opacity, THEN in the
-    // next frame apply the walking class + target transform so the
-    // transition kicks off.
-    for (const s of specs) {
-      const el = createPieceEl(s.p.char);
-      el.style.opacity = '0';
-      el.style.transform = `translate(${s.start.x}px, ${s.start.y}px) rotate(0deg)`;
-      piecesLayer.appendChild(el);
-      livePieces.push({ el, sq: s.sq, color: s.p.char === s.p.char.toUpperCase() ? 'w' : 'b', type: s.p.char.toLowerCase(), x: s.end.x, y: s.end.y });
-      s.el = el;
-    }
-
-    // Two rAFs to guarantee the initial transform is committed.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      for (const s of specs) {
-        s.el.style.transition = `transform 900ms ${getComputedStyle(document.documentElement).getPropertyValue('--ease-emp')} ${s.delay}ms, opacity 500ms var(--ease-out) ${s.delay}ms`;
-        s.el.style.opacity = '1';
-        s.el.style.transform = `translate(${s.end.x}px, ${s.end.y}px) rotate(0deg)`;
-      }
+    const targets = arr.map(p => ({
+      sq: p.file + p.rank,
+      color: p.char === p.char.toUpperCase() ? 'w' : 'b',
+      type: p.char.toLowerCase(),
+      char: p.char,
+      end: squareToXY(p.file + p.rank),
+      assigned: null,
     }));
 
-    // Total time = max delay + 900ms + small buffer
-    const maxDelay = Math.max(...specs.map(s => s.delay));
+    const available = livePieces.slice();
+    for (const t of targets) {
+      let bestIdx = -1, bestDist = Infinity;
+      for (let i = 0; i < available.length; i++) {
+        const p = available[i];
+        if (!p || p.color !== t.color || p.type !== t.type) continue;
+        const dx = (p.x + sqSize/2) - (t.end.x + sqSize/2);
+        const dy = (p.y + sqSize/2) - (t.end.y + sqSize/2);
+        const d = dx*dx + dy*dy;
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+      }
+      if (bestIdx >= 0) {
+        t.assigned = available[bestIdx];
+        available[bestIdx] = null;
+      }
+    }
+
+    // Spawn new pieces for targets with no leftover match.
+    const spawnY = sqSize * 8 + sqSize * 0.6;
+    for (const t of targets) {
+      if (t.assigned) continue;
+      const el = createPieceEl(t.char);
+      el.style.transform = `translate(${t.end.x}px, ${spawnY}px) rotate(0rad)`;
+      piecesLayer.appendChild(el);
+      const spawned = {
+        el, sq: null, color: t.color, type: t.type, char: t.char,
+        x: t.end.x, y: spawnY, rot: 0,
+      };
+      livePieces.push(spawned);
+      t.assigned = spawned;
+    }
+
+    const stragglers = livePieces.filter(p => !targets.some(t => t.assigned === p));
+
+    const rowDelay = (rank) => (8 - rank) * 55;
+    const fileDelay = (file) => (file.charCodeAt(0) - 97) * 10;
+    const WALK_MS = 950;
+
+    for (const t of targets) t.assigned.el.style.transition = 'none';
+    for (const p of stragglers) p.el.style.transition = 'none';
+    void piecesLayer.offsetHeight;
+
+    for (const t of targets) {
+      const p = t.assigned;
+      const delay = rowDelay(Number(t.sq[1])) + fileDelay(t.sq[0]);
+      p.el.style.transition = `transform ${WALK_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1) ${delay}ms`;
+      p.el.style.transform = `translate(${t.end.x}px, ${t.end.y}px) rotate(0rad)`;
+      p.x = t.end.x; p.y = t.end.y; p.rot = 0; p.sq = t.sq;
+    }
+    for (const p of stragglers) {
+      p.el.style.transition = `transform ${WALK_MS}ms cubic-bezier(0.4, 0, 0.9, 0.4) 0ms`;
+      p.el.style.transform = `translate(${p.x}px, ${spawnY + sqSize * 2}px) rotate(${p.rot + 0.5}rad)`;
+    }
+
+    const maxDelay = 8 * 55 + 8 * 10 + WALK_MS + 60;
     setTimeout(() => {
-      // Clean up transitions so future drags don't inherit them.
+      for (const p of stragglers) p.el.remove();
+      livePieces = livePieces.filter(p => !stragglers.includes(p));
       for (const p of livePieces) p.el.style.transition = '';
       resolve();
-    }, maxDelay + 950);
+    }, maxDelay);
   });
 }
 
-// ---- Boot ---------------------------------------------------------------
+async function transitionToNext() {
+  if (animating) return;
+  animating = true;
+  skipBtn.disabled = true;
+
+  await tumble();
+  await new Promise(r => setTimeout(r, 240));   // beat between tumble-rest + walk-back
+  posIndex = (posIndex + 1) % POSITIONS.length;
+  await walkBack();
+
+  animating = false;
+  skipBtn.disabled = false;
+  bumpIdle();
+}
+
 buildBoardSquares();
 updateSqSize();
 renderPosition(0);
 
-// Idle reset — if the shelf sits untouched for 25s AND we're not mid-
-// transition AND no piece is being dragged, advance to the next position.
-// Every interaction bumps the timer.
 let idleTimer = null;
 const IDLE_MS = 25_000;
 function bumpIdle() {
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    if (!animating && !dragState) transitionToNext();
+    if (!animating) transitionToNext();
   }, IDLE_MS);
 }
 document.addEventListener('pointerdown', bumpIdle);
-document.addEventListener('pointerup', bumpIdle);
 bumpIdle();
 </script>
 </body>
