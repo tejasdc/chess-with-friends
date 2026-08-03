@@ -1094,8 +1094,31 @@ export default {
     if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/_auth/")) return appStub(env).fetch(await requestForDo(request));
 
     const asset = await env.ASSETS.fetch(request);
-    if (asset.status !== 404) return asset;
+    if (asset.status !== 404) return withCacheHeaders(asset, url.pathname);
+    // SPA fallback for client-side routes — always the HTML shell, which
+    // must revalidate on every load so a deploy reaches phones on next
+    // reload (Tejas's Safari served the old notice UI post-toast-deploy).
     const indexUrl = new URL("/", request.url);
-    return env.ASSETS.fetch(new Request(indexUrl, request));
+    const shell = await env.ASSETS.fetch(new Request(indexUrl, request));
+    return withCacheHeaders(shell, "/");
   },
 };
+
+// Cache policy — Workers Assets defaults to `max-age=0, must-revalidate`
+// on everything, but Safari (esp. inside a PWA / from a home-screen
+// launch) treats that as "cache aggressively with heuristics" without an
+// explicit `no-cache`. Explicit `no-cache` forces the revalidation to
+// happen. Hashed bundles under /assets/* are content-addressed, so they
+// can cache forever with `immutable`.
+function withCacheHeaders(res: Response, pathname: string): Response {
+  const headers = new Headers(res.headers);
+  const isImmutable = pathname.startsWith("/assets/");
+  headers.set(
+    "Cache-Control",
+    isImmutable
+      ? "public, max-age=31536000, immutable"
+      : "no-cache, must-revalidate",
+  );
+  if (!isImmutable) headers.set("Pragma", "no-cache");
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}

@@ -445,20 +445,29 @@ function AuthScreen({
       }
       await onSignedIn();
     } catch (error) {
+      // Error taxonomy — never surface raw platform text. Tejas hit the
+      // verbatim WebAuthn "The request is not allowed by the user agent
+      // or the platform in the current context…" in the toast, which
+      // reads as broken software.
+      //
+      // 1. NotAllowedError (WebAuthn cancel / dismiss / timeout) —
+      //    almost always intentional. Silence is correct.
+      // 2. Any other DOMException or platform-shaped error — short
+      //    human line. Never the platform's own words.
+      // 3. Regular Error from api() — the server message is already
+      //    human-readable ("No account with that handle."). Surface it.
+      const name = error instanceof Error ? error.name : "";
       const msg = error instanceof Error ? error.message : "";
-      // WebAuthn cancel / no-credential recovery. If Sarah typed a taken
-      // handle, tapped "Sign in as @sarah" (the morph mask), then the OS
-      // sheet showed nothing / she cancelled, spell out both branches so
-      // she has a path either way.
-      const isCancel = error instanceof Error && /NotAllowedError|not allowed|cancel|abort|no.*credential/i.test((error.name || "") + " " + msg);
-      if (decided === "login" && isCancel) {
-        setMessage(
-          `No passkey for @${handle} on this device. Yours? Retry and use the phone/QR option. Not yours? The handle's taken — pick another.`,
-          "error",
-        );
-      } else {
-        setMessage(msg || "Sign in failed.", "error");
+      const isNotAllowed = name === "NotAllowedError" || /not allowed by the user agent/i.test(msg);
+      if (isNotAllowed) return;   // silence
+      const isPlatform = error instanceof DOMException
+        || /^(Not|Invalid|Security|Timeout|Constraint|Abort|Unknown)[A-Z][A-Za-z]*Error$/.test(name)
+        || /\bDOMException\b/i.test(msg);
+      if (isPlatform) {
+        setMessage("Sign in failed. Try again.", "error");
+        return;
       }
+      setMessage(msg || "Sign in failed.", "error");
     } finally {
       setBusy(false);
     }
@@ -518,16 +527,9 @@ function AuthScreen({
               {buttonLabel}
             </button>
           </div>
-          {/* Reserved subline — one muted line under the row. Only populated
-              when the probe says the handle is taken (Sarah's case: she
-              types "sarah", sees it's owned, doesn't get funneled into a
-              stranger's passkey sheet). Height is always reserved so the
-              row doesn't bounce as the probe result arrives. */}
-          <p className="auth-subline" aria-live="polite">
-            {flow === "login" && trimmedHandle
-              ? <>New here? This handle's taken — try another.</>
-              : null}
-          </p>
+          {/* Taken-handle UX is being rethought per Tejas's countermand —
+              no subline / no recovery toast until that directive lands.
+              The morphing button label stays. */}
         </form>
       </section>
     </Shell>
