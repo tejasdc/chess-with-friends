@@ -1,31 +1,28 @@
 <!doctype html>
 <!--
-  Chess-with-friends landing prototype v4 — the WALK transition.
+  Chess-with-friends landing prototype v5 — GRID walk.
 
-  Tejas played v3 and cut the chaos. Verdict: the walk-back reads
-  well; the tumble scatter was too much ("he just goes crazy"). So
-  v4 is walk-only:
+  Tejas played v4. His words:
+    "The jumping around is fine but I don't think I'd like the
+     jumping. What I actually like is the pawns kind of TRACING
+     BACK THEIR STEPS — not just bopping around."
 
-    1) TAP-TAP MECHANICS. Tap a piece, tap a destination. Zero drag,
-       zero wobble while a position is live. chess.js legality
-       (inlined, so file:// works fully offline).
+  So v5 is a walk on the grid — no bezier arcs, no footstep bob, no
+  tilt. Pieces move square-by-square via Manhattan routing, files
+  then ranks or ranks then files (per-piece variation), with a
+  clean glide per square that eases in and out so each square-
+  crossing reads as a step. Same tap-tap play, same inlined
+  chess.js, same tray. Two additions Tejas asked for:
 
-    2) WALK TRANSITION. On solve, on Skip, or after ~25s idle: no
-       topple, no physics, no chaos rest state. Each piece just walks
-       — at a deliberate pace — from its current square directly to
-       its next-position square. Per-piece gait (curved bezier path
-       with a small perpendicular arc, footstep bob and tilt that
-       taper at both ends, arrival settle beat), staggered starts by
-       target rank plus per-piece jitter.
+    A) SLOWER. Speed dropped again — unhurried.
+    B) SIDE-TO-MOVE LABELLED in the caption ("WHITE TO MOVE ·
+       RÉTI 1921"), so single-move puzzles don't leave the player
+       poking dead pieces.
 
-    3) STRAGGLERS + INCOMERS. Pieces the next position doesn't need
-       walk OFF the board to a captured tray beside it (whites below,
-       navies above), and rest there visibly. Any tray pieces the
-       next position DOES need walk back onto the board from the
-       tray. Nothing ever fades or leaves the screen.
-
-  Five real, cited positions with credit lines. Cycles on completed
-  move, on Skip, or after ~25s idle. Self-contained; open via file://.
+  Also fixed the two saved FENs that stored the AFTER-mate
+  position (Fool's Mate, Scholar's Mate) — the side to move had no
+  legal moves, so every tap silently failed. Replaced with the
+  one-move-before FEN so the puzzle is actually playable.
 
   Palette LOCKED to mockup D/E/F: celadon ground, buff + teal-dark
   squares, navy ink + cream chip, teak frame. No red.
@@ -34,7 +31,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>walk — chess with friends landing prototype (v4)</title>
+<title>grid walk — chess with friends landing prototype (v5)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
@@ -221,6 +218,9 @@ window.Chess = Chess;
   .piece.selected {
     filter: drop-shadow(0 0 6px rgba(238, 227, 196, 0.9));
   }
+  .piece.stuck {
+    filter: drop-shadow(0 0 4px rgba(46, 42, 61, 0.35));
+  }
 
   .credit {
     font-family: var(--mono);
@@ -260,7 +260,7 @@ window.Chess = Chess;
 </head>
 <body>
   <div class="frame">
-    <div class="wordmark">chess with friends · walk transition v4</div>
+    <div class="wordmark">chess with friends · grid walk v5</div>
     <div class="stage" id="stage">
       <div class="board-frame">
         <div class="board" id="board"></div>
@@ -285,12 +285,18 @@ window.Chess = Chess;
 const FILLED = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 const FILES = ['a','b','c','d','e','f','g','h'];
 
+// Each position stores the FEN ONE MOVE BEFORE the mate/solution
+// where relevant, so the side to move actually has a move to make.
+// If a position is stored at the checkmate itself, `game.moves()` is
+// empty for every square and the puzzle silently dies.
 const POSITIONS = [
   { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
     credit: 'Starting position' },
-  { fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3',
+  // After 1. f3 e5 2. g4 — black to play Qh4# (or anything else).
+  { fen: 'rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2',
     credit: "Fool's mate — 1836" },
-  { fen: 'r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4',
+  // After 1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 — white to play Qxf7#.
+  { fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4',
     credit: "Scholar's mate — 1656 pattern" },
   { fen: '4rrk1/pR5p/6p1/8/1n2Q3/8/PP4PP/6K1 w - - 0 1',
     credit: "Anastasia's mate — pattern" },
@@ -368,6 +374,43 @@ function newGame(fen) {
     try { return new ChessCtor(fen); } catch (e) { /* fall through */ }
   }
   return makeFallbackGame(fen);
+}
+
+// Credit line for the position, prefixed with which side responds to
+// taps. Without this, single-move puzzles leave players poking pieces
+// of the wrong color and getting silent no-ops — the caption is the
+// only cue that says "only these pieces are yours right now".
+// The .credit CSS already text-transforms to uppercase.
+function formatCredit(pos, g) {
+  const side = g.turn() === 'w' ? 'White to move' : 'Black to move';
+  return side + ' · ' + pos.credit;
+}
+
+// Micro-wobble driven per-frame so it composes with the piece's live
+// positioning transform (a pure CSS keyframe would clobber the piece's
+// square position). Amplitude and duration are tiny — this is a nudge,
+// not a shake.
+function wobbleStuck(piece) {
+  const el = piece.el;
+  el.classList.add('stuck');
+  const start = performance.now();
+  const DUR = 360;
+  const AMP = 4;   // radians × piece not — this is a rotation amp
+  const baseTx = piece.x;
+  const baseTy = piece.y;
+  function tick(now) {
+    const t = (now - start) / DUR;
+    if (t >= 1) {
+      el.style.transform = `translate(${baseTx.toFixed(2)}px, ${baseTy.toFixed(2)}px) rotate(0deg)`;
+      el.classList.remove('stuck');
+      return;
+    }
+    // One-and-a-half cycle sine, gently damped so it eases out.
+    const angleDeg = Math.sin(t * Math.PI * 1.5) * AMP * (1 - t);
+    el.style.transform = `translate(${baseTx.toFixed(2)}px, ${baseTy.toFixed(2)}px) rotate(${angleDeg.toFixed(2)}deg)`;
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
 }
 
 function makeFallbackGame(initialFen) {
@@ -504,7 +547,7 @@ function placeLiveAtSquare(p) {
 function renderPosition(idx) {
   const pos = POSITIONS[idx];
   game = newGame(pos.fen);
-  creditEl.textContent = pos.credit;
+  creditEl.textContent = formatCredit(pos, game);
   piecesLayer.innerHTML = '';
   livePieces = [];
   trayPieces = [];
@@ -544,7 +587,18 @@ function clearSelection() {
 
 function selectSquare(sq) {
   const moves = game.moves({ square: sq, verbose: true });
-  if (!moves.length) { clearSelection(); return false; }
+  if (!moves.length) {
+    // Own-color piece that legitimately has no legal moves (blocked
+    // by its own pieces, pinned, etc.). Silent no-op reads as "the
+    // tap didn't register" — drive a brief wobble in JS so at least
+    // SOMETHING acknowledges the tap and the player learns that piece
+    // is stuck. Can't do a pure CSS keyframe here because the piece
+    // element carries its own live positioning transform.
+    const piece = livePieces.find(p => p.sq === sq);
+    if (piece) wobbleStuck(piece);
+    clearSelection();
+    return false;
+  }
   clearSelection();
   selected = sq;
   const cell = board.querySelector(`[data-sq="${sq}"]`);
@@ -617,42 +671,28 @@ skipBtn.addEventListener('click', () => {
 });
 
 // -------------------------------------------------------------------------
-// WALK TRANSITION — every piece walks from its CURRENT square to its
-// next-position square (or to a slot in the captured tray if the next
-// position doesn't need it). No preceding tumble; no chaos. Just the
-// walk.
+// WALK TRANSITION — v5 grid walk. Every piece traces a Manhattan path
+// from its current square to its next-position square (or to a slot in
+// the tray if the next position doesn't need it). No bob, no tilt, no
+// bezier arc. The delight is that the pieces "trace back their steps"
+// on the grid — file-then-rank or rank-then-file, chosen per piece so
+// they don't all corner at the same square. Ease-in-out per segment
+// puts a natural pause at each square boundary without needing an
+// explicit bounce.
 //
-// v4 removed v3's tumble entirely per Tejas's judgment ("goes crazy").
-// The stand-up phase is still here as a no-op envelope (angle=0 → 0)
-// because piece rotation is 0 for live pieces; if any piece ever has
-// a nonzero rot (from a future variant), it would still resolve
-// cleanly.
+// Stagger is by target rank (far rank walks first). Larger per-piece
+// jitter than v4 (0–220ms) so the crowd doesn't march in step. Slower
+// pace: 360ms per square, capped at 6 segments (some tray walks are
+// long).
 //
-//   Phase 1 (0 → STAND_MS):   rotate from current angle → 0 with an
-//                             ease-out. No-op for pieces standing on
-//                             their squares (rot=0 → 0).
-//   Phase 2 (STAND_MS → END): travel from current center to
-//                             destination center along a slightly
-//                             curved bezier, with:
-//                             • vertical bob at footstep cadence,
-//                               tapered at both ends of the trip
-//                             • rotation tilt swinging with the bob,
-//                               tapered at both ends
-//   Phase 3 (last SETTLE_MS): scale beats 96% → 100% (arrival settle).
-//
-// Stagger is by rank: far rank starts first so pieces on nearer ranks
-// don't obscure a piece walking behind them. Small per-piece jitter
-// keeps the crowd from marching in lockstep.
-//
-// Stragglers (pieces the next position doesn't need) walk to the
-// captured tray, which is the celadon strip above the board (the y
-// coordinate is boardY - sqSize * 0.6, cream in one row, navy in
-// another). They stay visible on the ground — never off-screen.
+// Stragglers walk to the tray (whites below the board, navies above)
+// and rest there visibly — never off-screen. Any tray pieces the next
+// position calls for walk back onto the board.
 // -------------------------------------------------------------------------
 function walkTransition() {
   return new Promise((resolve) => {
     const pos = POSITIONS[posIndex];
-    creditEl.textContent = pos.credit;
+    creditEl.textContent = formatCredit(pos, game);
     const arr = fenToBoardArray(pos.fen);
 
     // Build target list.
@@ -707,45 +747,99 @@ function walkTransition() {
     const whiteQueue = stragglers.filter(p => p.color === 'w');
     const blackQueue = stragglers.filter(p => p.color === 'b');
 
-    // Build the walk list. Each entry: piece + startFrame + duration +
-    // curve control point + destination + endAngle.
+    // v5 GRID WALK. Each piece traces a Manhattan (L-shaped) path
+    // from its current center to its destination center, in one-
+    // square segments. Half the pieces route file-first, half rank-
+    // first — chosen per-piece so a shelf of pieces doesn't corner at
+    // the same square. Segment duration is a slow, deliberate glide
+    // with ease-in-out at each end, so the crossing of each square
+    // reads as a step without a bounce or a bob.
+    const SEG_MS = 360;                 // per-square glide, unhurried
+    const MAX_SEGS = 6;                 // pace-cap on long tray walks
+    const SETTLE_MS = 200;
     const now = performance.now();
     const walks = [];
+
+    function buildWaypoints(startCX, startCY, endCX, endCY, prefer) {
+      // Corner where the L bends. On-board pieces sit at square centers
+      // so the corner also lands on a square center; tray pieces land
+      // slightly off-grid, which is fine — the L still reads.
+      const corner = prefer === 'file-first'
+        ? { x: endCX,   y: startCY }
+        : { x: startCX, y: endCY   };
+      const points = [{ x: startCX, y: startCY }];
+      pushIntermediate(points, corner);
+      pushIntermediate(points, { x: endCX, y: endCY });
+      return points;
+    }
+    // Interpolate square-sized steps between last-point and target, so
+    // each waypoint sits on the grid boundary.
+    function pushIntermediate(points, target) {
+      const last = points[points.length - 1];
+      const dx = target.x - last.x, dy = target.y - last.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.5) return;
+      const steps = Math.max(1, Math.round(len / sqSize));
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        points.push({ x: last.x + dx * t, y: last.y + dy * t });
+      }
+    }
+
     function pushWalk(piece, endCX, endCY, isTray, rankHint) {
       const startCX = piece.x + sqSize / 2;
       const startCY = piece.y + sqSize / 2;
-      const dist = Math.hypot(endCX - startCX, endCY - startCY);
+      const totalDist = Math.hypot(endCX - startCX, endCY - startCY);
       // Piece is already on its target square — skip the animation
-      // (bob-in-place looks like a bug, not a beat). This is common in
-      // v4 walk-only transitions: most pieces don't change squares.
-      if (dist < sqSize * 0.06) return null;
-      const speed = boardW * 0.90;   // px per second, deliberate pace
-      const duration = Math.max(900, Math.min(1700, (dist / speed) * 1000));
-      // Stagger by rank so the far rank moves first; add larger per-
-      // piece jitter (0–180ms) so the crowd doesn't march in lockstep.
-      const rankDelay = (8 - (rankHint ?? 4)) * 70;
-      const jitter = Math.random() * 180;
-      const startAt = now + rankDelay + jitter;
+      // (a bob-in-place looked like a bug in v4; a step-in-place would
+      // read the same). Most pieces don't change squares between
+      // adjacent chess positions, so this branch fires often.
+      if (totalDist < sqSize * 0.06) return null;
 
-      // Curve: bezier control point offset perpendicular to travel. Per
-      // piece deterministic-ish jitter so paths look individual, not
-      // parallel. Bias so that pieces coming from the LEFT curve one
-      // way and pieces from the RIGHT curve the other — reduces
-      // criss-cross visual chaos.
-      const dx = endCX - startCX;
-      const dy = endCY - startCY;
-      const px = -dy, py = dx;
-      const perpLen = Math.hypot(px, py) || 1;
-      const curveSign = dx < 0 ? -1 : 1;
-      const curveAmt = curveSign * dist * (0.06 + Math.random() * 0.10);
-      const cx = (startCX + endCX) / 2 + (px / perpLen) * curveAmt;
-      const cy = (startCY + endCY) / 2 + (py / perpLen) * curveAmt;
+      // Per-piece Manhattan preference. Slight bias so pieces going
+      // primarily rightward tend file-first and vice-versa — that
+      // stops all 8 pieces of a rank from cornering at the same
+      // square. Pure random for the rest.
+      const dxAbs = Math.abs(endCX - startCX);
+      const dyAbs = Math.abs(endCY - startCY);
+      const bias = dxAbs > dyAbs * 1.4 ? 0.30 : 0.65;
+      const prefer = Math.random() < bias ? 'file-first' : 'rank-first';
+
+      const waypoints = buildWaypoints(startCX, startCY, endCX, endCY, prefer);
+      let segCount = waypoints.length - 1;
+      // Pace-cap: extremely long tray walks would otherwise take too
+      // long. Merge extra segments into fewer, longer ones (still
+      // grid-shaped visually because the endpoints of the merged
+      // segments still land on square boundaries most of the time).
+      if (segCount > MAX_SEGS) {
+        const stride = Math.ceil(segCount / MAX_SEGS);
+        const collapsed = [waypoints[0]];
+        for (let i = stride; i < waypoints.length; i += stride) {
+          collapsed.push(waypoints[i]);
+        }
+        if (collapsed[collapsed.length - 1] !== waypoints[waypoints.length - 1]) {
+          collapsed.push(waypoints[waypoints.length - 1]);
+        }
+        waypoints.length = 0;
+        waypoints.push(...collapsed);
+        segCount = waypoints.length - 1;
+      }
+      const duration = segCount * SEG_MS;
+
+      // Stagger by target rank so the far rank walks first (near-rank
+      // pieces don't get walked over). Larger per-piece jitter so the
+      // shelf doesn't march in lockstep.
+      const rankDelay = (8 - (rankHint ?? 4)) * 90;
+      const jitter = Math.random() * 220;
+      const startAt = now + rankDelay + jitter;
 
       const w = {
         piece,
-        startCX, startCY, startAngle: piece.rot,
-        endCX, endCY, endAngle: 0,
-        ctrlX: cx, ctrlY: cy,
+        waypoints,
+        segCount,
+        segMs: SEG_MS,
+        endCX, endCY,
+        startAngle: piece.rot,
         startAt, duration,
         isTray,
         fadeIn: false,
@@ -790,40 +884,25 @@ function walkTransition() {
     // Force reflow before we start.
     void piecesLayer.offsetHeight;
 
-    // Animation constants. Values pushed toward "obvious walking":
-    // bob is significant relative to square size (~14%), tilt is a
-    // visible ~4°, cadence is ~2 steps per second — slow enough to
-    // read as deliberate steps rather than a slide.
-    const STAND_MS = 260;
-    const SETTLE_MS = 150;
-    const BOB_HZ = 2.1;
-    const BOB_AMP = sqSize * 0.14;
-    const TILT_AMP = 0.070;              // radians (~4°)
-
+    // Ease-in-out per segment: piece slows near each waypoint and
+    // accelerates away from it, so each square-crossing reads as a
+    // "step" without any actual bounce or vertical bob.
+    function easeInOut(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-    function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
-    function bezier(t, x0, y0, xc, yc, x1, y1) {
-      const it = 1 - t;
-      return {
-        x: it*it*x0 + 2*it*t*xc + t*t*x1,
-        y: it*it*y0 + 2*it*t*yc + t*t*y1,
-      };
-    }
 
-    // Global end frame — a bit after the latest piece finishes. If
-    // no piece needs to walk (rare — identical positions), still play
-    // a short beat so the transition never feels dropped.
+    // Global end frame — a bit after the latest piece finishes. If no
+    // piece needs to walk (rare: identical positions), still play a
+    // short beat so the caption update doesn't feel dropped.
     const globalEnd = walks.length
-      ? walks.reduce((acc, w) => Math.max(acc, w.startAt + w.duration + STAND_MS + SETTLE_MS), now) + 120
+      ? walks.reduce((acc, w) => Math.max(acc, w.startAt + w.duration + SETTLE_MS), now) + 160
       : now + 380;
 
     function frame(tNow) {
       for (const w of walks) {
         const t = tNow - w.startAt;
-        if (t < 0) continue;    // hasn't started yet
-        const totalW = STAND_MS + w.duration + SETTLE_MS;
-        if (t >= totalW) {
-          // Snap to final resting transform.
+        if (t < 0) continue;
+        const total = w.duration + SETTLE_MS;
+        if (t >= total) {
           const tx = w.endCX - sqSize / 2;
           const ty = w.endCY - sqSize / 2;
           w.piece.el.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(0deg) scale(1)`;
@@ -832,53 +911,49 @@ function walkTransition() {
           continue;
         }
 
-        // Phase 1: stand-up rotation.
-        let currentAngle;
-        if (t < STAND_MS) {
-          const st = t / STAND_MS;
-          const e = easeOutCubic(st);
-          currentAngle = w.startAngle * (1 - e);
+        // Travel: work out which segment we're in, then ease across it.
+        let pt;
+        if (t < w.duration) {
+          const globalFrac = t / w.duration;
+          const segFloat = globalFrac * w.segCount;
+          const segIdx = Math.min(w.segCount - 1, Math.floor(segFloat));
+          const segT = easeInOut(segFloat - segIdx);
+          const a = w.waypoints[segIdx];
+          const b = w.waypoints[segIdx + 1];
+          pt = { x: a.x + (b.x - a.x) * segT, y: a.y + (b.y - a.y) * segT };
         } else {
-          currentAngle = 0;
+          pt = w.waypoints[w.waypoints.length - 1];
         }
 
-        // Phase 2: travel with bob + tilt.
-        const travelT = Math.max(0, Math.min(1, (t - STAND_MS) / w.duration));
-        const travelE = easeInOutCubic(travelT);
-        const pt = bezier(travelE, w.startCX, w.startCY, w.ctrlX, w.ctrlY, w.endCX, w.endCY);
-        // Bob taper: hats-shape (rise, hold, fall) so bob is strongest
-        // in the middle third of the walk, gone at start and end.
-        const bobTaper = smoothTaper(travelT, 0.15, 0.85);
-        const bobPhase = travelT * (w.duration / 1000) * BOB_HZ * Math.PI * 2;
-        const bob = -Math.abs(Math.sin(bobPhase)) * BOB_AMP * bobTaper;
-        const tilt = Math.sin(bobPhase * 0.5) * TILT_AMP * bobTaper;
+        // Fade-in for spawned pieces (empty pool fills from stage edge).
+        if (w.fadeIn) w.piece.el.style.opacity = String(Math.min(1, t / 260));
 
-        // Fade-in for spawned pieces.
-        if (w.fadeIn) w.piece.el.style.opacity = String(Math.min(1, t / 220));
-
-        // Phase 3: settle. Scale beats 1 → 0.94 → 1 in the last SETTLE_MS.
+        // Arrival settle: a small scale beat after the walk finishes.
+        // Deliberately subtler than v4 (4% not 6%) so it reads as
+        // "arrival breath" not "bounce".
         let scale = 1;
-        const settleStart = STAND_MS + w.duration;
-        if (t >= settleStart) {
-          const s = (t - settleStart) / SETTLE_MS;
-          scale = 1 - 0.06 * Math.sin(s * Math.PI);
+        if (t >= w.duration) {
+          const s = (t - w.duration) / SETTLE_MS;
+          scale = 1 - 0.04 * Math.sin(s * Math.PI);
         }
 
-        const totalAngle = (currentAngle + tilt);
-        const cx = pt.x;
-        const cy = pt.y + bob;
-        const tx = cx - sqSize / 2;
-        const ty = cy - sqSize / 2;
-        const deg = totalAngle * 180 / Math.PI;
+        // Angle stays at 0 unless the piece began mid-transition with
+        // a non-zero angle (defensive — v5 pieces are all upright).
+        let angleRad = 0;
+        if (w.startAngle) {
+          const standDur = Math.min(240, w.duration);
+          if (t < standDur) angleRad = w.startAngle * (1 - easeOutCubic(t / standDur));
+        }
+
+        const tx = pt.x - sqSize / 2;
+        const ty = pt.y - sqSize / 2;
+        const deg = angleRad * 180 / Math.PI;
         w.piece.el.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(${deg.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
       }
 
       if (tNow < globalEnd) requestAnimationFrame(frame);
       else {
-        // Reset transitions so live moves can use them again.
         for (const w of walks) w.piece.el.style.transition = '';
-        // Live pieces get their tap-tap behavior back; tray pieces do
-        // not (they're captured).
         for (const p of livePieces) p.el.classList.add('live');
         for (const p of trayPieces) p.el.classList.remove('live');
         resolve();
@@ -888,18 +963,6 @@ function walkTransition() {
   });
 }
 
-// Bob taper: 0 at both ends of [0,1], 1 in the middle. Uses a smooth
-// hat function that ramps up over [0, a], holds 1 over [a, 1-a] tail,
-// and ramps down over [1-a, 1].
-function smoothTaper(t, a, b) {
-  if (t < a) return smoothstep(0, a, t);
-  if (t > b) return smoothstep(1, b, t);
-  return 1;
-}
-function smoothstep(edge0, edge1, x) {
-  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
-}
 
 // Pick the stage-edge point nearest to a destination — for spawning
 // pieces that the fallen pool couldn't supply.
