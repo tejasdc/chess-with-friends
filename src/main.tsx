@@ -137,12 +137,14 @@ function App() {
 
   return (
     <Shell home={home} message={message}>
-      <InstallPanel home={home} setMessage={setMessage} />
-      {inviteMatch ? <InvitePanel token={inviteMatch[1]} refresh={refresh} setMessage={setMessage} /> : null}
-      <FriendPanel home={home} refresh={refresh} setMessage={setMessage} />
-      <ChallengePanel home={home} refresh={refresh} setMessage={setMessage} />
-      <SchedulePanel home={home} refresh={refresh} setMessage={setMessage} />
-      <GamesPanel home={home} refresh={refresh} />
+      <div className="dashboard-grid">
+        <InstallPanel home={home} setMessage={setMessage} />
+        {inviteMatch ? <InvitePanel token={inviteMatch[1]} refresh={refresh} setMessage={setMessage} /> : null}
+        <FriendPanel home={home} refresh={refresh} setMessage={setMessage} />
+        <ChallengePanel home={home} refresh={refresh} setMessage={setMessage} />
+        <SchedulePanel home={home} refresh={refresh} setMessage={setMessage} />
+        <GamesPanel home={home} refresh={refresh} />
+      </div>
     </Shell>
   );
 }
@@ -329,7 +331,7 @@ function InvitePanel({ token, refresh, setMessage }: { token: string; refresh: (
     }
   }
   return (
-    <section className="panel accent-panel">
+    <section className="panel accent-panel invite-panel">
       <p className="panel-kicker">Invite link</p>
       <h2>Join this circle</h2>
       <button onClick={send}>
@@ -361,7 +363,7 @@ function FriendPanel({ home, refresh, setMessage }: { home: HomeData; refresh: (
   }
 
   return (
-    <section className="panel">
+    <section className="panel friend-panel">
       <div className="panel-heading">
         <div>
           <p className="panel-kicker">Circle</p>
@@ -427,7 +429,7 @@ function ChallengePanel({ home, refresh, setMessage }: { home: HomeData; refresh
   }
 
   return (
-    <section className="panel">
+    <section className="panel challenge-panel">
       <p className="panel-kicker">Live board</p>
       <h2>Challenge</h2>
       <div className="inline-form">
@@ -479,7 +481,7 @@ function SchedulePanel({ home, refresh, setMessage }: { home: HomeData; refresh:
   }
 
   return (
-    <section className="panel">
+    <section className="panel schedule-panel">
       <p className="panel-kicker">Time & place</p>
       <h2>Schedule</h2>
       <div className="inline-form">
@@ -515,7 +517,7 @@ function SchedulePanel({ home, refresh, setMessage }: { home: HomeData; refresh:
 
 function GamesPanel({ home, refresh }: { home: HomeData; refresh: () => void }) {
   return (
-    <section className="panel">
+    <section className="panel games-panel">
       <div className="panel-heading">
         <div>
           <p className="panel-kicker">Boards</p>

@@ -269,6 +269,43 @@ h2 {
   gap: 18px;
 }
 
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
+  grid-template-areas:
+    "install install"
+    "friends challenge"
+    "friends schedule"
+    "games games";
+  gap: 18px;
+  align-items: start;
+}
+
+.install {
+  grid-area: install;
+}
+
+.invite-panel {
+  grid-column: 1 / -1;
+}
+
+.friend-panel {
+  grid-area: friends;
+  min-height: 410px;
+}
+
+.challenge-panel {
+  grid-area: challenge;
+}
+
+.schedule-panel {
+  grid-area: schedule;
+}
+
+.games-panel {
+  grid-area: games;
+}
+
 .auth-panel,
 .panel {
   position: relative;
@@ -679,8 +716,18 @@ h2 {
   .topbar,
   .install,
   .game-layout,
-  .auth-panel {
+  .auth-panel,
+  .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid {
+    grid-template-areas:
+      "install"
+      "friends"
+      "challenge"
+      "schedule"
+      "games";
   }
 
   .topbar {
