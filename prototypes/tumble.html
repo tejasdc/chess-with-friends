@@ -1,0 +1,544 @@
+<!doctype html>
+<!--
+  Tumble prototype — landing shelf transition.
+
+  What Tejas approves here: the FEEL of the animation between positions.
+  On the real landing this will trigger on solve or long idle; here it
+  triggers on any drag-drop (any piece to any square). No chess.js, no
+  legality — the prototype is the animation, not the puzzle.
+
+  Physics only lives in the TRANSITION. While a position is live it
+  behaves like a real board: tap/drag identical to game screen, no
+  flick gestures, no wobble. On trigger the pieces tumble with weight,
+  then the next position's pieces walk themselves onto their squares
+  (each staggered from the closest board edge).
+
+  Villalba palette: mid-teal ground, cream + deep-teal squares, cream
+  chip identity, deep-ink text. No red anywhere.
+
+  Open via file:// on a Mac (Safari/Chrome/Firefox) — mouse or trackpad.
+  For phone play, `nohup python3 -m http.server 8000 --directory .` in
+  this dir and hit the LAN address — later, not required.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>tumble — chess with friends landing prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
+<style>
+  :root {
+    --ground: #3E8C82;
+    --paper: #E9DFA0;
+    --ink: #081a18;
+    --ink-2: #0F201E;
+    --walnut: #0F201E;
+    --walnut-2: #081a18;
+    --stone-on-ground: rgba(8, 26, 24, 0.55);
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+    --sans: "IBM Plex Sans", -apple-system, sans-serif;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-emp: cubic-bezier(0.34, 1.56, 0.64, 1);      /* slight overshoot */
+    --ease-in:  cubic-bezier(0.4, 0, 1, 1);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    min-height: 100dvh;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  body { display: grid; place-items: center; padding: 16px; }
+
+  .frame {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    width: min(92vw, 92vh, 640px);
+  }
+  .wordmark {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    align-self: flex-start;
+  }
+  .wordmark::before {
+    content: "";
+    width: 9px; height: 9px;
+    background: var(--paper);
+    display: inline-block;
+    transform: translateY(-1px);
+  }
+  .stage {
+    position: relative;
+    width: min(92vw, 92vh, 640px);
+    aspect-ratio: 1 / 1;
+    /* stage is the animation coordinate system — pieces are absolutely
+       positioned within it. */
+  }
+  .board {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    border: 1px solid var(--walnut);
+    z-index: 1;
+    touch-action: none;   /* pointer events, no browser gestures */
+  }
+  .sq {
+    position: relative;
+    display: grid;
+    place-items: center;
+  }
+  .sq.light { background: var(--paper); }
+  .sq.dark  { background: var(--walnut); }
+  .coord {
+    position: absolute;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--stone-on-ground);
+    pointer-events: none;
+    letter-spacing: 0.04em;
+  }
+  .sq.dark .coord { color: rgba(233, 223, 160, 0.7); }
+  .sq.light .coord { color: rgba(8, 26, 24, 0.55); }
+  .coord-rank { top: 2px; left: 4px; }
+  .coord-file { bottom: 2px; right: 5px; text-transform: lowercase; }
+
+  .pieces {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;   /* board handles pointer down/up */
+  }
+  .piece {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: grid;
+    place-items: center;
+    font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", sans-serif;
+    line-height: 1;
+    user-select: none;
+    will-change: transform, opacity;
+    transform-origin: 50% 50%;
+  }
+  .piece.pw {
+    color: var(--paper);
+    text-shadow:
+      -1px -1px 0 var(--walnut-2), 1px -1px 0 var(--walnut-2),
+      -1px  1px 0 var(--walnut-2), 1px  1px 0 var(--walnut-2);
+  }
+  .piece.pb { color: var(--ink); }
+  .piece.walking {
+    transition: transform 900ms var(--ease-emp), opacity 400ms var(--ease-out);
+  }
+  .piece.dragging { cursor: grabbing; z-index: 20; }
+  .piece[data-live="1"] { cursor: grab; }
+
+  .credit {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--stone-on-ground);
+    align-self: flex-end;
+    padding: 4px 2px;
+  }
+  .foot {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    align-items: center;
+  }
+  .foot-hint {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--stone-on-ground);
+    max-width: 60%;
+  }
+  .skip {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--ink);
+    background: transparent;
+    border: 1px solid var(--ink);
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out);
+  }
+  .skip:hover { background: var(--ink); color: var(--paper); }
+  .skip:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="wordmark">chess with friends · tumble prototype</div>
+    <div class="stage" id="stage">
+      <div class="board" id="board"></div>
+      <div class="pieces" id="pieces"></div>
+    </div>
+    <div class="foot">
+      <p class="foot-hint">Drag any piece to any square. Or hit Skip.</p>
+      <button class="skip" id="skip">Skip →</button>
+    </div>
+    <div class="credit" id="credit">Starting position</div>
+  </div>
+
+<script>
+'use strict';
+
+// ---- Public-domain positions (facts about published games) ------------
+const FILLED = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const FILES = ['a','b','c','d','e','f','g','h'];
+
+const POSITIONS = [
+  { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR', credit: 'Starting position' },
+  { fen: 'rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR', credit: "Fool's mate, 1836" },
+  { fen: '4rrk1/pR5p/6p1/8/1n2Q3/8/PP4PP/6K1', credit: "Anastasia's mate — pattern" },
+  { fen: 'r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR', credit: "Scholar's mate, from 1656" },
+  { fen: '7K/8/k1P5/7p/8/8/8/8', credit: 'Réti, 1921 (endgame study)' },
+];
+
+const board = document.getElementById('board');
+const piecesLayer = document.getElementById('pieces');
+const creditEl = document.getElementById('credit');
+const skipBtn = document.getElementById('skip');
+const stage = document.getElementById('stage');
+
+let posIndex = 0;
+let animating = false;
+let livePieces = [];              // { el, sq, color, type, x, y }
+let sqSize = 0;                   // computed
+let dragState = null;             // { el, offsetX, offsetY, startSq }
+
+// ---- Setup board squares ------------------------------------------------
+function buildBoardSquares() {
+  board.innerHTML = '';
+  for (let r = 8; r >= 1; r--) {
+    for (let f = 0; f < 8; f++) {
+      const file = FILES[f];
+      const dark = (f + r) % 2 === 0;
+      const cell = document.createElement('div');
+      cell.className = 'sq ' + (dark ? 'dark' : 'light');
+      cell.dataset.sq = file + r;
+      const showFile = r === 1;
+      const showRank = f === 0;
+      if (showRank) {
+        const c = document.createElement('span');
+        c.className = 'coord coord-rank';
+        c.textContent = String(r);
+        cell.appendChild(c);
+      }
+      if (showFile) {
+        const c = document.createElement('span');
+        c.className = 'coord coord-file';
+        c.textContent = file;
+        cell.appendChild(c);
+      }
+      board.appendChild(cell);
+    }
+  }
+}
+
+// FEN row -> array of 8 chars (spaces for empty).
+function expandFenRow(row) {
+  let out = '';
+  for (const ch of row) {
+    if (/\d/.test(ch)) out += ' '.repeat(Number(ch));
+    else out += ch;
+  }
+  return out;
+}
+function fenToBoardArray(fen) {
+  const rows = fen.split(' ')[0].split('/');
+  const arr = [];       // [{ file, rank, char }]
+  for (let r = 0; r < 8; r++) {
+    const line = expandFenRow(rows[r]);
+    for (let f = 0; f < 8; f++) {
+      const ch = line[f];
+      if (ch === ' ') continue;
+      arr.push({ file: FILES[f], rank: 8 - r, char: ch });
+    }
+  }
+  return arr;
+}
+
+// Given a square (e.g. "e4"), return {x, y} at the square's top-left in
+// stage coordinates. Board is (0,0) to (8*sqSize, 8*sqSize).
+function squareToXY(sq) {
+  const file = sq.charCodeAt(0) - 97; // a=0
+  const rank = Number(sq[1]);          // 1..8
+  return { x: file * sqSize, y: (8 - rank) * sqSize };
+}
+function xyToSquare(x, y) {
+  const file = Math.max(0, Math.min(7, Math.floor(x / sqSize)));
+  const rank = 8 - Math.max(0, Math.min(7, Math.floor(y / sqSize)));
+  return FILES[file] + rank;
+}
+
+function updateSqSize() {
+  const rect = stage.getBoundingClientRect();
+  sqSize = rect.width / 8;
+  document.documentElement.style.setProperty('--sq-size', sqSize + 'px');
+  // Update all pieces' size + font-size
+  for (const p of livePieces) {
+    p.el.style.width = sqSize + 'px';
+    p.el.style.height = sqSize + 'px';
+    p.el.style.fontSize = Math.round(sqSize * 0.74) + 'px';
+    // Update transform to reflect new xy for its square
+    const { x, y } = squareToXY(p.sq);
+    p.x = x; p.y = y;
+    p.el.style.transform = `translate(${x}px, ${y}px) rotate(0deg)`;
+  }
+}
+window.addEventListener('resize', updateSqSize);
+
+// ---- Piece factory ------------------------------------------------------
+function createPieceEl(char) {
+  const el = document.createElement('div');
+  const isWhite = char === char.toUpperCase();
+  el.className = 'piece ' + (isWhite ? 'pw' : 'pb');
+  el.textContent = FILLED[char.toLowerCase()];
+  el.dataset.live = '1';
+  el.style.width = sqSize + 'px';
+  el.style.height = sqSize + 'px';
+  el.style.fontSize = Math.round(sqSize * 0.74) + 'px';
+  return el;
+}
+
+// ---- Render position ----------------------------------------------------
+function renderPosition(idx) {
+  const pos = POSITIONS[idx];
+  creditEl.textContent = pos.credit;
+  const arr = fenToBoardArray(pos.fen);
+  piecesLayer.innerHTML = '';
+  livePieces = [];
+  for (const p of arr) {
+    const el = createPieceEl(p.char);
+    const { x, y } = squareToXY(p.file + p.rank);
+    el.style.transform = `translate(${x}px, ${y}px) rotate(0deg)`;
+    piecesLayer.appendChild(el);
+    livePieces.push({ el, sq: p.file + p.rank, color: p.char === p.char.toUpperCase() ? 'w' : 'b', type: p.char.toLowerCase(), x, y });
+  }
+}
+
+// ---- Drag interaction ---------------------------------------------------
+board.addEventListener('pointerdown', onPointerDown);
+window.addEventListener('pointermove', onPointerMove);
+window.addEventListener('pointerup',   onPointerUp);
+window.addEventListener('pointercancel', onPointerUp);
+
+function stageXY(e) {
+  const r = stage.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function pieceAt(sq) {
+  return livePieces.find(p => p.sq === sq);
+}
+
+function onPointerDown(e) {
+  if (animating) return;
+  const { x, y } = stageXY(e);
+  if (x < 0 || y < 0 || x >= sqSize * 8 || y >= sqSize * 8) return;
+  const sq = xyToSquare(x, y);
+  const p = pieceAt(sq);
+  if (!p) return;
+  e.preventDefault();
+  dragState = {
+    piece: p,
+    grabDX: x - p.x,   // where inside the piece the finger grabbed
+    grabDY: y - p.y,
+  };
+  p.el.classList.add('dragging');
+  p.el.style.zIndex = '20';
+}
+
+function onPointerMove(e) {
+  if (!dragState) return;
+  const { x, y } = stageXY(e);
+  const nx = x - dragState.grabDX;
+  const ny = y - dragState.grabDY;
+  dragState.piece.el.style.transform = `translate(${nx}px, ${ny}px) rotate(0deg)`;
+}
+
+function onPointerUp(e) {
+  if (!dragState) return;
+  const { x, y } = stageXY(e);
+  const p = dragState.piece;
+  p.el.classList.remove('dragging');
+  dragState = null;
+  // Drop target (any square counts as "solved" for prototype).
+  const inside = x >= 0 && y >= 0 && x < sqSize * 8 && y < sqSize * 8;
+  if (!inside) {
+    // snap back
+    p.el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(0deg)`;
+    return;
+  }
+  const targetSq = xyToSquare(x, y);
+  if (targetSq === p.sq) {
+    // returned to origin — no-op
+    p.el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(0deg)`;
+    return;
+  }
+  // "Solved" — snap to target then trigger transition.
+  const { x: tx, y: ty } = squareToXY(targetSq);
+  p.el.classList.add('walking');
+  p.el.style.transform = `translate(${tx}px, ${ty}px) rotate(0deg)`;
+  p.x = tx; p.y = ty; p.sq = targetSq;
+  setTimeout(() => transitionToNext(), 380);
+}
+
+skipBtn.addEventListener('click', () => {
+  if (animating) return;
+  transitionToNext();
+});
+
+// ---- Tumble + walk transition -------------------------------------------
+async function transitionToNext() {
+  if (animating) return;
+  animating = true;
+  skipBtn.disabled = true;
+
+  await tumbleCurrent();
+  posIndex = (posIndex + 1) % POSITIONS.length;
+  await walkInNext();
+
+  animating = false;
+  skipBtn.disabled = false;
+}
+
+// Tumble: each piece gets random velocity + rotation, gravity pulls down,
+// fades to 0 as it falls off. Duration ~900ms.
+function tumbleCurrent() {
+  return new Promise((resolve) => {
+    const start = performance.now();
+    const DURATION = 900;
+    const GRAV = 0.0018;    // px per ms^2 (scaled to sq units)
+    const g = GRAV * sqSize * 8; // gravity in stage units
+    const state = livePieces.map(p => {
+      // Random horizontal spread; downward + slight up initial (like tipped)
+      const vx = (Math.random() - 0.5) * sqSize * 0.008;
+      const vy = -sqSize * 0.002 * Math.random();
+      const vr = (Math.random() - 0.5) * 0.008;   // radians per ms
+      // Remove transitions so we can drive transform directly.
+      p.el.classList.remove('walking');
+      p.el.style.transition = 'none';
+      return { p, vx, vy, vr, x: p.x, y: p.y, r: 0 };
+    });
+
+    function frame(now) {
+      const t = now - start;
+      const dt = Math.min(32, t - (frame.last ?? start));
+      frame.last = now;
+      for (const s of state) {
+        s.vy += g * dt / 1000;   // gravity in px/s
+        s.x  += s.vx * dt;
+        s.y  += s.vy * dt;
+        s.r  += s.vr * dt;
+        s.p.el.style.transform = `translate(${s.x}px, ${s.y}px) rotate(${s.r}rad)`;
+      }
+      // Fade in the last third
+      if (t > DURATION * 0.4) {
+        const fadeT = (t - DURATION * 0.4) / (DURATION * 0.6);
+        for (const s of state) s.p.el.style.opacity = String(Math.max(0, 1 - fadeT));
+      }
+      if (t < DURATION) requestAnimationFrame(frame);
+      else {
+        // Clean up: hide all
+        for (const s of state) s.p.el.remove();
+        livePieces = [];
+        resolve();
+      }
+    }
+    requestAnimationFrame(frame);
+  });
+}
+
+// Walk-in: for each piece in the next position, spawn at the CLOSEST board
+// edge and animate to the target square with a small overshoot. Stagger by
+// distance from that edge so bottom-rank arrivals settle first.
+function walkInNext() {
+  return new Promise((resolve) => {
+    const pos = POSITIONS[posIndex];
+    creditEl.textContent = pos.credit;
+    const arr = fenToBoardArray(pos.fen);
+
+    // Compute for each piece: startXY (edge), endXY (target square), delay.
+    const specs = arr.map(p => {
+      const sq = p.file + p.rank;
+      const end = squareToXY(sq);
+      // Enter from bottom edge (like players setting up a physical set).
+      // startX = target column, startY = below board
+      const start = { x: end.x, y: sqSize * 9 };
+      // Delay: bottom-rank first (higher rank number = later)
+      const delay = (8 - p.rank) * 60 + (p.file.charCodeAt(0) - 97) * 8;
+      return { p, sq, start, end, delay };
+    });
+
+    // Insert pieces at their start positions with 0 opacity, THEN in the
+    // next frame apply the walking class + target transform so the
+    // transition kicks off.
+    for (const s of specs) {
+      const el = createPieceEl(s.p.char);
+      el.style.opacity = '0';
+      el.style.transform = `translate(${s.start.x}px, ${s.start.y}px) rotate(0deg)`;
+      piecesLayer.appendChild(el);
+      livePieces.push({ el, sq: s.sq, color: s.p.char === s.p.char.toUpperCase() ? 'w' : 'b', type: s.p.char.toLowerCase(), x: s.end.x, y: s.end.y });
+      s.el = el;
+    }
+
+    // Two rAFs to guarantee the initial transform is committed.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      for (const s of specs) {
+        s.el.style.transition = `transform 900ms ${getComputedStyle(document.documentElement).getPropertyValue('--ease-emp')} ${s.delay}ms, opacity 500ms var(--ease-out) ${s.delay}ms`;
+        s.el.style.opacity = '1';
+        s.el.style.transform = `translate(${s.end.x}px, ${s.end.y}px) rotate(0deg)`;
+      }
+    }));
+
+    // Total time = max delay + 900ms + small buffer
+    const maxDelay = Math.max(...specs.map(s => s.delay));
+    setTimeout(() => {
+      // Clean up transitions so future drags don't inherit them.
+      for (const p of livePieces) p.el.style.transition = '';
+      resolve();
+    }, maxDelay + 950);
+  });
+}
+
+// ---- Boot ---------------------------------------------------------------
+buildBoardSquares();
+updateSqSize();
+renderPosition(0);
+
+// Idle reset — if the shelf sits untouched for 25s AND we're not mid-
+// transition AND no piece is being dragged, advance to the next position.
+// Every interaction bumps the timer.
+let idleTimer = null;
+const IDLE_MS = 25_000;
+function bumpIdle() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (!animating && !dragState) transitionToNext();
+  }, IDLE_MS);
+}
+document.addEventListener('pointerdown', bumpIdle);
+document.addEventListener('pointerup', bumpIdle);
+bumpIdle();
+</script>
+</body>
+</html>
