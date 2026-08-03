@@ -16,7 +16,10 @@ const html = `<!doctype html><html><head><style>
 const browser = await chromium.launch();
 const ctx = await browser.newContext({
   viewport: { width: 180, height: 180 },
-  deviceScaleFactor: 2, // Retina — output is 360×360 but scaled to 180 CSS pixels
+  // DPR 1 → true 180×180 physical pixels, matching Apple's apple-touch-icon
+  // spec and the manifest's declared "sizes": "180x180". SVG is vector so
+  // the crispness comes from the render, not from oversampling.
+  deviceScaleFactor: 1,
 });
 const page = await ctx.newPage();
 await page.setContent(html);

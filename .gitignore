@@ -28,4 +28,9 @@ tmp/reviews/screens-r2/*
 !tmp/reviews/screens-r2/fix-mobile-game-dot-presence.png
 !tmp/reviews/screens-r2/fix-mobile-opponent-piece-tap-no-dots.png
 !tmp/reviews/screens-r2/fix-mobile-own-piece-tap-shows-dots.png
+# Round-3 iPhone-test-fix evidence
+!tmp/reviews/screens-r2/fix2-install-with-dismiss.png
+!tmp/reviews/screens-r2/fix2-install-after-dismiss.png
+!tmp/reviews/screens-r2/fix2-dashboard-with-chevrons.png
+!tmp/reviews/screens-r2/fix2-game-strips-reserved.png
 .DS_Store
