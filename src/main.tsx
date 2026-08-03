@@ -81,6 +81,10 @@ const WalletScene = lazy(() => import("./WalletScene"));
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
+    // Explicit — modern browsers default to same-origin, but Safari's
+    // service-worker fetch interception has bit us before. Being explicit
+    // guarantees the session cookie rides on every /api call.
+    credentials: "same-origin",
     ...init,
     headers: { "content-type": "application/json", ...(init.headers || {}) },
   });
@@ -169,6 +173,148 @@ function Shell({
 
 function LoadingLine() {
   return <p className="muted center">Opening board…</p>;
+}
+
+// Realtime game channel — resilient WebSocket that reconnects on
+// close/error with backoff, resyncs on every reconnect (both by sending
+// "sync" and by requesting a fresh REST snapshot via onResync), wakes
+// on visibilitychange when the tab comes back, and detects silent
+// half-open sockets via a ping/pong heartbeat. Every path re-arms
+// itself, so the board can never silently freeze — the failure mode
+// this replaces was a dead socket that never noticed it was dead.
+function useRealtimeGame(
+  gameId: string,
+  {
+    onGame,
+    onResync,
+    enabled,
+  }: {
+    onGame: (game: GameState) => void;
+    onResync: () => Promise<void> | void;
+    enabled: boolean;
+  },
+) {
+  const onGameRef = React.useRef(onGame);
+  const onResyncRef = React.useRef(onResync);
+  onGameRef.current = onGame;
+  onResyncRef.current = onResync;
+
+  useEffect(() => {
+    if (!enabled) return;
+    let socket: WebSocket | null = null;
+    let backoffMs = 250;
+    let reconnectTimer: number | null = null;
+    let heartbeatTimer: number | null = null;
+    let livenessTimer: number | null = null;
+    let disposed = false;
+    let lastInboundAt = Date.now();
+
+    const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/games/${gameId}/socket`;
+
+    function clearTimers() {
+      if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer);
+      if (livenessTimer !== null) window.clearInterval(livenessTimer);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      heartbeatTimer = null;
+      livenessTimer = null;
+      reconnectTimer = null;
+    }
+
+    function scheduleReconnect() {
+      if (disposed) return;
+      clearTimers();
+      const delay = backoffMs;
+      backoffMs = Math.min(backoffMs * 2, 5000);
+      reconnectTimer = window.setTimeout(connect, delay);
+    }
+
+    function connect() {
+      if (disposed) return;
+      try {
+        socket = new WebSocket(wsUrl);
+      } catch {
+        scheduleReconnect();
+        return;
+      }
+      const s = socket;
+      s.addEventListener("open", () => {
+        backoffMs = 250;
+        lastInboundAt = Date.now();
+        try { s.send("sync"); } catch { /* dead almost immediately */ }
+        // Belt-and-suspenders REST resync in case a broadcast fired
+        // between the last disconnect and this reconnect.
+        void onResyncRef.current();
+        // Heartbeat: send a ping every 15s so the server has a reason to
+        // reply and we can see inbound traffic on a healthy socket.
+        heartbeatTimer = window.setInterval(() => {
+          try { s.send("ping"); } catch { /* will surface via liveness */ }
+        }, 15000);
+        // Liveness: if no inbound frame for 25s during an active game,
+        // treat the socket as half-open. Close it (that fires close →
+        // scheduleReconnect).
+        livenessTimer = window.setInterval(() => {
+          if (Date.now() - lastInboundAt > 25000) {
+            try { s.close(); } catch { /* ignored */ }
+          }
+        }, 5000);
+      });
+      s.addEventListener("message", (event) => {
+        lastInboundAt = Date.now();
+        const raw = typeof event.data === "string" ? event.data : "";
+        if (!raw || raw === "pong") return;
+        try {
+          const payload = JSON.parse(raw);
+          if (payload && payload.game) onGameRef.current(payload.game as GameState);
+        } catch { /* non-JSON frame ignored */ }
+      });
+      s.addEventListener("close", () => {
+        clearTimers();
+        scheduleReconnect();
+      });
+      s.addEventListener("error", () => {
+        try { s.close(); } catch { /* already closing */ }
+      });
+    }
+
+    function onVisibility() {
+      if (document.visibilityState !== "visible") return;
+      // Coming back into the foreground: if the socket isn't already
+      // OPEN, force an immediate reconnect (don't wait for backoff).
+      const state = socket?.readyState;
+      if (state === WebSocket.OPEN) {
+        try { socket?.send("sync"); } catch { /* trigger reconnect */ }
+        void onResyncRef.current();
+        return;
+      }
+      try { socket?.close(); } catch { /* ignored */ }
+      backoffMs = 250;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      connect();
+    }
+
+    document.addEventListener("visibilitychange", onVisibility);
+    connect();
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearTimers();
+      try { socket?.close(); } catch { /* ignored */ }
+      socket = null;
+    };
+  }, [gameId, enabled]);
+}
+
+function presenceLabel(state: "connected" | "reconnecting" | "gone", _handle: string): string {
+  // Softer wording than raw state — "gone" reads insane at a glance;
+  // "offline" is what a person would say. "away" carries the shorter
+  // interruption that iOS lock/tab-switch produces without alarming.
+  if (state === "connected") return "here";
+  if (state === "reconnecting") return "away";
+  return "offline";
 }
 
 function usePathname() {
@@ -740,29 +886,55 @@ function GameScreen({
   setMessage: (value: string) => void;
 }) {
   const [game, setGame] = useState<GameState | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [selected, setSelected] = useState<Square | null>(null);
   const [confirmResign, setConfirmResign] = useState(false);
   const [now, setNow] = useState(Date.now());
   const myColor = game?.whiteId === home.user.id ? "w" : "b";
   const opponentId = game ? (game.whiteId === home.user.id ? game.blackId : game.whiteId) : "";
-  const opponentState = game?.connectionState?.[opponentId] || "gone";
-
-  async function load() {
-    const data = await api<GameState>(`/api/games/${gameId}/state`);
-    setGame(data);
-  }
+  const opponentRawState = game?.connectionState?.[opponentId] || "gone";
 
   useEffect(() => {
-    void load();
-    const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/games/${gameId}/socket`;
-    const socket = new WebSocket(wsUrl);
-    socket.addEventListener("message", (event) => {
-      const payload = JSON.parse(event.data);
-      if (payload.game) setGame(payload.game);
-    });
-    socket.addEventListener("open", () => socket.send("sync"));
-    return () => socket.close();
-  }, [gameId]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api<GameState>(`/api/games/${gameId}/state`);
+        if (!cancelled) {
+          setGame(data);
+          setLoadError(null);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const text = error instanceof Error ? error.message : "Could not load this game.";
+        setLoadError(text);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId, loadAttempt]);
+
+  // Resilient realtime channel. Reconnects on close/error with backoff,
+  // resyncs (via REST snapshot) on every reconnect, wakes on visibility
+  // return, and treats a silent socket as half-open via ping/pong heartbeat.
+  useRealtimeGame(gameId, {
+    onGame: (next) => {
+      setGame(next);
+      setLoadError(null);
+    },
+    onResync: async () => {
+      try {
+        const data = await api<GameState>(`/api/games/${gameId}/state`);
+        setGame(data);
+        setLoadError(null);
+      } catch {
+        // Silent — REST resync failure just means we wait for the next
+        // socket message; the socket itself is separately reconnecting.
+      }
+    },
+    enabled: !!game && game.status === "active",
+  });
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -794,6 +966,20 @@ function GameScreen({
     setConfirmResign(false);
   }
 
+  if (loadError) {
+    return (
+      <Shell home={home}>
+        <section className="game-error">
+          <h2 className="section-title">Can't open this game</h2>
+          <p className="muted">{loadError}</p>
+          <div className="game-actions">
+            <button className="primary" onClick={() => setLoadAttempt((n) => n + 1)}>Try again</button>
+            <button className="ghost" onClick={onHome}>Home</button>
+          </div>
+        </section>
+      </Shell>
+    );
+  }
   if (!game) return <Shell home={home}><LoadingLine /></Shell>;
 
   const opponentHandle = myColor === "w" ? game.blackHandle : game.whiteHandle;
@@ -801,6 +987,7 @@ function GameScreen({
   const opponentColor: "w" | "b" = myColor === "w" ? "b" : "w";
   const opponentClock = liveClock(game, opponentColor, now);
   const myClock = liveClock(game, myColor, now);
+  const opponentPresence = presenceLabel(opponentRawState, opponentHandle);
 
   return (
     <Shell home={home}>
@@ -809,7 +996,7 @@ function GameScreen({
           <div className="clock-strip top">
             <div className="who">
               <span className="handle-line">@{opponentHandle}</span>
-              <span className={`connection ${opponentState}`}>{opponentState}</span>
+              <span className={`connection ${opponentRawState}`}>{opponentPresence}</span>
             </div>
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>

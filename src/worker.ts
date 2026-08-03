@@ -861,7 +861,17 @@ export class GameDO extends DurableObject<Env> {
     const timer = this.reconnectTimers.get(userId);
     if (timer) clearTimeout(timer);
     this.reconnectTimers.delete(userId);
-    server.addEventListener("message", () => this.send(server));
+    server.addEventListener("message", (event) => {
+      // Heartbeat: reply cheaply so clients see inbound traffic and
+      // know the socket is alive. Broadcasting full state on every
+      // ping would be wasteful (a client pings every 15s).
+      const data = typeof event.data === "string" ? event.data : "";
+      if (data === "ping") {
+        try { server.send("pong"); } catch { /* dead socket → close will fire */ }
+        return;
+      }
+      void this.send(server);
+    });
     server.addEventListener("close", () => this.disconnect(server));
     server.addEventListener("error", () => this.disconnect(server));
     await this.broadcast();
@@ -944,13 +954,17 @@ export class GameDO extends DurableObject<Env> {
     const stillConnected = [...this.clients.values()].some((item) => item.userId === client.userId);
     if (!stillConnected) {
       this.connectionState[client.userId] = "reconnecting";
+      // 15s grace before promoting to "gone" — iOS Safari can take 5-10s
+      // to reconnect after the URL bar hides/shows or the tab switches
+      // out and back. 3s (the old value) fired the harshest state during
+      // routine phone-idle interactions.
       const timer = setTimeout(() => {
         const connected = [...this.clients.values()].some((item) => item.userId === client.userId);
         if (!connected) {
           this.connectionState[client.userId] = "gone";
           void this.broadcast();
         }
-      }, 3000);
+      }, 15000);
       this.reconnectTimers.set(client.userId, timer);
     }
     void this.broadcast();

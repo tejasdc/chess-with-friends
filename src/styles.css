@@ -979,6 +979,33 @@ select {
 
 .move-num { color: var(--ink-3); min-width: 22px; text-align: right; }
 
+/* Error surface for game load failures — a celluloid tile with a
+   brass pin, matching the design language. */
+.game-error {
+  display: grid;
+  gap: 14px;
+  padding: 24px 24px 24px 32px;
+  background: var(--celluloid-hi);
+  border-radius: 4px;
+  border: 1px solid var(--hair-strong);
+  position: relative;
+  box-shadow: var(--shadow-1);
+  max-width: 480px;
+  margin: 24px auto;
+}
+
+.game-error::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 24px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--brass-hi), var(--brass) 60%, var(--vermillion-lo) 120%);
+  box-shadow: 0 1px 2px var(--brass-shadow);
+}
+
 /* ---------- responsive ---------- */
 
 @media (min-width: 720px) {
