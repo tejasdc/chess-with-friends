@@ -22,6 +22,10 @@ tmp/reviews/moodboard/*
 # Round-4 mockup exploration (six surfaces × two registers) for Tejas to judge
 !tmp/reviews/mockups/
 !tmp/reviews/mockups/**
+# Villalba build round (this round's evidence)
+!tmp/reviews/villalba-build/
+!tmp/reviews/villalba-build/**
+!tmp/reviews/villalba-build-report.md
 # Specific screens-r2 files kept as bar-fix evidence
 !tmp/reviews/screens-r2/
 tmp/reviews/screens-r2/*
