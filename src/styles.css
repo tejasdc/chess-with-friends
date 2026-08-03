@@ -1326,31 +1326,35 @@ body[data-screen="game"] .shell {
 .board:not(.board-static) .square:hover.light { background: var(--paper-2); }
 .board:not(.board-static) .square:hover.dark  { background: color-mix(in oklab, var(--walnut) 85%, var(--ink)); }
 
-/* Board indicators — swapped from vermillion to context-aware ink/cream
-   so they read on both cream light squares AND deep-teal dark squares
-   without needing a red the palette otherwise banished. */
+/* Board indicators — sourced from mock E crop (Tejas's own mockup).
+   SELECTED gets a THICK cream inset frame — wide inset from the square
+   edge, heavy border, same treatment on both light and dark squares.
+   LAST-MOVE uses the same shape at HALF-weight for secondary status.
+   Both use --cream (the identity chip color) rather than the buff paper
+   so the indicator reads distinctly against the buff light square as
+   well as the teal-dark square. */
 .square.selected::after {
   content: "";
   position: absolute;
-  inset: 2px;
-  border: 1.5px solid var(--ink);
+  inset: 4px;
+  border: 3px solid var(--cream);
   pointer-events: none;
 }
-.square.dark.selected::after { border-color: var(--paper); }
+.square.dark.selected::after { border-color: var(--cream); }
 
 .square.last-from::after,
 .square.last-to::after {
   content: "";
   position: absolute;
-  inset: 0;
-  border: 1.5px solid var(--ink);
+  inset: 3px;
+  border: 1.5px solid var(--cream);
   pointer-events: none;
-  opacity: 0.5;
+  opacity: 0.75;
 }
 .square.dark.last-from::after,
-.square.dark.last-to::after { border-color: var(--paper); }
+.square.dark.last-to::after { border-color: var(--cream); }
 .square.selected.last-from::after,
-.square.selected.last-to::after { opacity: 1; }
+.square.selected.last-to::after { opacity: 1; border-width: 3px; inset: 4px; }
 
 /* In-check — subtle warm ochre wash (palette-family adjacent, reads as
    "attention" without red). Retained on both square colors. */
