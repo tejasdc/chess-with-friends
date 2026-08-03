@@ -11,6 +11,9 @@
 - Full local verification passed once: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`. Visually inspected notification prompt screenshots, desktop board, and mobile board; removed the empty move-list container from fresh games afterward and `npm run typecheck` passed.
 - Final local verification after the move-list cleanup passed: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`. Visually inspected `00-notifications-enabled-*`, `06-challenge-game-started`, `07-checkmate-terminal`, and `16-mobile-game-board`.
 - Updated PWA theme color and icon to match the redesigned gaja/manuscript visual system. `npm run typecheck` and `npm run build` passed.
+- Design reviewer blocked the first redesign pass as too much parchment-styled web UI. Saved the review to `tmp/reviews/design-redesign-review.md`.
+- Second-pass design fixes implemented: dashboard now leads with a board-table register, custom chaturanga piece SVGs replace Unicode glyphs, bishops render as gaja motifs, ashtapada-style square marks were added, and native selects/inputs were further absorbed into framed controls. `npm run test:push && npm run typecheck && npm run build && npm run test:e2e` passed. Visually inspected `05-presence-visible-in-app`, `06-challenge-game-started`, and `16-mobile-game-board`.
+- Correctness reviewer approved with no required fixes. Saved the review to `tmp/reviews/correctness-redesign-review.md`.
 - Read `docs/requirements.md` and extracted the required v1 contract.
 - Committed scaffold: Vite/React entry, Cloudflare Worker config, PWA manifest, service worker, dependencies.
 - Committed backend: singleton `AppDO` for accounts, friends, invites, schedules, push queue/policy, and `GameDO` for live chess state, WebSocket presence, legal moves, clocks, resign/checkmate/timeout.

@@ -86,10 +86,8 @@ interface GameState {
 
 const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
-const pieces: Record<Color, Record<PieceSymbol, string>> = {
-  w: { p: "♙", n: "♘", b: "♗", r: "♖", q: "♕", k: "♔" },
-  b: { p: "♟", n: "♞", b: "♝", r: "♜", q: "♛", k: "♚" },
-};
+const pieceNames: Record<PieceSymbol, string> = { p: "padati", n: "ashva", b: "gaja", r: "ratha", q: "mantri", k: "raja" };
+const ashtapadaMarks = new Set(["b1", "c1", "f1", "g1", "b4", "c4", "f4", "g4", "b5", "c5", "f5", "g5", "b8", "c8", "f8", "g8"]);
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -520,20 +518,25 @@ function GamesPanel({ home, refresh }: { home: HomeData; refresh: () => void }) 
     <section className="panel games-panel">
       <div className="panel-heading">
         <div>
-          <p className="panel-kicker">Boards</p>
+          <p className="panel-kicker">Board table</p>
           <h2>Games</h2>
         </div>
         <button className="icon-button" aria-label="Refresh games" onClick={refresh}>
           <RefreshCcw size={18} />
         </button>
       </div>
-      {home.games.length === 0 ? <p className="small">No games yet.</p> : null}
-      {home.games.map((game) => (
-        <div className="list-row" key={game.id}>
-          <span>{game.timeControl} · {game.status}{game.result ? ` · ${game.result}` : ""}</span>
-          <button onClick={() => navigate(`/game/${game.id}`)}>Open</button>
+      <div className="board-table">
+        <MiniatureBoard />
+        <div className="games-register">
+          {home.games.length === 0 ? <p className="small">No games yet.</p> : null}
+          {home.games.map((game) => (
+            <div className="list-row game-row" key={game.id}>
+              <span>{game.timeControl} · {game.status}{game.result ? ` · ${game.result}` : ""}</span>
+              <button onClick={() => navigate(`/game/${game.id}`)}>Open</button>
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
     </section>
   );
 }
@@ -669,7 +672,8 @@ function Board({ fen, orientation, selected, onSquare }: { fen: string; orientat
               onClick={() => void onSquare(square)}
               aria-label={square}
             >
-              {piece ? <span className={`piece piece-${piece.color}-${piece.type}`}>{pieces[piece.color][piece.type]}</span> : ""}
+              {ashtapadaMarks.has(square) ? <span className="ashtapada-mark" aria-hidden="true" /> : null}
+              {piece ? <PieceGlyph color={piece.color} type={piece.type} /> : null}
             </button>
           );
         }),
@@ -693,6 +697,69 @@ function TimeSelect({ value, onChange }: { value: TimeControl; onChange: (value:
       <option value="10|0">10|0</option>
       <option value="5|0">5|0</option>
     </select>
+  );
+}
+
+function MiniatureBoard() {
+  return (
+    <div className="miniature-board" aria-hidden="true">
+      {Array.from({ length: 64 }).map((_, index) => {
+        const file = files[index % 8];
+        const rank = ranks[Math.floor(index / 8)];
+        const square = `${file}${rank}`;
+        return <span className={ashtapadaMarks.has(square) ? "marked" : ""} key={square} />;
+      })}
+    </div>
+  );
+}
+
+function PieceGlyph({ color, type }: { color: Color; type: PieceSymbol }) {
+  const title = `${color === "w" ? "white" : "black"} ${pieceNames[type]}`;
+  return (
+    <svg className={`piece piece-${color} piece-${type}`} viewBox="0 0 64 64" role="img" aria-label={title}>
+      <path className="piece-ground" d="M14 54h36l4 6H10z" />
+      {type === "p" ? (
+        <>
+          <circle className="piece-fill" cx="32" cy="19" r="8" />
+          <path className="piece-fill" d="M22 45c2-15 18-15 20 0z" />
+          <path className="piece-line" d="M25 34h14M32 27v17" />
+        </>
+      ) : null}
+      {type === "n" ? (
+        <>
+          <path className="piece-fill" d="M19 47c2-18 4-29 22-37 6 7 8 15 5 25l-8-4-5 8 9 8z" />
+          <path className="piece-line" d="M28 20c6 2 10 7 12 15M38 18h.1" />
+        </>
+      ) : null}
+      {type === "b" ? (
+        <>
+          <path className="piece-fill" d="M17 42c0-17 11-28 28-28 8 0 13 5 13 12 0 5-4 9-9 9-6 0-9-5-7-10-8 1-13 8-13 18 0 6 2 10 7 13H18z" />
+          <path className="piece-line" d="M18 42c-8 2-11 8-9 13 7 2 13-4 15-13M28 21c-8-7-18-3-17 6 1 7 7 11 16 12M38 15c0-8 8-12 14-8 5 4 4 12-2 16" />
+          <circle className="piece-eye" cx="38" cy="30" r="2.4" />
+        </>
+      ) : null}
+      {type === "r" ? (
+        <>
+          <path className="piece-fill" d="M17 23h30v20H17z" />
+          <path className="piece-line" d="M20 18h24M20 18l5 5m19-5-5 5M22 45h20" />
+          <circle className="piece-eye" cx="24" cy="47" r="3" />
+          <circle className="piece-eye" cx="40" cy="47" r="3" />
+        </>
+      ) : null}
+      {type === "q" ? (
+        <>
+          <path className="piece-fill" d="M16 44l7-25 9 12 9-12 7 25z" />
+          <path className="piece-line" d="M21 18l11-8 11 8M24 43h16M32 31v13" />
+        </>
+      ) : null}
+      {type === "k" ? (
+        <>
+          <path className="piece-fill" d="M18 44c2-18 8-27 14-27s12 9 14 27z" />
+          <path className="piece-line" d="M20 19h24M24 19l8-10 8 10M25 34h14" />
+          <circle className="piece-eye" cx="32" cy="24" r="2.4" />
+        </>
+      ) : null}
+    </svg>
   );
 }
 
