@@ -1,7 +1,35 @@
-# Ledger Verification — landing-production-build audit
-Generated 2026-08-03 by chess-design-2. Updated 2026-08-03 by Codex landing build.
+# Ledger Verification — landing-production-build SHIPPED
+Generated 2026-08-03 by chess-design-2. Updated 2026-08-03 by Codex landing build. Final shipping-time evidence appended 2026-08-03 by chess-design-2.
 
-Prod version at time of writing: `6d5888ad` (commit `25f3cae`), serving both twochairs.club and chess.tejas.nyc from the same worker.
+Landing build committed as `335dd16`, deployed as prod version `14fca60b`, serving both twochairs.club and chess.tejas.nyc.
+
+## Shipping-time prod evidence
+
+**Assets propagated:** `dist/assets/index-D1rkzMf8.js` + `dist/assets/index-4QnGXtvU.css` verified serving from worker.dev origin AND twochairs.club (post-cache-propagation via `until` monitor).
+
+**Prod browser probe at 390×844 and 1440×900** (cache-bypassed):
+- wordmark = "two chairs" ✓
+- no ⋯ menu on landing ✓
+- caption "BLACK TO MOVE · Traditional; earliest published 1836" visible in DOM ✓
+- copy "No infinite pool of opponents. A game happens when two friends sit down." present in body innerText at both viewports ✓
+- footer "made by tejas.nyc · inspirations" present with both links ✓
+- no-scroll: `document.documentElement.scrollHeight === window.innerHeight` at 390 (844=844) and 1440 (900=900) ✓
+
+**Icon endpoints:** `/icon.svg`, `/apple-touch-icon.png`, `/icon-60.png`, `/icon-512.png` all HTTP 200 on worker.dev origin.
+
+**Beacon:** origin-aware picker's runtime bootstrap present; both token strings in served HTML as expected (worker serves single bundle to both hostnames).
+
+**Health:** `/api/health` returns `{"ok":true,"pushTypes":["friend_request","challenge","challenge_accepted","scheduled_start"]}`.
+
+**Full adversity suite:** 11/11 green including new regression `landing puzzle solve walks to a new caption and position without chrome regressions`.
+
+**Non-Playwright gates:** typecheck (0), push-policy (0), verify-positions (0 — 11 mate-in-1s confirmed), build (0).
+
+---
+
+## Pre-build audit context
+
+Prior prod version before this ship: `6d5888ad` (commit `25f3cae`). Serving twochairs.club and chess.tejas.nyc.
 
 Each item marked:
 - **VERIFIED** — with an evidence pointer (test name / screenshot path / prod probe / commit).
