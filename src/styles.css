@@ -609,10 +609,8 @@ body[data-screen="landing"] .auth-scene {
   .toast { animation: none; }
 }
 
-.stage {
-  flex: 1;
-  min-height: 0;
-}
+/* .stage layout rules are declared earlier in this file (the flex chain
+   that pins .made-by to viewport bottom). No duplicate here. */
 
 .muted { color: var(--stone); font-size: 14px; }
 .center { text-align: center; }
@@ -1152,10 +1150,11 @@ body[data-screen="landing"] .auth-scene {
 }
 
 /* Made-by attribution — landing / dashboard / inspirations ONLY. Never
-   on the game screen. Follows Tejas's own site convention: small, mono,
-   muted, one line, bottom of the page. */
+   on the game screen. Positioning (margin-top: auto for viewport-bottom
+   pin) is defined earlier in this file — this block is presentation
+   only (font, color, hover). Do NOT re-declare margin here, or the
+   shorthand's implicit margin-top: <value> will override the pin. */
 .made-by {
-  margin: 48px 0 8px;
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.04em;
