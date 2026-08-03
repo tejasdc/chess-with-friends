@@ -238,7 +238,6 @@ function AuthScreen({
   return (
     <Shell message={message} setMessage={setMessage}>
       <section className="auth">
-        <h1 className="display">A quiet board.<br />Only your friends.</h1>
         <form
           className="auth-form"
           onSubmit={(event) => {
