@@ -49,9 +49,32 @@ constraints).
   no calendar integration, no recurring cadence in v1 (later if wanted).
 
 **Notifications (the whole policy)**
-Exactly three pushes exist: (1) game challenge received, (2) friend request
-received, (3) scheduled game starting. Nothing else — no presence, no streaks,
-no "come back" nudges, ever. This is an invariant, not a default.
+
+The policy is a PRINCIPLE, not an enumeration:
+
+> Notifications are minimal and useful: one exists only when it serves the
+> user's own intention — a request TO them, a handshake THEY initiated
+> completing, a time THEY agreed to arriving. The banned category is
+> re-engagement: anything that exists to pull the user back for the app's
+> sake — presence pings, streaks, activity nudges, "your friend just
+> beat their record", "you haven't played in 3 days" — is permanently
+> out, not deferred.
+
+The current pushes are a descriptive snapshot of what the principle
+presently produces. Adding to this set is fine iff the new push satisfies
+the principle. Removing is fine if a use case turns out not to. There is
+no "exactly N" cap:
+
+- `friend_request` — someone requested you as a friend
+- `challenge` — a friend invited you to a game
+- `challenge_accepted` — the friend you invited accepted; your game is ready (completes a user-initiated handshake; explicitly added 2026-08-03)
+- `scheduled_start` — a game you both agreed to a time for is starting
+
+Enforcement: `scripts/verify-push-policy.mjs` scans `src/worker.ts` and
+`public/sw.js` — every `enqueuePush` call site must use a type in this
+list, and no notification-like literal may name a re-engagement category.
+The list is not the policy; the principle is. If a future push satisfies
+the principle, add it to both the code and this list in the same change.
 
 **Anti-addiction invariants**
 - No rating ladder, no ELO, no streaks, no puzzles feed, no daily anything.
