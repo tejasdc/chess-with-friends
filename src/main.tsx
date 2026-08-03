@@ -856,7 +856,9 @@ function Dashboard({
           sinks; the user's current obligations rise. */}
       <IncomingPanel home={home} refresh={refresh} />
       <LiveGamesSection games={home.games} />
-      <PlaySection home={home} refresh={refresh} setMessage={setMessage} />
+      {/* PlaySection (Schedule) now lives INSIDE FriendsSection as a
+          bottom-of-list button — Tejas's decision. Kept as its own
+          component so the schedule form logic is unchanged. */}
       <FriendsSection home={home} refresh={refresh} setMessage={setMessage} />
       <PastGamesSection games={home.games} />
       <MadeByTejas />
@@ -1396,6 +1398,12 @@ function FriendsSection({
         />
         <button className="primary" onClick={requestFriend} disabled={!handle}>Add</button>
       </div>
+
+      {/* Schedule entry point — one button at the BOTTOM of the friends
+          section (Tejas's decision). Tapping expands the day + time
+          picker. Visible enough to be discovered, out of the way when
+          the user isn't scheduling. */}
+      <PlaySection home={home} refresh={refresh} setMessage={setMessage} />
     </section>
   );
 }
