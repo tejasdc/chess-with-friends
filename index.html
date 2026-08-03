@@ -21,6 +21,26 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script type="module" defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "dbfc2c7423ea47be9637714344538b35"}'></script>
+    <!--
+      One worker serves both chess.tejas.nyc AND twochairs.club, each with
+      its own Cloudflare Web Analytics property. Pick the beacon token at
+      runtime so each origin reports to its own property. Anything that
+      isn't twochairs.club (chess.tejas.nyc, preview URLs, localhost)
+      falls back to the tejas.nyc zone token. The beacon script reads
+      data-cf-beacon on load, so dynamic injection works.
+    -->
+    <script>
+      (function () {
+        var host = location.hostname;
+        var token = host === "twochairs.club" || host.endsWith(".twochairs.club")
+          ? "440e3220ea784677a8223afb28c0dacc"
+          : "dbfc2c7423ea47be9637714344538b35";
+        var s = document.createElement("script");
+        s.defer = true;
+        s.src = "https://static.cloudflareinsights.com/beacon.min.js";
+        s.setAttribute("data-cf-beacon", JSON.stringify({ token: token }));
+        document.head.appendChild(s);
+      })();
+    </script>
   </body>
 </html>
