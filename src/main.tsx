@@ -1367,15 +1367,26 @@ function GameScreen({
 
   async function choose(square: Square) {
     if (!game || game.status !== "active") return;
+    // Silent-board principle: during play, the BOARD is the only feedback
+    // channel. Gameplay taps NEVER produce toasts. Off-turn or illegal
+    // taps are silent no-ops so the server-side "Illegal move." / "It is
+    // not your turn." responses are unreachable in the normal UI flow
+    // (they still exist as an authoritative backstop).
+    if (game.turn !== myColor) {
+      // Not your turn. The turn strip already tells you whose it is; a
+      // tap on your own piece here is silent — no selection, no dots,
+      // no move request. Same silence already applies to opponent
+      // pieces (below); extend to own-pieces-off-turn.
+      return;
+    }
+    const chess = new Chess(game.fen);
+    const targetPiece = chess.get(square);
     if (!selected) {
       // Only YOUR OWN pieces are selectable — empty squares and opponent
-      // pieces are silent no-ops (no selection state, no legal-move dots
-      // for opponent's pieces, no doomed move request, no error toast).
-      // Tapping an opponent piece to "see what it could do" is a chess.com
-      // affordance the anti-chess.com thesis explicitly rejects.
-      const chess = new Chess(game.fen);
-      const piece = chess.get(square);
-      if (!piece || piece.color !== myColor) return;
+      // pieces are silent no-ops. Tapping an opponent piece to "see what
+      // it could do" is a chess.com affordance the anti-chess.com thesis
+      // explicitly rejects.
+      if (!targetPiece || targetPiece.color !== myColor) return;
       setSelected(square);
       return;
     }
@@ -1384,16 +1395,28 @@ function GameScreen({
       setSelected(null);
       return;
     }
-    // Detect promotion locally so we can show the picker instead of
-    // silently auto-queening. A pawn moving to rank 8 (white) or rank
-    // 1 (black) needs a promotion choice.
-    const chess = new Chess(game.fen);
-    const piece = chess.get(selected);
+    // Tapping another of your OWN pieces retargets the selection —
+    // natural correction path when the user changes their mind.
+    if (targetPiece && targetPiece.color === myColor) {
+      setSelected(square);
+      return;
+    }
+    // Client-side legality gate — chess.js already computes the same
+    // legal-target set the dot overlay uses. If the target isn't in
+    // that set, the tap is silent: deselect and stop. No doomed move
+    // request, no "Illegal move." toast.
+    const legalMoves = chess.moves({ square: selected, verbose: true }) as Array<{ to: string; promotion?: string }>;
+    const legalTarget = legalMoves.find((m) => m.to === square);
+    if (!legalTarget) {
+      setSelected(null);
+      return;
+    }
+    // Detect promotion locally so we show the picker instead of
+    // silently auto-queening.
+    const fromPiece = chess.get(selected);
     const targetRank = square[1];
-    if (piece && piece.type === "p" && ((piece.color === "w" && targetRank === "8") || (piece.color === "b" && targetRank === "1"))) {
-      // Verify it's actually a legal promotion target (not a wild tap).
-      const legal = chess.moves({ square: selected, verbose: true }) as Array<{ to: string; promotion?: string }>;
-      if (legal.some((m) => m.to === square && m.promotion)) {
+    if (fromPiece && fromPiece.type === "p" && ((fromPiece.color === "w" && targetRank === "8") || (fromPiece.color === "b" && targetRank === "1"))) {
+      if (legalMoves.some((m) => m.to === square && m.promotion)) {
         setPendingPromotion({ from: selected, to: square });
         return;
       }

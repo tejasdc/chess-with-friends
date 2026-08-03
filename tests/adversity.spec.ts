@@ -260,6 +260,67 @@ test("move roundtrip stays under the perf budget on a throttled CPU", async ({ b
   }
 });
 
+test("off-turn tap on own piece is silent — no toast, no selection, no request", async ({ browser }) => {
+  // Silent-board principle: during play the BOARD is the only feedback
+  // channel. Bob is black, so on the opening position it's white to
+  // move. Bob tapping any of his own pieces (own-piece off-turn) MUST
+  // be a silent no-op: no toast, no selection state, no move request.
+  const suffix = Date.now().toString(36).slice(-6);
+  const { aliceCtx, bobCtx, alice, bob } = await twoClientsInGame(browser, suffix);
+  try {
+    const failures: string[] = [];
+    bob.on("response", (r) => {
+      if (r.url().includes("/api/games/") && r.url().includes("/move")) {
+        failures.push(`unexpected move POST to ${r.url()}`);
+      }
+    });
+    // Bob taps his own e7 pawn — it is currently white's turn.
+    await bob.locator('[data-square="e7"]').click();
+    await bob.waitForTimeout(300);
+    // No toast should appear.
+    const toast = await bob.locator(".toast, .toast-body").count();
+    expect(toast).toBe(0);
+    // No selection frame on e7.
+    const selected = await bob.locator('[data-square="e7"].selected').count();
+    expect(selected).toBe(0);
+    // No move request fired.
+    expect(failures).toEqual([]);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("illegal-destination tap deselects silently — no toast, no request", async ({ browser }) => {
+  // Alice (white) selects e2 pawn then taps a non-legal square (e5).
+  // Client-side legality via chess.js gates the submission — nothing
+  // goes to the server, no toast fires, selection just clears.
+  const suffix = Date.now().toString(36).slice(-6);
+  const { aliceCtx, bobCtx, alice, bob } = await twoClientsInGame(browser, suffix);
+  try {
+    const failures: string[] = [];
+    alice.on("response", (r) => {
+      if (r.url().includes("/api/games/") && r.url().includes("/move")) {
+        failures.push(`unexpected move POST to ${r.url()}`);
+      }
+    });
+    await alice.locator('[data-square="e2"]').click();
+    await alice.waitForTimeout(150);
+    await alice.locator('[data-square="e5"]').click();  // illegal — pawn can't jump to e5
+    await alice.waitForTimeout(300);
+    const toast = await alice.locator(".toast, .toast-body").count();
+    expect(toast).toBe(0);
+    // Selection cleared.
+    const stillSelected = await alice.locator('[data-square="e2"].selected').count();
+    expect(stillSelected).toBe(0);
+    // No move request fired.
+    expect(failures).toEqual([]);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 test("game screen never scrolls at 390x844, 1280x700, or 1440x900", async ({ browser }) => {
   // Tejas rejected a build where the game screen scrolled — on his phone
   // AND on his laptop (the huge desktop board pushed the bottom bar
