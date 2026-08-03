@@ -10,4 +10,13 @@ tmp/reviews/*
 !tmp/reviews/PROGRESS.md
 !tmp/reviews/*-review.md
 !tmp/reviews/build-report.md
+# Round-2 evidence: thesis, moodboard, side-by-side composites, report.
+# Team-lead explicitly asked for these to be committed as the round's evidence.
+!tmp/reviews/design-thesis.md
+!tmp/reviews/design-round-2-report.md
+!tmp/reviews/moodboard/
+tmp/reviews/moodboard/*
+!tmp/reviews/moodboard/final/
+!tmp/reviews/moodboard/contact-sheet.jpg
+!tmp/reviews/composites/
 .DS_Store
