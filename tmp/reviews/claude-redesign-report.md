@@ -71,6 +71,27 @@ Board
 3. **Empty new-user state.** A user who just registered sees only the install strip, an empty `Play` with "Add a friend to start a game.", and the `Friends` section with `Copy invite link`. It's honest but bare. If Tejas wants a nudge, we could add one line under `Friends` — but I lean toward not narrating.
 4. **Dark mode.** Not implemented. The paper world reads warmly on light OS themes; on dark-mode systems it will still show light (color-scheme is pinned to `light`). If dark mode matters to Tejas, that's a separate round.
 
+## Addendum — auth screen board anchor (2026-08-03)
+
+Tejas's verdict after the headline was removed: "just a wordmark and a form, nothing else, ridiculous." Quiet must not read as empty. The fix keeps the copy discipline intact and gives the page the product itself as its visual anchor.
+
+Change:
+- The auth screen now renders a large, non-interactive board — a real Queen's Gambit Declined Orthodox middlegame position (`r1bq1rk1/pp1nbppp/2p1pn2/3p2B1/2PP4/2N1PN2/PP3PPP/2RQKB1R w K - 3 8`). Chosen because it composes: both bishops developed, kingside castling, characteristic d5/c6/e6 pawn triangle, white's bishop pin on f6 gives the position a "moment" feel. Same walnut/paper world and Unicode Staunton pieces used everywhere else in the app.
+- Mobile stacks board over form. Desktop splits `1fr` for the board and `300–380px` for the form via a shell that widens to `1040px` when `:has(.auth)`.
+- `Board` component now takes an `interactive` prop; static mode renders squares as plain `div`s with no hover filter and no `aria-label`, and wraps the whole thing in `aria-hidden="true"` at the parent so screen readers skip a decorative board.
+- No copy added. The board carries the meaning.
+
+Screens added to `tmp/reviews/screens-claude/`:
+- `desktop-auth-empty.png` — desktop split, board left, form centered right
+- `mobile-auth-empty.png`, `mobile-auth-typed.png` — mobile stack, board over form
+- `desktop-dashboard-with-friend.png` and the rest of the flow unchanged
+
+Verification:
+- `npm run typecheck` clean
+- `npm run test:e2e` — both suites pass (the board mount doesn't disturb the register/challenge/game flows)
+- Prod: Worker version `a9d5cf43-00b9-4296-b496-dd45c0d75c96`. `/api/health` OK, `cloudflareinsights` beacon count 1, `chess.tejas.nyc` serves the new hashes (`index-CcjN3FRS.js`, `index-r-zxGPRJ.css`) after edge cache flush.
+- Committed as `ba7ea51 Auth screen: static board is the anchor`.
+
 ## Runbook if the deploy needs to roll back
 - `wrangler rollback` to a previous version, or
 - Revert commit `9f01e3e` (`Redesign: quiet warm-paper world, board is the hero`) and re-deploy.
