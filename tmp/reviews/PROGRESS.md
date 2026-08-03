@@ -46,3 +46,16 @@ Sign in) rejected as confusing.
 - src/styles.css — full rewrite
 - index.html — theme-color updated
 - tests/e2e.spec.ts — register() helper: Continue then Create passkey
+
+## Done
+- Typecheck + build + full e2e all green.
+- Two rounds of Playwright screenshots at 390px and 1200px, inspected and iterated
+  (mobile topbar wordmark wrap fixed, disabled primary made ghost, tabs turned into
+  underline instead of pill, desktop game shell widened to 1040px so the board
+  breathes).
+- Committed as `9f01e3e Redesign: quiet warm-paper world, board is the hero`.
+- Deployed to Cloudflare Worker `chess-with-friends`, version
+  `6b3db249-a41a-4709-b955-eced5421a9d0`. Prod smoke checks green:
+  `/api/health`, CF Insights beacon count = 1, `chess.tejas.nyc` serves the new
+  asset hashes after CF edge cache flush.
+- Final report at `tmp/reviews/claude-redesign-report.md`.
