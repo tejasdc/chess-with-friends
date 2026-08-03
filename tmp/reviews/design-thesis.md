@@ -51,7 +51,7 @@ No blue, no purple, no indigo, no green, no gradient, no glass, no dark mode.
 
 - 8×8 grid at exactly `min(90vw, 640px)`. Squares are `--paper` (light) and `--walnut` (dark). Flat fills. No gradient, no bevel, no glow, no shadow.
 - Coordinates rendered in `10px` monospace at the outer corners of each edge (not inside squares) — the previous round put tiny 9's *inside* squares, which competes with the pieces.
-- Pieces: standard Unicode Staunton, filled solid `--ink` for black, filled solid `--paper` with 1px `--ink` stroke for white. Font size = 74% of the square (previously ~55% — pieces looked skeletal). Optical baseline nudge so pawns don't float.
+- Pieces: FILLED Unicode Staunton glyphs (`♚♛♜♝♞♟`) for **both** sides — the outline "white" glyphs (`♔♕♖♗♘♙`) have transparent interiors and turn to mud on walnut squares. Differentiate by color: `--paper` fill for white with a 1px `--walnut-2` contrast stroke via four-corner text-shadow so bone pieces read on paper squares too; `--ink` fill for black (7:1 contrast on walnut — AAA — no stroke needed). Font size = 74% of the square (previously ~55% — pieces looked skeletal). Optical baseline nudge so pawns don't float. Rationale: this is what physical Bauhaus/Man Ray sets do — Hartwig's whites are pale wood, not wireframes.
 - **Legal-move indicator**: a single vermillion dot at square center (`8px`, `--vermillion`) — a coin drop, not a fill. If it's a capture: vermillion ring outlining the target square instead. Never both.
 - **Last move**: subtle vermillion outline (`1.5px`) on origin + destination squares. Fades after 800ms to a walnut hairline that stays until the next move.
 - **Selected square**: walnut hairline outline (`1.5px inset`).

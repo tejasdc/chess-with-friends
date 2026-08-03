@@ -19,4 +19,9 @@ tmp/reviews/moodboard/*
 !tmp/reviews/moodboard/final/
 !tmp/reviews/moodboard/contact-sheet.jpg
 !tmp/reviews/composites/
+# Two specific screens-r2 files kept as bar-fix evidence
+!tmp/reviews/screens-r2/
+tmp/reviews/screens-r2/*
+!tmp/reviews/screens-r2/piece-legibility-grid.png
+!tmp/reviews/screens-r2/prod-landing-mobile.png
 .DS_Store

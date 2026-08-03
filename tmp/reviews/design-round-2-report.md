@@ -2,8 +2,28 @@
 
 **Round:** 2026-08-03 · chess-design-2
 **Live at:** https://chess.tejas.nyc
-**Deployed:** wrangler version `4c867f30-f85f-4d61-8f59-0872a459d2ab`
-**Commit:** `6b0b736` — "Round 2: warm-paper Bauhaus world, board is the landing"
+**Deployed:** wrangler version `a242c84a-be9a-4933-a2e4-5c1c0bd2fbdf`
+**Commits on `main` for this round:**
+- `6b0b736` — the code (initial round 2 rewrite)
+- `7bfbdf3` — the evidence (thesis, moodboard, side-by-side composites, report)
+- `1d89365` — piece-legibility bar fix (filled glyphs for both sides, contrast stroke)
+
+## Post-review bar fix (piece legibility on dark squares)
+
+Team-lead flagged one bar failure visible in the round-2 live mobile shot: outline Unicode 'white' glyphs (`♔♕♖♗♘♙`) have transparent interiors, so on walnut squares the walnut showed through and white pieces read as mud with a whisper-thin edge. The h1 rook rendered with visible parallel-line artifacts from the outline stroke fighting the walnut fill. Root cause: my at-scale verification leaned on light-square examples.
+
+**Fix (what physical Bauhaus / Man Ray sets actually do):**
+- Both colors now use the FILLED glyph set (`♚♛♜♝♞♟`). Shape stays constant; color differentiates the sides.
+- `.piece-w` gets a `--paper` fill with a 1px `--walnut-2` hairline stroke via four-corner text-shadow — bone pieces now read on both paper squares (via the stroke) and walnut squares (via the fill).
+- `.piece-b` keeps `--ink` fill (~7:1 contrast on walnut, AAA; no stroke — a paper stroke on ink would look like a glow).
+- Piece font-family reordered to prefer symbol faces (`Segoe UI Symbol`, `Apple Symbols`, `Noto Sans Symbols2`) before `IBM Plex Sans`, since the UI face may bind chess codepoints to tofu on some systems.
+
+**Verification evidence:**
+- `tmp/reviews/screens-r2/piece-legibility-grid.png` — exhaustive grid at 44px squares (matches 390px viewport): every piece type in both colors on both square colors, plus alternating strips. All 24 combinations read cleanly. h1 rook artifact resolved.
+- `tmp/reviews/composites/05-pieces-before-after.jpg` — the shipped-round-2 mobile game view (LEFT: outline whites on walnut = mud) vs the fixed prod mobile landing (RIGHT: filled bone pieces, every rank crisp on both square colors).
+- `tmp/reviews/screens-r2/prod-landing-mobile.png` — fresh live prod capture.
+
+All 10 chromium + adversity tests remain green after the fix.
 
 ---
 
