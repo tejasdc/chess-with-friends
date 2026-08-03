@@ -302,6 +302,93 @@ body[data-screen="game"] .shell {
 body[data-screen="game"] .topbar {
   padding-bottom: 8px;
 }
+
+/* Landing and Inspirations follow Tejas's general no-scroll law: if the
+   page doesn't NEED to scroll, don't add scroll. Same shell-cap pattern
+   as the game screen, tuned to their content shape. Footer pins to the
+   bottom of the viewport via flex; content above fills the rest. */
+body[data-screen="landing"],
+body[data-screen="inspirations"] {
+  overflow: hidden;
+  height: 100dvh;
+}
+body[data-screen="landing"] .shell,
+body[data-screen="inspirations"] .shell {
+  height: 100dvh;
+  min-height: 100dvh;
+  padding-top: 12px;
+  padding-bottom: 8px;
+  gap: 12px;
+  overflow: hidden;
+}
+/* Content column stretches to fill available height; footer aligned to
+   viewport bottom via margin-top: auto on the .made-by footer. */
+body[data-screen="landing"] .stage,
+body[data-screen="inspirations"] .stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+body[data-screen="landing"] .stage > .auth,
+body[data-screen="inspirations"] .stage > .inspirations {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+body[data-screen="landing"] .made-by,
+body[data-screen="inspirations"] .made-by {
+  margin-top: auto;
+  margin-bottom: 0;
+  padding-top: 12px;
+}
+/* Mobile landing compression — sandbox board and form take the top,
+   auth stack is a flex column not a grid so it lays out predictably. */
+body[data-screen="landing"] .auth {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0;
+  min-height: 0;
+}
+body[data-screen="landing"] .auth-scene {
+  width: min(100%, 88vw, 640px);
+  flex: 0 1 auto;
+}
+@media (max-width: 640px) {
+  body[data-screen="landing"] .auth-scene { width: min(100%, 82vw, 420px); }
+}
+@media (min-width: 900px) {
+  body[data-screen="landing"] .auth {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+    align-items: center;
+    gap: 48px;
+  }
+}
+
+/* Landing footer — inline attribution + one signed-out link, quietly
+   paired. Same mono/muted register as the standard made-by. */
+.landing-footer {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--stone);
+  text-align: center;
+}
+.linkish {
+  font: inherit;
+  color: var(--stone);
+  background: transparent;
+  padding: 0;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  letter-spacing: inherit;
+}
+.linkish:hover { color: var(--ink); }
 /* Compound selector wins over `.game` at same specificity + later
    position — critical because `.game { display: grid }` further down in
    the file would otherwise override this flex column and collapse the

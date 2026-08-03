@@ -305,6 +305,7 @@ function Shell({
   setMessage,
   onSignedOut,
   menuExtras,
+  hideMenu,
 }: {
   children?: React.ReactNode;
   home?: HomeData | null;
@@ -316,6 +317,9 @@ function Shell({
      Inspirations items. Used by GameScreen to expose Home + Resign inside
      the same ⋯ menu (team-lead: one menu pattern, one position). */
   menuExtras?: (closeMenu: () => void) => React.ReactNode;
+  /* Landing screen suppresses chrome — signed-out visitors need no menu.
+     The footer carries attribution + the one useful link (inspirations). */
+  hideMenu?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // Close menu when route changes.
@@ -336,17 +340,21 @@ function Shell({
         <div className="topbar-right">
           {home ? <span className="handle">@{home.user.handle}</span> : null}
           {/* Universal ⋯ menu — top-right on every screen per team-lead.
-              Kept as one pattern so users learn "menu lives here" once. */}
-          <button
-            className="menu-dot"
-            type="button"
-            aria-label="Open menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(v => !v)}
-          >···</button>
+              Kept as one pattern so users learn "menu lives here" once.
+              Landing suppresses it via hideMenu — signed-out visitors
+              need no chrome; the footer carries the one useful link. */}
+          {hideMenu ? null : (
+            <button
+              className="menu-dot"
+              type="button"
+              aria-label="Open menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(v => !v)}
+            >···</button>
+          )}
         </div>
       </header>
-      {menuOpen ? (
+      {menuOpen && !hideMenu ? (
         <MenuSheet
           home={home || null}
           onClose={() => setMenuOpen(false)}
@@ -439,35 +447,24 @@ function MenuSheet({
 // Simple in-world layout; back link at top; ⋯ menu still available in
 // the Shell topbar for consistency.
 function InspirationsPage() {
+  // Same no-scroll shell as landing/game — Tejas's general law now that
+  // nothing on this page NEEDS to scroll.
+  useEffect(() => {
+    document.body.dataset.screen = "inspirations";
+    return () => {
+      if (document.body.dataset.screen === "inspirations") delete document.body.dataset.screen;
+    };
+  }, []);
   return (
     <div className="inspirations">
       <button className="link" onClick={() => navigate("/")}>← back</button>
       <h1 className="insp-title">Inspirations</h1>
       <p className="insp-body">
-        This app's visual world sits on top of chess design history and one
-        painting.
+        Leisure reconceived as active and collective, not passive and solitary.
       </p>
       <ul className="insp-list">
-        <li>
-          <strong>Alexander Rodchenko</strong> · Chess table for the workers' club, 1925.
-          Two chairs and a board built as one piece of furniture — sitting IS the invitation.
-          <p className="insp-note">
-            The chess table was part of Rodchenko's design for the USSR Workers' Club,
-            shown at the 1925 Paris <em>Exposition Internationale des Arts Décoratifs</em> and
-            now in the MoMA collection. The Workers' Club reconceived leisure as
-            <em> active and collective</em> rather than passive and solitary — chess played sitting
-            across from someone you know, not scrolled alone. It's the philosophy this app inherits.
-          </p>
-        </li>
-        <li>
-          <strong>Josef Hartwig</strong> · Bauhaus chess set, 1924. Pieces as pure geometry;
-          the shape encodes the movement.
-        </li>
-        <li>
-          <strong>Virgilio Villalba</strong> · Untitled, 1955 (MoMA collection). Muted
-          celadon field, deep incision, one cream chip. The composition this
-          register borrows from.
-        </li>
+        <li><strong>Alexander Rodchenko</strong> · Chess table for the workers' club, 1925.</li>
+        <li><strong>Virgilio Villalba</strong> · Untitled, 1955.</li>
       </ul>
       <MadeByTejas />
     </div>
@@ -650,6 +647,16 @@ function AuthScreen({
   // prompts across separate activations reliably on all engines).
   const [flow, setFlow] = useState<"login" | "register" | "unknown">("unknown");
 
+  // Landing borrows the no-scroll shell — everything must fit in one
+  // viewport at 390, footer pinned to the bottom. Tejas's general law:
+  // "if you don't need scrolling, let's not add scrolling."
+  useEffect(() => {
+    document.body.dataset.screen = "landing";
+    return () => {
+      if (document.body.dataset.screen === "landing") delete document.body.dataset.screen;
+    };
+  }, []);
+
   useEffect(() => {
     const trimmed = handle.trim();
     if (!trimmed) {
@@ -770,7 +777,7 @@ function AuthScreen({
           : "Sign in or sign up";
 
   return (
-    <Shell message={message} messageKind={messageKind} setMessage={setMessage}>
+    <Shell message={message} messageKind={messageKind} setMessage={setMessage} hideMenu>
       <section className="auth">
         <div className="auth-scene">
           {/* Sandbox — real legal moves, no goal, resets after 20s idle.
@@ -808,9 +815,22 @@ function AuthScreen({
               no subline / no recovery toast until that directive lands.
               The morphing button label stays. */}
         </form>
-        <MadeByTejas />
+        <LandingFooter />
       </section>
     </Shell>
+  );
+}
+
+// Landing footer — pinned to the bottom of the viewport. Both attribution
+// and the one useful signed-out link (inspirations) in one quiet line.
+function LandingFooter() {
+  return (
+    <p className="made-by landing-footer">
+      made by{" "}
+      <a href="https://tejas.nyc" target="_blank" rel="noreferrer">tejas.nyc</a>
+      {" · "}
+      <button className="linkish" type="button" onClick={() => navigate("/inspirations")}>inspirations</button>
+    </p>
   );
 }
 
