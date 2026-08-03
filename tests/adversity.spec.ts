@@ -260,5 +260,42 @@ test("move roundtrip stays under the perf budget on a throttled CPU", async ({ b
   }
 });
 
+test("game screen never scrolls at 390x844, 1280x700, or 1440x900", async ({ browser }) => {
+  // Tejas rejected a build where the game screen scrolled — on his phone
+  // AND on his laptop (the huge desktop board pushed the bottom bar
+  // below the fold). The hard constraint: while a game is open, the
+  // page's scroll extent MUST equal the viewport. If it doesn't, the
+  // board is over-tall and needs to shrink into the remaining budget.
+  const suffix = Date.now().toString(36).slice(-6);
+  const { aliceCtx, bobCtx, alice, bob } = await twoClientsInGame(browser, suffix);
+  try {
+    const sizes = [
+      { width: 390, height: 844 },   // iPhone 14 Pro
+      { width: 1280, height: 700 },  // laptop with short vertical space
+      { width: 1440, height: 900 },  // standard desktop
+    ];
+    for (const size of sizes) {
+      await alice.setViewportSize(size);
+      // Force a reflow beat so aspect-ratio + flex chain settles.
+      await alice.waitForTimeout(150);
+      const scroll = await alice.evaluate(() => ({
+        scrollHeight: document.documentElement.scrollHeight,
+        clientHeight: document.documentElement.clientHeight,
+        innerHeight: window.innerHeight,
+        screen: document.body.dataset.screen,
+      }));
+      // Body should be flipped into game mode.
+      expect(scroll.screen).toBe("game");
+      // Scroll extent must not exceed the viewport height. Allow a
+      // 1px slack for subpixel rounding.
+      expect(scroll.scrollHeight).toBeLessThanOrEqual(scroll.clientHeight + 1);
+      expect(scroll.scrollHeight).toBeLessThanOrEqual(scroll.innerHeight + 1);
+    }
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 // Silence unused-import warning if a future refactor drops CDPSession above.
 export type _KeepCDP = CDPSession;

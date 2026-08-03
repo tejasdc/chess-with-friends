@@ -97,6 +97,14 @@ function SandboxBoard() {
 
 type TimeControl = "10|0" | "5|0";
 type GameStatus = "active" | "checkmate" | "resigned" | "timeout" | "draw";
+
+// Pipe notation stays code-only — humans read minutes. Every surface that
+// renders a TimeControl to the user MUST call this. Sweep script in CI
+// checks the compiled bundle for "10|0"/"5|0" appearing in user-visible
+// contexts.
+function formatTimeControl(tc: TimeControl): string {
+  return tc === "5|0" ? "5 min" : "10 min";
+}
 type PushStatus = "checking" | "ready" | "enabled" | "blocked" | "unsupported";
 type ToastKind = "info" | "error";
 type SetMessage = (value: string, kind?: ToastKind) => void;
@@ -776,13 +784,16 @@ function Dashboard({
     <div className="dashboard">
       <InstallPrompt home={home} setMessage={setMessage} />
       {inviteToken ? <InvitePanel token={inviteToken} refresh={refresh} setMessage={setMessage} /> : null}
-      {/* Actionable-first ordering: things awaiting a response come before
-          things you initiate. Incoming panel renders nothing when empty
-          (checked inside), so this position doesn't produce a hollow strip. */}
+      {/* Ordering: (1) INCOMING actions the user must respond to, (2) games
+          already IN PLAY — an accepted invite must not require scrolling
+          past a Play form to find, (3) PLAY to start something new,
+          (4) friends list, (5) PAST games collapsed. Passive material
+          sinks; the user's current obligations rise. */}
       <IncomingPanel home={home} refresh={refresh} />
+      <LiveGamesSection games={home.games} />
       <PlaySection home={home} refresh={refresh} setMessage={setMessage} />
       <FriendsSection home={home} refresh={refresh} setMessage={setMessage} />
-      <GamesSection games={home.games} />
+      <PastGamesSection games={home.games} />
     </div>
   );
 }
@@ -962,7 +973,7 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
     })),
     ...home.challenges.map((challenge) => ({
       key: `c-${challenge.id}`,
-      label: <><strong>@{challenge.fromHandle}</strong> challenged you · {challenge.timeControl}</>,
+      label: <><strong>@{challenge.fromHandle}</strong> invited you to a game · {formatTimeControl(challenge.timeControl)}</>,
       onAccept: () => void acceptChallenge(challenge.id),
     })),
     ...home.schedules
@@ -973,7 +984,7 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
           <>
             <strong>@{schedule.fromHandle}</strong> proposed{" "}
             {new Date(schedule.startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ·{" "}
-            {schedule.timeControl}
+            {formatTimeControl(schedule.timeControl)}
           </>
         ),
         onAccept: () => void acceptSchedule(schedule.id),
@@ -994,21 +1005,48 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
   );
 }
 
-function GamesSection({ games }: { games: GameMeta[] }) {
-  if (!games.length) return null;
+// Split into two: LIVE games shout at the top of the dashboard so an
+// accepted invitation is unmissable; past games get their own collapsed
+// section far below. Never mixed — mixing them buries the one thing the
+// user was told about into the noise of games they already know about.
+function LiveGamesSection({ games }: { games: GameMeta[] }) {
   const active = games.filter((game) => game.status === "active");
-  const past = games.filter((game) => game.status !== "active");
+  if (!active.length) return null;
   return (
-    <section className="games">
-      <h2 className="section-title">Games</h2>
+    <section className="games games-live">
+      <h2 className="section-title">In play</h2>
       <div className="game-rows">
         {active.map((game) => (
           <GameRow key={game.id} game={game} accent />
         ))}
-        {past.slice(0, 4).map((game) => (
-          <GameRow key={game.id} game={game} />
-        ))}
       </div>
+    </section>
+  );
+}
+
+function PastGamesSection({ games }: { games: GameMeta[] }) {
+  const past = games.filter((game) => game.status !== "active");
+  const [open, setOpen] = useState(false);
+  if (!past.length) return null;
+  return (
+    <section className="games games-past">
+      <button
+        className="section-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        type="button"
+      >
+        <span className="section-title">Past games</span>
+        <span className="section-toggle-count">{past.length}</span>
+        <span className="section-toggle-caret" aria-hidden="true">{open ? "−" : "+"}</span>
+      </button>
+      {open ? (
+        <div className="game-rows">
+          {past.slice(0, 20).map((game) => (
+            <GameRow key={game.id} game={game} />
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1017,7 +1055,7 @@ function GameRow({ game, accent }: { game: GameMeta; accent?: boolean }) {
   const status = game.status === "active" ? "in play" : game.result || game.status;
   return (
     <button className={`game-row ${accent ? "accent" : ""}`} onClick={() => navigate(`/game/${game.id}`)}>
-      <span className="row-mono">{game.timeControl}</span>
+      <span className="row-mono">{formatTimeControl(game.timeControl)}</span>
       <span className="row-status">{status}</span>
       <span className="row-arrow" aria-hidden="true">→</span>
     </button>
@@ -1299,6 +1337,16 @@ function GameScreen({
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  // Lock the viewport to no-scroll while on the game screen. Board sizes
+  // itself to fit the remaining budget via CSS; no vertical scroll on any
+  // form factor. Attribute is namespaced so other routes are unaffected.
+  useEffect(() => {
+    document.body.dataset.screen = "game";
+    return () => {
+      if (document.body.dataset.screen === "game") delete document.body.dataset.screen;
+    };
   }, []);
 
   async function submitMove(from: Square, to: Square, promotion?: "q" | "r" | "b" | "n") {
