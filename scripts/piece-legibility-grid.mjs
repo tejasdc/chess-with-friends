@@ -14,7 +14,7 @@ const html = `<!doctype html>
 <link rel="stylesheet" href="http://127.0.0.1:4173/assets/index-uRzzsVxR.css" />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
 <style>
-  body { padding: 12px 16px; background: #F0E6D2; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: #12100C; }
+  body { padding: 12px 16px; background: #7CA898; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: #2E2A3D; }
   h1 { font-size: 12px; margin: 0 0 8px 0; letter-spacing: 0.14em; text-transform: uppercase; color: #6B6455; font-weight: 500; }
   table { border-collapse: collapse; }
   td { padding: 0; margin: 0; }
@@ -27,8 +27,8 @@ const html = `<!doctype html>
     vertical-align: middle;
     display: table-cell;
   }
-  .light { background: #F0E6D2; }
-  .dark  { background: #4A3826; }
+  .light { background: #E8DBBE; }
+  .dark  { background: #5F8A7A; }
   /* Reuse the shipped piece rules by hoisting them here (mirror of styles.css) */
   .piece {
     font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", "IBM Plex Sans", sans-serif;
@@ -39,14 +39,21 @@ const html = `<!doctype html>
     transform: translateY(-1px);
   }
   .piece-w {
-    color: #F0E6D2;
+    color: #E8DBBE;
     text-shadow:
-      -1px -1px 0 #3A2B1E,
-       1px -1px 0 #3A2B1E,
-      -1px  1px 0 #3A2B1E,
-       1px  1px 0 #3A2B1E;
+      -1px -1px 0 #2E2A3D,
+       1px -1px 0 #2E2A3D,
+      -1px  1px 0 #2E2A3D,
+       1px  1px 0 #2E2A3D;
   }
-  .piece-b { color: #12100C; }
+  .piece-b {
+    color: #2E2A3D;
+    text-shadow:
+      -1px -1px 0 #EEE3C4,
+       1px -1px 0 #EEE3C4,
+      -1px  1px 0 #EEE3C4,
+       1px  1px 0 #EEE3C4;
+  }
   .divider { padding: 12px 0 4px; }
 </style>
 </head><body>
@@ -103,14 +110,14 @@ const mixedB  = ["k","q","r","b","n","p","k","q"].map((t,i) => `<td class="cell 
 const HTML = `<!doctype html><html><head>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
 <style>
-  body { padding: 12px 16px; background: #F0E6D2; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: #12100C; }
+  body { padding: 12px 16px; background: #7CA898; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: #2E2A3D; }
   h1 { font-size: 12px; margin: 0 0 8px 0; letter-spacing: 0.14em; text-transform: uppercase; color: #6B6455; font-weight: 500; }
   table { border-collapse: collapse; margin: 0; }
   td { padding: 0; margin: 0; }
   .lab { padding: 0 8px; font-size: 10px; color: #6B6455; letter-spacing: 0.1em; text-transform: uppercase; vertical-align: middle; }
   .cell { width: 44px; height: 44px; text-align: center; vertical-align: middle; }
-  .light { background: #F0E6D2; }
-  .dark  { background: #4A3826; }
+  .light { background: #E8DBBE; }
+  .dark  { background: #5F8A7A; }
   .piece {
     font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", "IBM Plex Sans", sans-serif;
     font-size: 32px; line-height: 1; user-select: none; display: inline-block; transform: translateY(-1px);

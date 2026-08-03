@@ -1,63 +1,75 @@
 /* =========================================================================
-   Villalba build — teal grounds + cream chip + deep incision.
+   Villalba build (approved-mockup palette).
 
-   Palette family lifted from Tejas's own site (tejas.nyc/projects) so the
-   two properties read as siblings. Reference photos of chess set + painting
-   at tmp/reviews/moodboard/final/{01-rodchenko,02-hartwig,08-villalba-...}.
+   Tokens LOCKED to the mockup D/E/F set Tejas approved. The earlier
+   tejas.nyc/projects palette was rejected — those hex values are gone.
+   Reference painting at tmp/reviews/moodboard/final/08-villalba-...jpeg;
+   the mockup tokens live in tmp/reviews/mockups/src/_tokens.css.
 
-   Compositional map (chess app ↔ tejas.nyc/projects):
-     mid-teal ground        = site background
-     cream                  = jewel accent + board light squares
-     deep-teal ink          = text on ground + board dark squares + turn strip
-     vermillion             = REDUCED — retained ONLY for hard error toasts
-                              (a genuine failure signal a cream tag can't
-                              replace); everywhere else it's dead.
+   Compositional map:
+     celadon field       = site background (softer green than the earlier build)
+     buff                = board LIGHT squares + inputs + toast surface
+     teal-dark           = board DARK squares — green board, per Tejas
+     navy-ink            = primary text + BUTTON FILL (dark buttons, light text)
+     cream chip          = tiny accent (identity mark, in-play dot, active-turn
+                           chip); DIFFERENT from buff (lighter, warmer)
+     teak                = frame edge (hairline at mobile)
+     vermillion          = ERROR + destructive (Resign / Confirm resign) only
 
-   The variable NAMES kept from round 2 so downstream CSS didn't need a
-   sweep — the SEMANTICS bind to new hues. --ground is new: site bg,
-   distinct from --paper which is a cream surface (board light, inputs,
-   toasts).
+   Variable NAMES kept so downstream rules didn't need a sweep — SEMANTICS
+   bind to new hues. Anything that used to render brown/walnut now renders
+   in-family (there is no brown/walnut hue anywhere in the token set —
+   any leftover brown on screen is a hardcoded hex to hunt and delete).
    ========================================================================= */
 
 :root {
   color-scheme: light;
 
-  /* Site ground — mid-teal, matches tejas.nyc/projects background. */
-  --ground:     #3E8C82;   /* body / shell / app bg */
-  --ground-2:   #4E9E92;   /* one shade lighter — subtle hover / hairline on teal */
-  --ground-3:   #57A89B;   /* lightest teal — soft accents */
+  /* Site ground — celadon, softer green than the previous build. */
+  --ground:     #7CA898;   /* body / shell / app bg */
+  --ground-2:   #6E9F91;   /* one shade darker teal (still in-family) */
+  --ground-3:   #5F8A7A;   /* teal-dark (board dark squares) */
 
-  /* Cream surfaces — board light, inputs, toasts, buttons at rest. */
-  --paper:      #E9DFA0;   /* Villalba's cream chip, matches site accents */
-  --paper-2:    #D8CE8F;   /* one shade deeper — input focus / hover */
-  --paper-3:    #C5BB7F;   /* softer, disabled swatch */
+  /* Buff — board LIGHT squares, input surfaces, toast surface. */
+  --paper:      #E8DBBE;   /* buff — the club-vinyl light square */
+  --paper-2:    #D9CBA6;   /* buff-2 — input focus / hover */
+  --paper-3:    #C5BB92;   /* softer, disabled swatch */
 
-  /* Ink — deepest teal, from the incision + site content column. */
-  --ink:        #081a18;   /* primary text on ground/paper; near-black-teal */
-  --ink-2:      #0F201E;   /* deep panel bg (column, incoming band, turn strip) */
-  --ink-3:      #1b2a26;   /* softest deep — secondary borders */
-  --stone:      #4b6660;   /* muted teal-grey for small print on cream */
-  --stone-on-ground: rgba(8, 26, 24, 0.55);  /* small print on the teal ground */
+  /* Ink — navy-purple, from the Villalba incision. Also the button fill. */
+  --ink:        #2E2A3D;   /* primary text + button bg */
+  --ink-2:      #23202F;   /* one shade deeper (active-turn strip, incoming) */
+  --ink-3:      #1a1826;   /* softest deep — secondary borders */
+  --stone:      #6b6a7a;   /* muted for small print on buff/cream */
+  --stone-on-ground: rgba(46, 42, 61, 0.55);   /* small print on ground */
 
-  /* Board — light = cream, dark = deep teal. */
-  --walnut:     #0F201E;   /* dark squares (name retained; hue swapped) */
-  --walnut-2:   #081a18;   /* piece-white outline stroke */
+  /* Board — light = buff, dark = teal-dark (green board). */
+  --walnut:     #5F8A7A;   /* board DARK squares — green, per Tejas */
+  --walnut-2:   #2E2A3D;   /* piece-white outline stroke = navy-ink */
 
-  /* Vermillion — REDUCED. Retained only for the error toast tint. */
+  /* Cream chip — the Villalba jewel, distinct from buff. Used ONLY for
+     small accents (identity mark, in-play dot). Not a surface color. */
+  --cream:      #EEE3C4;
+  --cream-2:    #E5D9B4;
+
+  /* Teak — warm wood frame edge (per mockup). Used at hairline weight
+     on mobile so it doesn't dominate at 390. */
+  --teak:       #8C5A2E;
+  --teak-2:     #6E4620;
+
+  /* Vermillion — DEAD except error toast + destructive game actions. */
   --vermillion: #C43416;
   --vermillion-2:#A02710;
 
-  /* Presence dots — functional signals on ground/strip.
-     Cream = online (jewel chip), warm ochre pulse = reconnecting,
-     hollow stone ring = offline. */
-  --presence-online:      #E9DFA0;
-  --presence-reconnect:   #B77C29;
-  --presence-offline-ring:#4b6660;
+  /* Presence dots — cream chip online, warm-ochre pulse reconnecting,
+     hollow navy ring offline. */
+  --presence-online:      var(--cream);
+  --presence-reconnect:   var(--teak);
+  --presence-offline-ring:#6b6a7a;
 
-  --hair:        rgba(233, 223, 160, 0.20);      /* cream-based hairline on ground */
-  --hair-strong: rgba(233, 223, 160, 0.36);
-  --hair-on-cream: rgba(8, 26, 24, 0.20);         /* ink-based hairline on cream */
-  --focus:       rgba(233, 223, 160, 0.55);
+  --hair:        rgba(46, 42, 61, 0.22);   /* navy-based hairline on ground */
+  --hair-strong: rgba(46, 42, 61, 0.36);
+  --hair-on-cream: rgba(46, 42, 61, 0.22);
+  --focus:       rgba(238, 227, 196, 0.55);
 
   /* Type stacks */
   --mono: "IBM Plex Mono", ui-monospace, "JetBrains Mono", "Menlo", monospace;
@@ -153,14 +165,13 @@ a { color: inherit; }
   .account .ghost { padding: 6px 10px; font-size: 12px; }
 }
 .wordmark::before {
-  /* Small cream chip before the wordmark — the Villalba chip translated
-     to the identity mark, replacing the previous vermillion square.
-     One 9px cream tag against the teal ground. */
+  /* Identity mark — the Villalba cream chip (LIGHTER than the buff
+     board light square). Single 9px cream tag against celadon ground. */
   content: "";
   display: inline-block;
   width: 9px;
   height: 9px;
-  background: var(--paper);
+  background: var(--cream);
   margin-right: 10px;
   vertical-align: 0.05em;
   transform: translateY(-1px);
@@ -200,7 +211,7 @@ a { color: inherit; }
   position: fixed;
   inset: 0;
   z-index: 25;
-  background: rgba(8, 26, 24, 0.35);
+  background: rgba(46, 42, 61, 0.35);
 }
 .menu-sheet {
   position: fixed;
@@ -212,7 +223,7 @@ a { color: inherit; }
   color: var(--paper);
   border: 1px solid var(--ink);
   padding: 8px 0;
-  box-shadow: 0 8px 24px rgba(8, 26, 24, 0.32);
+  box-shadow: 0 8px 24px rgba(46, 42, 61, 0.32);
 }
 .menu-list {
   list-style: none;
@@ -231,7 +242,7 @@ a { color: inherit; }
   cursor: pointer;
   transition: background-color 120ms var(--ease);
 }
-.menu-item:hover { background: rgba(233, 223, 160, 0.08); }
+.menu-item:hover { background: rgba(238, 227, 196, 0.08); }
 .menu-state {
   display: flex;
   align-items: baseline;
@@ -241,10 +252,10 @@ a { color: inherit; }
   font-family: var(--mono);
   font-size: 13px;
 }
-.menu-state-label { color: rgba(233, 223, 160, 0.7); }
+.menu-state-label { color: rgba(238, 227, 196, 0.7); }
 .menu-state-value { color: var(--paper); }
 .menu-item-warn { color: var(--vermillion); }
-.menu-item-warn:hover { background: rgba(196, 52, 22, 0.1); }
+.menu-item-warn:hover { background: rgba(196, 52, 22, 0.12); }
 .menu-item-danger {
   background: var(--vermillion);
   color: var(--paper);
@@ -364,7 +375,7 @@ a { color: inherit; }
   color: var(--ink);
   background: var(--paper);
   border: 1px solid var(--walnut);
-  box-shadow: 0 6px 20px rgba(74, 56, 38, 0.18);
+  box-shadow: 0 6px 20px rgba(46, 42, 61, 0.24);
   /* Subtle rise-in when replaced — feels like something arrived, not
      something appeared. Prefers-reduced-motion respected below. */
   animation: toast-in 240ms var(--ease);
@@ -413,7 +424,7 @@ a { color: inherit; }
   color: var(--paper);
   transition: transform 120ms var(--ease), background-color 120ms var(--ease);
 }
-.primary:hover:not(:disabled)  { background: #000; }
+.primary:hover:not(:disabled)  { background: var(--ink-2); }
 .primary:active:not(:disabled) { transform: translateY(1px); }
 .primary:disabled              { opacity: 0.35; cursor: not-allowed; }
 .primary.compact               { padding: 6px 12px; font-size: 13px; }
@@ -580,15 +591,16 @@ a { color: inherit; }
   white-space: nowrap;
   transition: background-color 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
 }
-.auth-primary:hover:not(:disabled) { background: #000; border-color: #000; }
+.auth-primary:hover:not(:disabled) { background: var(--ink-2); border-color: var(--ink-2); }
 .auth-primary:active:not(:disabled) { transform: translateY(1px); }
 .auth-primary:disabled {
-  /* Ghost/outline — quiet in-world, reads as "waiting", not "dead". */
-  color: var(--stone);
-  background: var(--paper);
-  border-color: var(--walnut);
+  /* Buttons GO DARK per Tejas — always navy-filled, dim opacity when
+     disabled. No more cream/yellow ghost state (rejected). */
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
   cursor: default;
-  opacity: 1;                /* override .primary:disabled opacity */
+  opacity: 0.4;
 }
 
 @media (max-width: 480px) {
@@ -778,7 +790,7 @@ a { color: inherit; }
   justify-content: space-between;
   gap: 16px;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(233, 223, 160, 0.16);
+  border-bottom: 1px solid rgba(238, 227, 196, 0.16);
   font-size: 14px;
 }
 .incoming-row:last-child { border-bottom: 0; }
@@ -788,7 +800,7 @@ a { color: inherit; }
   color: var(--ink);
   font-weight: 600;
 }
-.incoming-row .primary:hover { background: #F3EBB6; }
+.incoming-row .primary:hover { background: var(--cream); }
 
 /* Invite panel — mirrors incoming, single deep band */
 .invite {
@@ -1018,7 +1030,7 @@ a { color: inherit; }
    it doesn't disappear against vermillion; green/amber remain themselves. */
 .clock-strip.active-turn .presence.offline,
 .clock-strip.active-turn .presence.gone {
-  box-shadow: inset 0 0 0 1.5px rgba(240, 230, 210, 0.7);
+  box-shadow: inset 0 0 0 1.5px rgba(238, 227, 196, 0.7);
 }
 
 .who {
@@ -1160,8 +1172,16 @@ a { color: inherit; }
   height: 100%;
   aspect-ratio: 1 / 1;
   background: var(--paper);
-  border: 1px solid var(--walnut);
+  /* Teak wood frame — desktop gets the mockup's 5px band; mobile
+     collapses to a hairline so the frame doesn't dominate at 390 (per
+     team-lead's honest-at-mobile rule). Inner 1px navy hairline stays
+     for square contrast against the buff outer ring. */
+  border: 1px solid var(--ink);
+  box-shadow: 0 0 0 5px var(--teak), 0 8px 22px rgba(46, 42, 61, 0.22);
   contain: layout paint;
+}
+@media (max-width: 480px) {
+  .board { box-shadow: 0 0 0 1px var(--teak), 0 4px 14px rgba(46, 42, 61, 0.20); }
 }
 
 .square {
@@ -1180,8 +1200,8 @@ a { color: inherit; }
 
 .board-static .square { cursor: default; }
 .board:not(.board-static) .square { cursor: pointer; }
-.board:not(.board-static) .square:hover.light { background: #EADFC5; }
-.board:not(.board-static) .square:hover.dark  { background: #3E2F1E; }
+.board:not(.board-static) .square:hover.light { background: var(--paper-2); }
+.board:not(.board-static) .square:hover.dark  { background: color-mix(in oklab, var(--walnut) 85%, var(--ink)); }
 
 /* Board indicators — swapped from vermillion to context-aware ink/cream
    so they read on both cream light squares AND deep-teal dark squares
@@ -1242,10 +1262,12 @@ a { color: inherit; }
   user-select: none;
   transform: translateY(-1px); /* optical baseline nudge — pawns don't float */
 }
-/* Filled glyphs for BOTH sides — differentiate by fill color. White is
-   bone with a walnut contrast stroke so it reads at 390px on paper AND
-   on walnut squares. This is what physical Bauhaus sets do: pale wood
-   whites, dark wood blacks, no wireframes. */
+/* Filled glyphs for BOTH sides. Each color gets a contextual contrast
+   hairline stroke — buff fill + navy stroke for white; navy fill + cream
+   stroke for black. In the mockup palette navy pieces on the teal-dark
+   board squares are near-tone (both dark) and disappeared without the
+   cream stroke — a mirror of the round-3 Hartwig-trick for the black
+   pieces. Verified with the legibility grid. */
 .piece-w {
   color: var(--paper);
   text-shadow:
@@ -1255,9 +1277,12 @@ a { color: inherit; }
      1px  1px 0 var(--walnut-2);
 }
 .piece-b {
-  /* Ink on paper is high contrast; ink on walnut is still ~7:1 (AAA).
-     No stroke needed — a paper stroke on ink would look like a glow. */
   color: var(--ink);
+  text-shadow:
+    -1px -1px 0 var(--cream),
+     1px -1px 0 var(--cream),
+    -1px  1px 0 var(--cream),
+     1px  1px 0 var(--cream);
 }
 
 /* Legal move dot — contextual: deep-ink chip on cream squares, cream
@@ -1288,7 +1313,7 @@ a { color: inherit; }
 .promotion-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(18, 16, 12, 0.55);
+  background: rgba(46, 42, 61, 0.55);
   display: grid;
   place-items: center;
   z-index: 20;

@@ -417,11 +417,7 @@ function InspirationsPage() {
           celadon field, deep incision, one cream chip. The composition this
           register borrows from.
         </li>
-        <li>
-          <strong>Palette family</strong> · adapted from <a className="insp-link" href="https://tejas.nyc/projects" target="_blank" rel="noreferrer">tejas.nyc/projects</a> so the two properties read as siblings.
-        </li>
       </ul>
-      <p className="insp-footnote">Photo of the Villalba painting by Tejas.</p>
     </div>
   );
 }
