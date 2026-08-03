@@ -150,8 +150,12 @@ function App() {
 function Shell({ children, home, message }: { children?: React.ReactNode; home?: HomeData | null; message?: string }) {
   return (
     <main className="app-shell">
+      <div className="page-ornament" aria-hidden="true" />
       <header className="topbar">
-        <button className="brand" onClick={() => navigate("/")}>Chess with Friends</button>
+        <button className="brand" onClick={() => navigate("/")}>
+          <span className="brand-mark" aria-hidden="true"><ElephantMark /></span>
+          <span>Friends-only chess</span>
+        </button>
         {home ? (
           <div className="account">
             <span>@{home.user.handle}</span>
@@ -165,7 +169,7 @@ function Shell({ children, home, message }: { children?: React.ReactNode; home?:
         ) : null}
       </header>
       {message ? <p className="notice" role="status">{message}</p> : null}
-      {children}
+      <div className="surface-stack">{children}</div>
     </main>
   );
 }
@@ -221,19 +225,23 @@ function AuthScreen({ onSignedIn, message, setMessage }: { onSignedIn: () => voi
   return (
     <Shell message={message}>
       <section className="auth-panel">
-        <div>
-          <p className="eyebrow">Friends-only live chess</p>
+        <div className="auth-copy">
+          <div className="hero-seal" aria-hidden="true"><ElephantMark /></div>
+          <p className="eyebrow">Chaturanga lineage</p>
           <h1>Sit down when your friend is ready.</h1>
+          <p className="lede">A quiet board, a known opponent, and no open pool of strangers.</p>
         </div>
-        <label>
-          Handle
-          <input value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="your_handle" autoComplete="username webauthn" />
-        </label>
-        <div className="button-row">
-          <button onClick={register} disabled={busy || !handle}>Create passkey</button>
-          <button className="secondary" onClick={login} disabled={busy || !handle}>Sign in</button>
+        <div className="auth-form">
+          <label>
+            Handle
+            <input value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="your_handle" autoComplete="username webauthn" />
+          </label>
+          <div className="button-row">
+            <button onClick={register} disabled={busy || !handle}>Create passkey</button>
+            <button className="secondary" onClick={login} disabled={busy || !handle}>Sign in</button>
+          </div>
+          <p className="small">No email or phone number. Your passkey is the account anchor.</p>
         </div>
-        <p className="small">No email or phone number. Your passkey is the account anchor.</p>
       </section>
     </Shell>
   );
@@ -292,7 +300,8 @@ function InstallPanel({ home, setMessage }: { home: HomeData; setMessage: (value
   return (
     <section className="panel install">
       <div>
-        <h2>Install</h2>
+        <p className="panel-kicker">Three allowed pushes</p>
+        <h2>Install & notifications</h2>
         {pushStatus === "blocked" ? (
           <p>Notifications are blocked in this browser. They are only for friend requests, game challenges, and scheduled games starting.</p>
         ) : (
@@ -321,7 +330,8 @@ function InvitePanel({ token, refresh, setMessage }: { token: string; refresh: (
   }
   return (
     <section className="panel accent-panel">
-      <h2>Invite link</h2>
+      <p className="panel-kicker">Invite link</p>
+      <h2>Join this circle</h2>
       <button onClick={send}>
         <Send size={18} />
         Send friend request
@@ -353,7 +363,10 @@ function FriendPanel({ home, refresh, setMessage }: { home: HomeData; refresh: (
   return (
     <section className="panel">
       <div className="panel-heading">
-        <h2>Friends</h2>
+        <div>
+          <p className="panel-kicker">Circle</p>
+          <h2>Friends</h2>
+        </div>
         <button className="icon-button" aria-label="Copy invite link" onClick={() => void navigator.clipboard.writeText(invite)}>
           <Copy size={18} />
         </button>
@@ -415,6 +428,7 @@ function ChallengePanel({ home, refresh, setMessage }: { home: HomeData; refresh
 
   return (
     <section className="panel">
+      <p className="panel-kicker">Live board</p>
       <h2>Challenge</h2>
       <div className="inline-form">
         <label>
@@ -466,6 +480,7 @@ function SchedulePanel({ home, refresh, setMessage }: { home: HomeData; refresh:
 
   return (
     <section className="panel">
+      <p className="panel-kicker">Time & place</p>
       <h2>Schedule</h2>
       <div className="inline-form">
         <label>
@@ -502,7 +517,10 @@ function GamesPanel({ home, refresh }: { home: HomeData; refresh: () => void }) 
   return (
     <section className="panel">
       <div className="panel-heading">
-        <h2>Games</h2>
+        <div>
+          <p className="panel-kicker">Boards</p>
+          <h2>Games</h2>
+        </div>
         <button className="icon-button" aria-label="Refresh games" onClick={refresh}>
           <RefreshCcw size={18} />
         </button>
@@ -583,14 +601,19 @@ function GameScreen({ gameId, home, onHome, setMessage }: { gameId: string; home
             <strong>@{game.blackHandle}</strong>
             <time>{formatClock(liveClock(game, "b", now))}</time>
           </div>
-          <Board fen={game.fen} orientation={myColor || "w"} selected={selected} onSquare={choose} />
+          <div className="board-frame">
+            <Board fen={game.fen} orientation={myColor || "w"} selected={selected} onSquare={choose} />
+          </div>
           <div className="clock-row">
             <strong>@{game.whiteHandle}</strong>
             <time>{formatClock(liveClock(game, "w", now))}</time>
           </div>
         </div>
         <aside className="game-side">
-          <button className="secondary" onClick={onHome}>Home</button>
+          <div className="game-side-heading">
+            <div className="side-seal" aria-hidden="true"><ElephantMark /></div>
+            <button className="secondary" onClick={onHome}>Home</button>
+          </div>
           <div className="status-box">
             <span>{game.status === "active" ? `${game.turn === "w" ? "White" : "Black"} to move` : game.status}</span>
             {game.result ? <strong>{game.result}</strong> : null}
@@ -642,7 +665,7 @@ function Board({ fen, orientation, selected, onSquare }: { fen: string; orientat
               onClick={() => void onSquare(square)}
               aria-label={square}
             >
-              {piece ? pieces[piece.color][piece.type] : ""}
+              {piece ? <span className={`piece piece-${piece.color}-${piece.type}`}>{pieces[piece.color][piece.type]}</span> : ""}
             </button>
           );
         }),
@@ -702,6 +725,19 @@ function navigate(path: string, after?: () => void) {
   window.history.pushState({}, "", path);
   if (after) void after();
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+function ElephantMark() {
+  return (
+    <svg viewBox="0 0 96 96" aria-hidden="true" focusable="false">
+      <path d="M26 56c0-18 12-30 30-30 12 0 22 7 22 19 0 8-5 13-12 13-6 0-10-4-10-10 0-4 2-7 5-9-2-2-5-3-9-3-10 0-17 8-17 20 0 11 7 20 18 20 8 0 15-4 19-10" />
+      <path d="M25 57c-8 3-13 9-13 15 0 4 3 7 8 7 8 0 14-9 15-22" />
+      <path d="M36 36c-8-11-20-8-22 1-2 8 4 16 18 18" />
+      <path d="M64 26c-1-9 7-15 15-12 7 3 9 12 3 19" />
+      <path d="M43 73v10M62 72v11M42 84h9M61 84h9" />
+      <path d="M49 44h.1" />
+    </svg>
+  );
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
