@@ -26,6 +26,9 @@ tmp/reviews/moodboard/*
 !tmp/reviews/villalba-build/
 !tmp/reviews/villalba-build/**
 !tmp/reviews/villalba-build-report.md
+# Rodchenko icon exploration (for Tejas to judge)
+!tmp/reviews/icons/
+!tmp/reviews/icons/**
 # Specific screens-r2 files kept as bar-fix evidence
 !tmp/reviews/screens-r2/
 tmp/reviews/screens-r2/*
