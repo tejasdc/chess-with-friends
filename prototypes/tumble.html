@@ -38,7 +38,19 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
-<script src="https://cdn.jsdelivr.net/npm/chess.js@0.13.4/chess.min.js"></script>
+<!-- chess.js 0.13.4 ships ES-module exports; load it as a module and
+     stamp Chess onto window so the (non-module) prototype script below
+     can reference it as a global. If this import fails (offline / CSP
+     / whatever) the prototype's fallback shim takes over so the file
+     still runs. -->
+<script type="module">
+  try {
+    const mod = await import('https://cdn.jsdelivr.net/npm/chess.js@0.13.4/chess.min.js');
+    window.Chess = mod.Chess || mod.default;
+  } catch (err) {
+    console.warn('[tumble] chess.js failed to load — using permissive fallback:', err);
+  }
+</script>
 <style>
   :root {
     --ground:   #7CA898;
@@ -343,14 +355,17 @@ function xyToSquare(cx, cy) {
 // -------------------------------------------------------------------------
 // chess.js legality engine. Fall back to a permissive "any different-
 // color square" stand-in only if the CDN failed (still ships a working
-// prototype offline).
+// prototype offline). We check `window.Chess` at each newGame() call
+// rather than at parse time — chess.js is loaded via <script type=
+// "module">, which is deferred, so it isn't defined when this inline
+// script first runs.
 // -------------------------------------------------------------------------
-const HAS_CHESS_JS = (typeof Chess === 'function');
 let game = null;   // Chess instance for the live position
 
 function newGame(fen) {
-  if (HAS_CHESS_JS) {
-    try { return new Chess(fen); } catch (e) { /* fall through */ }
+  const ChessCtor = window.Chess;
+  if (typeof ChessCtor === 'function') {
+    try { return new ChessCtor(fen); } catch (e) { /* fall through */ }
   }
   return makeFallbackGame(fen);
 }
@@ -666,7 +681,10 @@ function tumble() {
         vx: 0, vy: 0,
         rot: p.rot,
         vr: (Math.random() - 0.5) * 0.020,  // rad/ms
-        r: sqSize * 0.34,
+        // Slightly smaller collision radius than the visual piece so
+        // pieces in adjacent squares don't collide at rest and so
+        // launching-adjacent pieces don't immediately jam each other.
+        r: sqSize * 0.30,
         mass: 1 + (p.type === 'k' || p.type === 'q' ? 0.5 : 0),
       };
     });
@@ -898,14 +916,14 @@ function walkBack() {
       t._fadeIn = true;
     }
 
-    // Stragglers: everything left in pool.
+    // Stragglers: everything left in pool. White pieces rest on the
+    // celadon strip BELOW the board (they're the "bottom" side); black
+    // pieces rest on the strip ABOVE. Both stay inside the stage and
+    // never overlap the wordmark / foot content.
     const stragglers = pool.filter(Boolean);
-    // Sort tray slots: cream row above navy row on the celadon strip
-    // above the board. Cap the row at 12 slots per color; if we ever
-    // exceed that, wrap (won't happen with real chess positions).
-    const trayGap = sqSize * 0.55;
-    const trayYWhite = boardY - sqSize * 0.72;
-    const trayYBlack = boardY - sqSize * 1.44;
+    const trayGap = sqSize * 0.50;
+    const trayYWhite = boardY + boardH + sqSize * 0.50;
+    const trayYBlack = boardY - sqSize * 0.55;
     const whiteQueue = stragglers.filter(p => p.color === 'w');
     const blackQueue = stragglers.filter(p => p.color === 'b');
 
@@ -918,9 +936,11 @@ function walkBack() {
       const startCY = piece.y + sqSize / 2;
       const dist = Math.hypot(endCX - startCX, endCY - startCY);
       const speed = boardW * 1.15;   // px per second, walking pace
-      const duration = Math.max(560, Math.min(1150, (dist / speed) * 1000));
-      const rankDelay = (8 - (rankHint ?? 4)) * 55;
-      const jitter = Math.random() * 90;
+      const duration = Math.max(700, Math.min(1400, (dist / speed) * 1000));
+      // Stagger by rank so the far rank moves first; add larger per-
+      // piece jitter (0–180ms) so the crowd doesn't march in lockstep.
+      const rankDelay = (8 - (rankHint ?? 4)) * 70;
+      const jitter = Math.random() * 180;
       const startAt = now + rankDelay + jitter;
 
       // Curve: bezier control point offset perpendicular to travel. Per
@@ -979,12 +999,15 @@ function walkBack() {
     // Force reflow before we start.
     void piecesLayer.offsetHeight;
 
-    // Animation constants.
-    const STAND_MS = 220;
-    const SETTLE_MS = 130;
-    const BOB_HZ = 2.6;                 // footsteps per second
-    const BOB_AMP = sqSize * 0.09;
-    const TILT_AMP = 0.055;              // radians (~3.2°)
+    // Animation constants. Values pushed toward "obvious walking":
+    // bob is significant relative to square size (~14%), tilt is a
+    // visible ~4°, cadence is ~2 steps per second — slow enough to
+    // read as deliberate steps rather than a slide.
+    const STAND_MS = 260;
+    const SETTLE_MS = 150;
+    const BOB_HZ = 2.1;
+    const BOB_AMP = sqSize * 0.14;
+    const TILT_AMP = 0.070;              // radians (~4°)
 
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
     function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
