@@ -128,6 +128,13 @@ try {
   await alicePage.waitForTimeout(300);
   await shot(alicePage, "desktop-game-mid");
 
+  // Bob selects a piece — legal-move dots become visible.
+  await bobPage.locator('[data-square="g8"]').click();
+  await bobPage.waitForTimeout(150);
+  await shot(bobPage, "desktop-game-legal-moves");
+  // Deselect
+  await bobPage.locator('[data-square="g8"]').click();
+
   // schedule tab
   await alicePage.goto(base);
   await alicePage.getByRole("tab", { name: "Schedule" }).click();
@@ -147,3 +154,5 @@ try {
 } finally {
   await browser.close();
 }
+
+// (extension appended by round 6 — capture niceties)

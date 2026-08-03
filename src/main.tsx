@@ -889,6 +889,7 @@ function GameScreen({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [selected, setSelected] = useState<Square | null>(null);
+  const [pendingPromotion, setPendingPromotion] = useState<{ from: Square; to: Square } | null>(null);
   const [confirmResign, setConfirmResign] = useState(false);
   const [now, setNow] = useState(Date.now());
   const myColor = game?.whiteId === home.user.id ? "w" : "b";
@@ -941,23 +942,48 @@ function GameScreen({
     return () => window.clearInterval(timer);
   }, []);
 
+  async function submitMove(from: Square, to: Square, promotion?: "q" | "r" | "b" | "n") {
+    try {
+      const next = await api<GameState>(`/api/games/${gameId}/move`, {
+        method: "POST",
+        body: JSON.stringify({ from, to, promotion: promotion || undefined }),
+      });
+      setGame(next);
+      setSelected(null);
+      setPendingPromotion(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Move failed.");
+      setSelected(null);
+      setPendingPromotion(null);
+    }
+  }
+
   async function choose(square: Square) {
     if (!game || game.status !== "active") return;
     if (!selected) {
       setSelected(square);
       return;
     }
-    try {
-      const next = await api<GameState>(`/api/games/${gameId}/move`, {
-        method: "POST",
-        body: JSON.stringify({ from: selected, to: square, promotion: "q" }),
-      });
-      setGame(next);
+    if (selected === square) {
+      // Tapping the selected square again cancels the selection.
       setSelected(null);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Move failed.");
-      setSelected(null);
+      return;
     }
+    // Detect promotion locally so we can show the picker instead of
+    // silently auto-queening. A pawn moving to rank 8 (white) or rank
+    // 1 (black) needs a promotion choice.
+    const chess = new Chess(game.fen);
+    const piece = chess.get(selected);
+    const targetRank = square[1];
+    if (piece && piece.type === "p" && ((piece.color === "w" && targetRank === "8") || (piece.color === "b" && targetRank === "1"))) {
+      // Verify it's actually a legal promotion target (not a wild tap).
+      const legal = chess.moves({ square: selected, verbose: true }) as Array<{ to: string; promotion?: string }>;
+      if (legal.some((m) => m.to === square && m.promotion)) {
+        setPendingPromotion({ from: selected, to: square });
+        return;
+      }
+    }
+    await submitMove(selected, square);
   }
 
   async function resign() {
@@ -988,6 +1014,7 @@ function GameScreen({
   const opponentClock = liveClock(game, opponentColor, now);
   const myClock = liveClock(game, myColor, now);
   const opponentPresence = presenceLabel(opponentRawState, opponentHandle);
+  const lastMove = game.moves.length ? { from: game.moves[game.moves.length - 1].from, to: game.moves[game.moves.length - 1].to } : null;
 
   return (
     <Shell home={home}>
@@ -1001,9 +1028,19 @@ function GameScreen({
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>
 
+          <CapturedStrip moves={game.moves} color={opponentColor} />
+
           <div className="board-holder">
-            <Board fen={game.fen} orientation={myColor || "w"} selected={selected} onSquare={choose} />
+            <Board
+              fen={game.fen}
+              orientation={myColor || "w"}
+              selected={selected}
+              onSquare={choose}
+              lastMove={lastMove}
+            />
           </div>
+
+          <CapturedStrip moves={game.moves} color={myColor} />
 
           <div className="clock-strip bottom">
             <div className="who">
@@ -1013,6 +1050,14 @@ function GameScreen({
             <time className="clock">{formatClock(myClock)}</time>
           </div>
         </div>
+
+        {pendingPromotion ? (
+          <PromotionPicker
+            color={myColor || "w"}
+            onPick={(piece) => void submitMove(pendingPromotion.from, pendingPromotion.to, piece)}
+            onCancel={() => setPendingPromotion(null)}
+          />
+        ) : null}
 
         <aside className="game-side">
           <div className="game-status">
@@ -1064,17 +1109,49 @@ function Board({
   selected,
   onSquare,
   interactive = true,
+  lastMove,
 }: {
   fen: string;
   orientation: "w" | "b";
   selected: Square | null;
   onSquare: (square: Square) => void;
   interactive?: boolean;
+  lastMove?: { from: string; to: string } | null;
 }) {
   const chess = useMemo(() => new Chess(fen), [fen]);
   const board = chess.board();
   const rankList = orientation === "w" ? ranks : [...ranks].reverse();
   const fileList = orientation === "w" ? files : [...files].reverse();
+
+  // Legal destinations for the currently-selected piece — pulled from
+  // chess.js so promotion, castling, and en passant are all included.
+  const legalTargets = useMemo(() => {
+    if (!selected || !interactive) return new Map<string, "move" | "capture">();
+    const moves = chess.moves({ square: selected, verbose: true }) as Array<{ to: string; captured?: string; flags: string }>;
+    const map = new Map<string, "move" | "capture">();
+    for (const m of moves) {
+      map.set(m.to, m.captured || m.flags.includes("e") ? "capture" : "move");
+    }
+    return map;
+  }, [chess, selected, interactive]);
+
+  // King-in-check square gets a vermillion glow. chess.js reports the
+  // side to move as in check when inCheck() is true.
+  const checkedKingSquare = useMemo(() => {
+    if (!interactive) return null;
+    if (!chess.inCheck()) return null;
+    const turn = chess.turn();
+    for (let r = 0; r < 8; r++) {
+      for (let f = 0; f < 8; f++) {
+        const cell = board[r][f];
+        if (cell && cell.type === "k" && cell.color === turn) {
+          return `${files[f]}${8 - r}`;
+        }
+      }
+    }
+    return null;
+  }, [chess, board, interactive]);
+
   return (
     <div
       className={`board ${interactive ? "" : "board-static"}`}
@@ -1088,6 +1165,11 @@ function Board({
           const dark = (files.indexOf(file) + Number(rank)) % 2 === 0;
           const showFile = orientation === "w" ? rank === "1" : rank === "8";
           const showRank = orientation === "w" ? file === "a" : file === "h";
+          const target = legalTargets.get(square);
+          const isFromLast = lastMove?.from === square;
+          const isToLast = lastMove?.to === square;
+          const isCheck = checkedKingSquare === square;
+
           if (!interactive) {
             return (
               <div
@@ -1101,9 +1183,17 @@ function Board({
               </div>
             );
           }
+          const classes = [
+            "square",
+            dark ? "dark" : "light",
+            selected === square ? "selected" : "",
+            isFromLast ? "last-from" : "",
+            isToLast ? "last-to" : "",
+            isCheck ? "in-check" : "",
+          ].filter(Boolean).join(" ");
           return (
             <button
-              className={`square ${dark ? "dark" : "light"} ${selected === square ? "selected" : ""}`}
+              className={classes}
               data-square={square}
               key={square}
               onClick={() => void onSquare(square)}
@@ -1112,10 +1202,73 @@ function Board({
               {showRank ? <span className="coord coord-rank" aria-hidden="true">{rank}</span> : null}
               {showFile ? <span className="coord coord-file" aria-hidden="true">{file}</span> : null}
               {piece ? <PieceGlyph color={piece.color} type={piece.type} /> : null}
+              {target === "move" ? <span className="legal-dot" aria-hidden="true" /> : null}
+              {target === "capture" ? <span className="legal-capture" aria-hidden="true" /> : null}
             </button>
           );
         }),
       )}
+    </div>
+  );
+}
+
+// Promotion picker — a small celluloid strip that appears when a pawn
+// reaches the last rank. Four pins, one per promotion piece; user taps
+// the piece to promote. Kills the auto-queen behavior.
+function PromotionPicker({
+  color,
+  onPick,
+  onCancel,
+}: {
+  color: "w" | "b";
+  onPick: (piece: "q" | "r" | "b" | "n") => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="promotion-backdrop" onClick={onCancel} role="dialog" aria-label="Choose promotion piece">
+      <div className="promotion-strip" onClick={(e) => e.stopPropagation()}>
+        {(["q", "r", "b", "n"] as const).map((t) => (
+          <button
+            className="promotion-choice"
+            key={t}
+            onClick={() => onPick(t)}
+            aria-label={pieceNames[t]}
+          >
+            <PieceGlyph color={color} type={t} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Captured-material strip — shows pieces the opponent has taken from
+// this player. Displayed above the opponent's clock so the imbalance
+// is immediately readable.
+function CapturedStrip({ moves, color }: { moves: GameState["moves"]; color: "w" | "b" }) {
+  // Rebuild captures by replaying the SAN moves through chess.js.
+  const captured = useMemo(() => {
+    const c = new Chess();
+    const takenFromColor: string[] = [];
+    for (const m of moves) {
+      const result = c.move(m.san);
+      if (result?.captured) {
+        // The captured piece belonged to whoever's turn it just was —
+        // the side that just made the move captured the OTHER color.
+        const capturedColor: "w" | "b" = result.color === "w" ? "b" : "w";
+        if (capturedColor === color) takenFromColor.push(result.captured);
+      }
+    }
+    // Sort by piece value so the visual reads left-to-right in strength.
+    const rank: Record<string, number> = { q: 5, r: 4, b: 3, n: 2, p: 1 };
+    return takenFromColor.sort((a, b) => (rank[b] || 0) - (rank[a] || 0));
+  }, [moves, color]);
+  if (!captured.length) return null;
+  return (
+    <div className="captured-strip" aria-label={`${color === "w" ? "White" : "Black"} pieces captured`}>
+      {captured.map((t, i) => (
+        <span className={`captured piece piece-${color}`} key={i}>{color === "w" ? whiteGlyphs[t as never] : blackGlyphs[t as never]}</span>
+      ))}
     </div>
   );
 }

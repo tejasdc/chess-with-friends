@@ -889,6 +889,116 @@ select {
   pointer-events: none;
 }
 
+/* Last-move highlight — the from-square is dimmer than to-square so
+   the reader's eye lands on where the piece ended up. Brass tone
+   keeps it in the design language. */
+.square.last-from::after,
+.square.last-to::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(181, 138, 60, 0.16);
+  pointer-events: none;
+}
+
+.square.last-to::after {
+  background: rgba(181, 138, 60, 0.28);
+}
+
+/* King in check — vermillion glow (the destructive accent, echoing
+   the Resign button — this is the color of danger in this world). */
+.square.in-check {
+  box-shadow: inset 0 0 0 3px var(--vermillion), inset 0 0 24px rgba(166, 58, 35, 0.35);
+}
+
+/* Legal move indicators — brass pin dot for empty targets, brass ring
+   for captures. Matches the pin-head vocabulary used elsewhere. */
+.legal-dot,
+.legal-capture {
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.legal-dot {
+  width: 24%;
+  height: 24%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--brass-hi), var(--brass) 60%, var(--vermillion-lo) 120%);
+  box-shadow: 0 1px 1px var(--brass-shadow);
+  opacity: 0.72;
+}
+
+.legal-capture {
+  inset: 6%;
+  border-radius: 50%;
+  border: 3px solid var(--brass);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25), 0 1px 1px var(--brass-shadow);
+  opacity: 0.85;
+}
+
+/* Promotion picker — a small celluloid strip that appears over the
+   board when a pawn reaches the last rank. Full-screen backdrop dims
+   the world so the choice reads clearly. */
+.promotion-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 21, 12, 0.4);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  padding: 24px;
+}
+
+.promotion-strip {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 2px;
+  padding: 12px;
+  background: linear-gradient(180deg, var(--celluloid-hi), var(--celluloid));
+  border: 1px solid var(--leather);
+  border-radius: 6px;
+  box-shadow: var(--shadow-3);
+}
+
+.promotion-choice {
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+
+.promotion-choice:hover {
+  background: rgba(181, 138, 60, 0.14);
+  border-color: var(--brass);
+}
+
+.promotion-choice .piece {
+  font-size: 44px;
+}
+
+/* Captured-material strip — small piece glyphs above/below the board,
+   sized proportionally so they read as trophies not as active pieces. */
+.captured-strip {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px;
+  flex-wrap: wrap;
+}
+
+.captured {
+  font-size: 20px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
 .coord {
   position: absolute;
   font-family: var(--mono);
