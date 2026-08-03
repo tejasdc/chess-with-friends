@@ -293,8 +293,22 @@ select {
 
 .auth {
   display: grid;
-  gap: 40px;
-  padding: 24px 0 40px;
+  gap: 32px;
+  padding: 8px 0 32px;
+}
+
+.auth-board {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.auth-board .board-holder {
+  aspect-ratio: 1;
+  padding: 6px;
+  background: var(--board-frame);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
 }
 
 .display {
@@ -312,9 +326,25 @@ select {
   display: grid;
   gap: 14px;
   max-width: 380px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .auth-form .primary { justify-self: start; min-width: 160px; }
+
+@media (min-width: 820px) {
+  .shell:has(.auth) { max-width: 1040px; }
+
+  .auth {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+    align-items: center;
+    gap: 64px;
+    padding: 24px 0 64px;
+  }
+
+  .auth-board { margin: 0; max-width: none; }
+  .auth-form { margin: 0; }
+}
 
 .hint {
   font-size: 14px;
@@ -658,6 +688,9 @@ select {
 .square.dark  { background: var(--board-dark); }
 
 .square:hover { filter: brightness(1.06); }
+
+.board-static .square { cursor: default; }
+.board-static .square:hover { filter: none; }
 
 .square.selected::before {
   content: "";

@@ -238,6 +238,11 @@ function AuthScreen({
   return (
     <Shell message={message} setMessage={setMessage}>
       <section className="auth">
+        <div className="auth-board" aria-hidden="true">
+          <div className="board-holder static">
+            <Board fen={AUTH_POSITION} orientation="w" selected={null} onSquare={() => undefined} interactive={false} />
+          </div>
+        </div>
         <form
           className="auth-form"
           onSubmit={(event) => {
@@ -272,6 +277,13 @@ function AuthScreen({
     </Shell>
   );
 }
+
+// Queen's Gambit Declined, Orthodox Defense, after 7...c6 — a real balanced
+// middlegame: both bishops developed, kingside castling on both flanks,
+// tension in the centre, pieces spread across the board. Chosen because it
+// composes visually — no ragged pawn shapes, both piece colours in the field,
+// characteristic d5/c6/e6 pawn triangle reading as a made object.
+const AUTH_POSITION = "r1bq1rk1/pp1nbppp/2p1pn2/3p2B1/2PP4/2N1PN2/PP3PPP/2RQKB1R w K - 3 8";
 
 function Dashboard({
   home,
@@ -819,18 +831,24 @@ function Board({
   orientation,
   selected,
   onSquare,
+  interactive = true,
 }: {
   fen: string;
   orientation: "w" | "b";
   selected: Square | null;
   onSquare: (square: Square) => void;
+  interactive?: boolean;
 }) {
   const chess = useMemo(() => new Chess(fen), [fen]);
   const board = chess.board();
   const rankList = orientation === "w" ? ranks : [...ranks].reverse();
   const fileList = orientation === "w" ? files : [...files].reverse();
   return (
-    <div className="board" role="grid" aria-label="Chess board">
+    <div
+      className={`board ${interactive ? "" : "board-static"}`}
+      role={interactive ? "grid" : "presentation"}
+      aria-label={interactive ? "Chess board" : undefined}
+    >
       {rankList.flatMap((rank) =>
         fileList.map((file) => {
           const square = `${file}${rank}` as Square;
@@ -838,6 +856,19 @@ function Board({
           const dark = (files.indexOf(file) + Number(rank)) % 2 === 0;
           const showFile = orientation === "w" ? rank === "1" : rank === "8";
           const showRank = orientation === "w" ? file === "a" : file === "h";
+          if (!interactive) {
+            return (
+              <div
+                className={`square ${dark ? "dark" : "light"}`}
+                data-square={square}
+                key={square}
+              >
+                {showRank ? <span className="coord coord-rank">{rank}</span> : null}
+                {showFile ? <span className="coord coord-file">{file}</span> : null}
+                {piece ? <PieceGlyph color={piece.color} type={piece.type} /> : null}
+              </div>
+            );
+          }
           return (
             <button
               className={`square ${dark ? "dark" : "light"} ${selected === square ? "selected" : ""}`}
