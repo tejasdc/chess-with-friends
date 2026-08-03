@@ -33,7 +33,8 @@ async function register(page: Page, handle: string) {
   await page.goto("/");
   await page.getByPlaceholder("your_handle").fill(handle);
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Log in or create account" }).click();
+  // See tests/e2e.spec.ts register() for morph-label rationale.
+  await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
   await expect(page.getByText(`@${handle}`)).toBeVisible();
 }
 

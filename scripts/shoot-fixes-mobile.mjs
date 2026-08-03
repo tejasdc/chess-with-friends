@@ -27,7 +27,7 @@ async function addAuth(page) {
 async function register(page, handle) {
   await page.getByPlaceholder("your_handle").fill(handle);
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Log in or create account" }).click();
+  await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
   // At 390px the topbar @handle is hidden by design — wait on a stable
   // dashboard-landed signal (the add-friend input) instead.
   await page.getByPlaceholder("friend_handle").waitFor({ timeout: 15000 });

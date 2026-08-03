@@ -133,6 +133,36 @@ test("sign out returns to the auth screen", async ({ browser }) => {
   await context.close();
 });
 
+// Guard for the "Sarah types a taken handle" case (the exact ambiguity that
+// killed the morph-only design): the button quietly reads "Sign in as
+// @sarah" but the subline UNDER the row spells it out — "New here? This
+// handle's taken — try another." — so a new user has words, not just a verb.
+// Register a handle in one context; type the same handle in a fresh context;
+// assert the subline appears once the probe lands.
+test("subline warns a new user when a typed handle is already taken", async ({ browser }) => {
+  const suffix = Date.now().toString(36).slice(-6);
+  const taken = `taken_${suffix}`;
+  const ctxA = await browser.newContext();
+  const pA = await ctxA.newPage();
+  await addAuthenticator(pA);
+  await pA.goto("/");
+  await register(pA, taken);
+  await ctxA.close();
+
+  const ctxB = await browser.newContext();
+  const pB = await ctxB.newPage();
+  await addAuthenticator(pB);
+  await pB.goto("/");
+  await pB.getByPlaceholder("your_handle").fill(taken);
+  // Debounced probe (350ms) + tiny buffer. The subline is text-visible when
+  // flow === "login" (i.e., server confirmed the handle exists).
+  await expect(pB.getByText(/New here\? This handle's taken/)).toBeVisible({ timeout: 5000 });
+  // And the button label morphs to "Sign in as @taken_..." — the mask that
+  // the subline is guarding against.
+  await expect(pB.getByRole("button", { name: new RegExp(`Sign in as @${taken}`) })).toBeVisible();
+  await ctxB.close();
+});
+
 // Regression guard for the install-panel-disappears-in-private-browsing bug:
 // install guidance must show independently of push support.
 test("install guidance shows even when push is unsupported", async ({ browser }) => {
@@ -300,7 +330,11 @@ async function register(page: Page, handle: string) {
   // based on a debounced preflight of the handle. Wait a moment so the
   // preflight has a chance to land before we click.
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Log in or create account" }).click();
+  // Button label morphs: default "Sign in or sign up" → "Sign up as @handle"
+  // once the debounced probe returns (handle is free for fresh registrations).
+  // The 500ms wait above lets the probe land. Click by role+regex covers all
+  // morph states without coupling the test to a specific label.
+  await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
   await expect(page.getByText(`@${handle}`)).toBeVisible();
 }
 

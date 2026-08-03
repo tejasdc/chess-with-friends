@@ -405,12 +405,17 @@ function AuthScreen({
   async function submit() {
     if (!handle || busy) return;
     setBusy(true);
+    // `decided` is declared outside the try so the catch block can tailor
+    // its toast to the flow that was actually attempted (Sarah-typing-taken-
+    // handle case: the login path can fail with NotAllowedError when she
+    // cancels the sheet or has no credential; the tailored recovery text
+    // needs to know we were on the login branch).
+    let decided: "login" | "register" = flow === "register" ? "register" : "login";
     try {
       // If the probe hasn't landed yet, do it inline — still a single user
       // gesture from the browser's perspective for the credential call that
       // follows, and cheaper than forcing a second click.
-      let decided = flow;
-      if (decided === "unknown") {
+      if (flow === "unknown") {
         try {
           await api<PublicKeyCredentialRequestOptionsJSON>("/api/auth/login/options", {
             method: "POST",
@@ -440,11 +445,39 @@ function AuthScreen({
       }
       await onSignedIn();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Sign in failed.", "error");
+      const msg = error instanceof Error ? error.message : "";
+      // WebAuthn cancel / no-credential recovery. If Sarah typed a taken
+      // handle, tapped "Sign in as @sarah" (the morph mask), then the OS
+      // sheet showed nothing / she cancelled, spell out both branches so
+      // she has a path either way.
+      const isCancel = error instanceof Error && /NotAllowedError|not allowed|cancel|abort|no.*credential/i.test((error.name || "") + " " + msg);
+      if (decided === "login" && isCancel) {
+        setMessage(
+          `No passkey for @${handle} on this device. Yours? Retry and use the phone/QR option. Not yours? The handle's taken — pick another.`,
+          "error",
+        );
+      } else {
+        setMessage(msg || "Sign in failed.", "error");
+      }
     } finally {
       setBusy(false);
     }
   }
+
+  // Morphing button label — driven by the debounced handle-probe result.
+  // Width is reserved in CSS (auth-primary min-width) so the row does NOT
+  // jump when the label transitions. Empty/invalid state falls back to the
+  // parallel-construction default.
+  const trimmedHandle = handle.trim();
+  const buttonLabel = busy
+    ? "Working…"
+    : !trimmedHandle
+      ? "Sign in or sign up"
+      : flow === "login"
+        ? `Sign in as @${trimmedHandle}`
+        : flow === "register"
+          ? `Sign up as @${trimmedHandle}`
+          : "Sign in or sign up";
 
   return (
     <Shell message={message} messageKind={messageKind} setMessage={setMessage}>
@@ -481,10 +514,20 @@ function AuthScreen({
               spellCheck={false}
               aria-label="Handle"
             />
-            <button className="primary auth-primary" type="submit" disabled={busy || !handle}>
-              {busy ? "Working…" : "Log in or create account"}
+            <button className="auth-primary" type="submit" disabled={busy || !handle}>
+              {buttonLabel}
             </button>
           </div>
+          {/* Reserved subline — one muted line under the row. Only populated
+              when the probe says the handle is taken (Sarah's case: she
+              types "sarah", sees it's owned, doesn't get funneled into a
+              stranger's passkey sheet). Height is always reserved so the
+              row doesn't bounce as the probe result arrives. */}
+          <p className="auth-subline" aria-live="polite">
+            {flow === "login" && trimmedHandle
+              ? <>New here? This handle's taken — try another.</>
+              : null}
+          </p>
         </form>
       </section>
     </Shell>
@@ -609,7 +652,10 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: SetMe
           </button>
           <p className="install-title">Install to your Home Screen</p>
           <p className="install-body">
-            iPhone: open Share, choose Add to Home Screen. Android/Chrome: menu → Install app.
+            Install to get notified — game invites and scheduled games reach you as notifications.
+          </p>
+          <p className="install-body install-how">
+            iPhone: Share → Add to Home Screen. Android/Chrome: menu → Install app.
           </p>
         </div>
       ) : null}

@@ -365,9 +365,13 @@ a { color: inherit; }
   justify-self: start;
 }
 
-/* One-row auth: input flexes to fill, button takes its natural width.
-   Tejas explicitly rejected the stacked input-above-button pattern —
-   on phone the two elements should live on a single line. */
+/* One-row auth — DESIGNED, not just placed. Input and button share:
+   identical box height, identical border treatment, baseline text.
+   Disabled button is a quiet ghost (paper + walnut border + stone text)
+   rather than a dead gray slab — it reads as "waiting for input", not
+   "broken". Enabled = filled ink. Width reserved via min-width so the
+   morphing button label ("Sign in or sign up" → "Sign in as @handle")
+   never bumps the row layout. */
 .auth-row {
   display: flex;
   align-items: stretch;
@@ -377,11 +381,12 @@ a { color: inherit; }
 }
 .auth-input {
   flex: 1 1 auto;
-  min-width: 60px;           /* keep the input tappable even when button is wide */
+  min-width: 60px;
+  height: 46px;              /* explicit height so input + button align */
+  padding: 0 12px;
   font-family: var(--sans);
-  font-size: 16px;
+  font-size: 16px;           /* iOS anti-zoom (see .field input note) */
   color: var(--ink);
-  padding: 10px 12px;
   background: var(--paper);
   border: 1px solid var(--walnut);
   border-radius: 0;
@@ -389,20 +394,57 @@ a { color: inherit; }
 }
 .auth-input:focus { outline: none; border-color: var(--ink); }
 .auth-input::placeholder { color: var(--stone); font-family: var(--mono); font-size: 15px; }
+
 .auth-primary {
   flex: 0 0 auto;
+  height: 46px;              /* MATCHES input height */
+  min-width: 200px;          /* reserves width across morph states */
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--paper);
+  background: var(--ink);
+  border: 1px solid var(--ink);   /* SAME border treatment as input */
+  border-radius: 0;
+  cursor: pointer;
   white-space: nowrap;
+  transition: background-color 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
 }
-/* Compress the auth button at mobile so "Log in or create account" fits
-   next to the input at 390px. Font drops from 14 to 12, padding tightens
-   proportionally. Desktop keeps the roomier default. */
+.auth-primary:hover:not(:disabled) { background: #000; border-color: #000; }
+.auth-primary:active:not(:disabled) { transform: translateY(1px); }
+.auth-primary:disabled {
+  /* Ghost/outline — quiet in-world, reads as "waiting", not "dead". */
+  color: var(--stone);
+  background: var(--paper);
+  border-color: var(--walnut);
+  cursor: default;
+  opacity: 1;                /* override .primary:disabled opacity */
+}
+
+.auth-subline {
+  min-height: 20px;          /* reserve line's space across states */
+  margin: 10px 0 0;
+  padding: 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--stone);
+}
+
 @media (max-width: 480px) {
+  .auth-input, .auth-primary { height: 44px; }
+  .auth-input { padding: 0 12px; }
   .auth-primary {
     font-size: 12px;
-    padding: 10px 12px;
-    letter-spacing: 0.01em;
+    min-width: 178px;
+    padding: 0 12px;
+    letter-spacing: 0;
   }
-  .auth-input { padding: 10px 10px; }
 }
 
 .auth-brand {
