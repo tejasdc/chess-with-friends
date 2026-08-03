@@ -353,15 +353,45 @@ body[data-screen="inspirations"] .shell {
 /* Mobile landing compression — sandbox board and form take the top,
    auth stack is a flex column not a grid so it lays out predictably. */
 body[data-screen="landing"] .auth {
+  /* Landing composition — shelf at top, auth-form in the middle band,
+     made-by at the bottom. Three flex items distributed via
+     space-between (works only because we neutralize the pattern-global
+     .made-by { margin-top: auto } inside this scope; auto margins on a
+     flex-main-axis item override justify-content, which was crowding
+     everything at the top with a void above the footer). align-items:
+     center gives caption + copy + form + footer one alignment
+     discipline (center) — team-lead's audit ask. */
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
   gap: 12px;
-  padding: 0;
+  padding: 4px 0 8px;
+  flex: 1;
   min-height: 0;
+}
+body[data-screen="landing"] .auth > .made-by {
+  /* Neutralize the pattern-global pin so space-between can distribute.
+     Made-by is still at the viewport bottom — it's just the LAST flex
+     item in a space-between column instead of an auto-margin pin. */
+  margin-top: 0;
 }
 body[data-screen="landing"] .auth-scene {
   width: min(100%, 94vw, 560px, calc(100dvh - 160px));
   flex: 0 1 auto;
+}
+body[data-screen="landing"] .auth-form {
+  /* Center the form under the board — matches the caption + footer
+     center-alignment. Was justify-self:start (left-aligned in grid). */
+  align-self: center;
+  justify-self: center;
+}
+body[data-screen="landing"] .landing-copy {
+  /* Center the tagline. Was inheriting left-align because .landing-copy
+     had no text-align rule. Team-lead's audit: caption, copy, and auth
+     row must share alignment — center is the choice. */
+  text-align: center;
+  margin: 0 auto;
 }
 @media (max-width: 640px) {
   body[data-screen="landing"] .auth-scene { width: min(100%, 94vw, 430px); }
