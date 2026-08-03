@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Chess, type Color, type PieceSymbol, type Square } from "chess.js";
@@ -7,6 +7,11 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/server";
 import "./styles.css";
+
+// Standard starting position — the auth screen shows a real, static board
+// in this position so the OBJECT arrives before any framing text does
+// (per Rodchenko's chess table: the furniture IS the invitation to play).
+const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 type TimeControl = "10|0" | "5|0";
 type GameStatus = "active" | "checkmate" | "resigned" | "timeout" | "draw";
@@ -74,10 +79,6 @@ const pieceNames: Record<PieceSymbol, string> = {
 };
 const whiteGlyphs: Record<PieceSymbol, string> = { k: "♔", q: "♕", r: "♖", b: "♗", n: "♘", p: "♙" };
 const blackGlyphs: Record<PieceSymbol, string> = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
-
-// Lazy-load the 3D wallet scene so unauthenticated first-paint stays
-// lean; three.js only lands on the wire when the auth screen mounts.
-const WalletScene = lazy(() => import("./WalletScene"));
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -415,9 +416,13 @@ function AuthScreen({
     <Shell message={message} setMessage={setMessage}>
       <section className="auth">
         <div className="auth-scene" aria-hidden="true">
-          <Suspense fallback={<div className="auth-scene-fallback">Opening the wallet…</div>}>
-            <WalletScene />
-          </Suspense>
+          <Board
+            fen={INITIAL_FEN}
+            orientation="w"
+            selected={null}
+            onSquare={() => undefined}
+            interactive={false}
+          />
         </div>
         <form
           className="auth-form"
@@ -441,7 +446,7 @@ function AuthScreen({
           <button className="primary" type="submit" disabled={busy || !handle}>
             {busy ? "Working…" : "Continue"}
           </button>
-          <p className="footnote">Passkeys only — no password, no email.</p>
+          <p className="footnote">Passkeys only.</p>
         </form>
       </section>
     </Shell>
@@ -463,10 +468,13 @@ function Dashboard({
     <div className="dashboard">
       <InstallPrompt home={home} setMessage={setMessage} />
       {inviteToken ? <InvitePanel token={inviteToken} refresh={refresh} setMessage={setMessage} /> : null}
+      {/* Actionable-first ordering: things awaiting a response come before
+          things you initiate. Incoming panel renders nothing when empty
+          (checked inside), so this position doesn't produce a hollow strip. */}
       <IncomingPanel home={home} refresh={refresh} />
-      <GamesSection games={home.games} />
       <PlaySection home={home} refresh={refresh} setMessage={setMessage} />
       <FriendsSection home={home} refresh={refresh} setMessage={setMessage} />
+      <GamesSection games={home.games} />
     </div>
   );
 }
@@ -1020,7 +1028,11 @@ function GameScreen({
     <Shell home={home}>
       <section className="game">
         <div className="board-column">
-          <div className="clock-strip top">
+          {/* active-turn class paints the strip vermillion — the whole strip
+              IS the turn indicator (Rodchenko: your seat is your color). */}
+          <div
+            className={`clock-strip top ${game.status === "active" && game.turn === opponentColor ? "active-turn" : ""}`}
+          >
             <div className="who">
               <span className="handle-line">@{opponentHandle}</span>
               <span className={`connection ${opponentRawState}`}>{opponentPresence}</span>
@@ -1042,9 +1054,13 @@ function GameScreen({
 
           <CapturedStrip moves={game.moves} color={myColor} />
 
-          <div className="clock-strip bottom">
+          <div
+            className={`clock-strip bottom ${game.status === "active" && game.turn === myColor ? "active-turn" : ""}`}
+          >
             <div className="who">
               <span className="handle-line">@{myHandle}</span>
+              {/* "you" preserved for a11y — visually clipped via CSS.
+                  The vermillion strip is what a human reads. */}
               <span className="you">you</span>
             </div>
             <time className="clock">{formatClock(myClock)}</time>
@@ -1062,7 +1078,11 @@ function GameScreen({
         <aside className="game-side">
           <div className="game-status">
             {game.status === "active" ? (
-              <span>{game.turn === myColor ? "Your move" : "Their move"}</span>
+              /* Turn indicator is visually communicated by the vermillion
+                 strip on the active player's clock band (Rodchenko chair
+                 duality). This span carries the same signal for screen
+                 readers and for the adversity suite's turn-advance probe. */
+              <span className="sr-only">{game.turn === myColor ? "Your move" : "Their move"}</span>
             ) : (
               <span className="terminal">
                 {game.status}
@@ -1072,16 +1092,16 @@ function GameScreen({
           </div>
 
           <div className="game-actions">
-            <button className="ghost" onClick={onHome}>Home</button>
+            <button className="link" onClick={onHome}>Home</button>
             {confirmResign ? (
               <>
                 <button className="danger" onClick={() => void resign()} disabled={game.status !== "active"}>
                   Confirm resign
                 </button>
-                <button className="ghost" onClick={() => setConfirmResign(false)}>Cancel</button>
+                <button className="link" onClick={() => setConfirmResign(false)}>Cancel</button>
               </>
             ) : (
-              <button className="ghost warn" onClick={() => setConfirmResign(true)} disabled={game.status !== "active"}>
+              <button className="link warn" onClick={() => setConfirmResign(true)} disabled={game.status !== "active"}>
                 Resign
               </button>
             )}
