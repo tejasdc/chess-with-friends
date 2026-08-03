@@ -367,7 +367,7 @@ export class AppDO extends DurableObject<Env> {
       // Human-first push copy (Tejas's iPhone-test order): put the OTHER
       // player's handle in the title so the notification reads as a person,
       // not a category. iOS renders this as the first line above "from
-      // Chess with Friends".
+      // two chairs".
       const fromHandle = db.users[schedule.fromId]?.handle || "your friend";
       const toHandle = db.users[schedule.toId]?.handle || "your friend";
       await this.enqueuePush(db, schedule.fromId, "scheduled_start", `Your game with @${toHandle} is starting`, `/game/${schedule.gameId}`);
@@ -412,7 +412,7 @@ export class AppDO extends DurableObject<Env> {
     const userId = newId("usr");
     const { rpID } = rpInfo(request);
     const options = await generateRegistrationOptions({
-      rpName: this.env.APP_NAME || "Chess with Friends",
+      rpName: this.env.APP_NAME || "two chairs",
       rpID,
       userName: handle,
       userDisplayName: handle,

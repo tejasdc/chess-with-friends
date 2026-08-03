@@ -336,7 +336,7 @@ function Shell({
   return (
     <main className="shell">
       <header className="topbar">
-        <button className="wordmark" onClick={() => navigate("/")}>Chess with friends</button>
+        <button className="wordmark" onClick={() => navigate("/")}>two chairs</button>
         <div className="topbar-right">
           {home ? <span className="handle">@{home.user.handle}</span> : null}
           {/* Universal ⋯ menu — top-right on every screen per team-lead.

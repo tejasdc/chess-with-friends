@@ -61,7 +61,7 @@ async function showPolicyNotification(event) {
 
   // The server's payload.body IS now the human-first title line
   // ("@handle invited you to a game" etc.). One line, no separate body —
-  // iOS appends "from Chess with Friends" after the title so we don't
+  // iOS appends "from two chairs" after the title so we don't
   // double up. Fallback to the old generic titles only if payload.body
   // is missing (should not happen with the current server).
   const title = payload.body || (
