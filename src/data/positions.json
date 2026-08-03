@@ -1,0 +1,123 @@
+[
+  {
+    "id": "fools-mate-1836",
+    "title": "Fool's mate",
+    "credit": "Traditional; earliest published 1836",
+    "fen": "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
+    "sideToMove": "b",
+    "solution": {
+      "from": "d8",
+      "to": "h4"
+    }
+  },
+  {
+    "id": "queen-close-mate",
+    "title": "Queen close, king pinned to edge",
+    "credit": "Basic pattern",
+    "fen": "8/8/5K1k/8/8/8/6Q1/8 w - - 0 1",
+    "sideToMove": "w",
+    "solution": {
+      "from": "g2",
+      "to": "g6"
+    }
+  },
+  {
+    "id": "scholars-mate-1656",
+    "title": "Scholar's mate",
+    "credit": "Francis Beale, 1656",
+    "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+    "sideToMove": "w",
+    "solution": {
+      "from": "h5",
+      "to": "f7"
+    }
+  },
+  {
+    "id": "queen-g7-diagonal-support",
+    "title": "Queen on g7, bishop diagonal support",
+    "credit": "Traditional pattern",
+    "fen": "6k1/7p/8/6Q1/8/8/1B6/6K1 w - - 0 1",
+    "sideToMove": "w",
+    "solution": {
+      "from": "g5",
+      "to": "g7"
+    }
+  },
+  {
+    "id": "legal-mate-1750",
+    "title": "Legal's mate",
+    "credit": "Kermur de Legal, c. 1750",
+    "fen": "rn1q1bnr/ppp1kB1p/3p2p1/4N3/4P3/2N5/PPPP1PPP/R1BbK2R w KQ - 1 7",
+    "sideToMove": "w",
+    "solution": {
+      "from": "c3",
+      "to": "d5"
+    }
+  },
+  {
+    "id": "queen-h7-supported",
+    "title": "Queen-plus-bishop on h7",
+    "credit": "Traditional pattern",
+    "fen": "7k/6pp/7Q/8/8/8/8/1B4K1 w - - 0 1",
+    "sideToMove": "w",
+    "solution": {
+      "from": "h6",
+      "to": "h7"
+    }
+  },
+  {
+    "id": "opera-house-final",
+    "title": "Opera-house mate",
+    "credit": "Morphy vs Duke Karl & Count Isouard, Paris 1858",
+    "fen": "1n2kb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2KR4 w k - 0 17",
+    "sideToMove": "w",
+    "solution": {
+      "from": "d1",
+      "to": "d8"
+    }
+  },
+  {
+    "id": "back-rank-mate-white",
+    "title": "Back-rank mate",
+    "credit": "Traditional pattern",
+    "fen": "6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1",
+    "sideToMove": "w",
+    "solution": {
+      "from": "a1",
+      "to": "a8"
+    }
+  },
+  {
+    "id": "back-rank-mate-black",
+    "title": "Back-rank mate (Black to move)",
+    "credit": "Traditional pattern",
+    "fen": "r5k1/8/8/8/8/8/5PPP/6K1 b - - 0 1",
+    "sideToMove": "b",
+    "solution": {
+      "from": "a8",
+      "to": "a1"
+    }
+  },
+  {
+    "id": "smothered-mate",
+    "title": "Smothered mate (knight to f7)",
+    "credit": "Traditional pattern (Philidor's Legacy shape)",
+    "fen": "6rk/6pp/8/6N1/8/8/8/6K1 w - - 0 1",
+    "sideToMove": "w",
+    "solution": {
+      "from": "g5",
+      "to": "f7"
+    }
+  },
+  {
+    "id": "morphys-mate-shape",
+    "title": "Bishop + rook, back-rank check",
+    "credit": "Traditional pattern",
+    "fen": "6k1/5ppp/8/8/8/8/8/3R2K1 w - - 0 1",
+    "sideToMove": "w",
+    "solution": {
+      "from": "d1",
+      "to": "d8"
+    }
+  }
+]
