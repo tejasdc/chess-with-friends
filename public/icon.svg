@@ -1,11 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="72" fill="#efe0bd"/>
-  <rect x="34" y="34" width="444" height="444" rx="42" fill="#f7edcf" stroke="#6f271e" stroke-width="14"/>
-  <rect x="62" y="62" width="388" height="388" rx="24" fill="none" stroke="#c18a32" stroke-width="10"/>
-  <path d="M132 300c0-96 64-160 160-160 64 0 118 38 118 102 0 43-27 70-64 70-32 0-54-22-54-54 0-21 11-38 27-48-11-11-27-16-48-16-53 0-91 43-91 106 0 59 38 107 96 107 43 0 80-22 102-53" fill="none" stroke="#33442c" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M126 305c-43 16-70 48-70 80 0 22 16 38 43 38 43 0 75-48 80-118" fill="none" stroke="#33442c" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M185 192c-43-59-107-43-118 5-11 43 22 86 96 96" fill="none" stroke="#33442c" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M334 140c-5-48 38-80 80-64 38 16 48 64 16 102" fill="none" stroke="#33442c" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M224 392v54M326 386v59M221 450h48M322 450h48" fill="none" stroke="#33442c" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="260" cy="236" r="13" fill="#a23c28"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Chess with friends">
+  <!-- Warm paper background — matches --paper #F0E6D2 in the app. iOS
+       applies its own rounded-corner mask on the home screen, so we
+       leave the SVG full-bleed and edge-safe. -->
+  <rect width="512" height="512" fill="#F0E6D2"/>
+  <!-- 2×2 mini board, centered, 320×320. Standard chess convention:
+       bottom-left square is dark. Two walnut squares (#4A3826) on the
+       diagonal, two paper squares matching the ground. -->
+  <g>
+    <rect x="256" y="96"  width="160" height="160" fill="#4A3826"/>
+    <rect x="96"  y="256" width="160" height="160" fill="#4A3826"/>
+  </g>
+  <!-- One vermillion square — the identity mark. Top-right inset, well
+       inside iOS's rounded-mask safe area. Rodchenko's chair as a
+       single geometric accent on the paper ground. -->
+  <rect x="376" y="60" width="76" height="76" fill="#C43416"/>
 </svg>

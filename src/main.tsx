@@ -487,9 +487,17 @@ function Dashboard({
   );
 }
 
+const INSTALL_DISMISSED_KEY = "chess.install-dismissed";
+
 function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: (value: string) => void }) {
   const [pushStatus, setPushStatus] = useState<PushStatus>("checking");
   const [installed, setInstalled] = useState<boolean>(() => detectInstalled());
+  // Persist dismissal in localStorage so it sticks across reloads for this
+  // browser. Cleared naturally when the user installs (dismissal becomes
+  // moot — showInstall is already false) or manually via storage clear.
+  const [installDismissed, setInstallDismissed] = useState<boolean>(() => {
+    try { return window.localStorage.getItem(INSTALL_DISMISSED_KEY) === "true"; } catch { return false; }
+  });
 
   async function checkPushStatus() {
     if (!home.pushPublicKey || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
@@ -542,12 +550,18 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: (valu
 
   // Install guidance and notification enablement are independent. Show
   // install guidance whenever the app isn't launched from the Home Screen
-  // (this matters ESPECIALLY in private browsing where push is unsupported
-  // — that's the one case where the user most needs install instructions).
-  const showInstall = !installed;
+  // AND the user hasn't dismissed it (dismissal persists in localStorage
+  // per Tejas's iPhone-test order — "cannot dismiss it and it drives him
+  // nuts").
+  const showInstall = !installed && !installDismissed;
   const showEnablePush = pushStatus === "ready";
   const showBlocked = pushStatus === "blocked";
   const showEnabled = pushStatus === "enabled";
+
+  function dismissInstall() {
+    try { window.localStorage.setItem(INSTALL_DISMISSED_KEY, "true"); } catch { /* private-mode → session-only dismissal is fine */ }
+    setInstallDismissed(true);
+  }
 
   if (!showInstall && !showEnablePush && !showBlocked) return null;
 
@@ -555,6 +569,14 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: (valu
     <div className="install-strip">
       {showInstall ? (
         <div className="install-block">
+          <button
+            className="install-dismiss"
+            aria-label="Dismiss install prompt"
+            onClick={dismissInstall}
+            type="button"
+          >
+            ×
+          </button>
           <p className="install-title">Install to your Home Screen</p>
           <p className="install-body">
             iPhone: open Share, choose Add to Home Screen. Android/Chrome: menu → Install app.
@@ -1310,7 +1332,10 @@ function CapturedStrip({ moves, color }: { moves: GameState["moves"]; color: "w"
     const rank: Record<string, number> = { q: 5, r: 4, b: 3, n: 2, p: 1 };
     return takenFromColor.sort((a, b) => (rank[b] || 0) - (rank[a] || 0));
   }, [moves, color]);
-  if (!captured.length) return null;
+  // Always render the wrapper so its height is reserved from the very
+  // first frame — Tejas reported the whole game screen jumping when the
+  // first capture appeared. The wrapper's min-height (see .captured-strip
+  // in styles.css) locks the row height whether captured is empty or full.
   return (
     <div className="captured-strip" aria-label={`${color === "w" ? "White" : "Black"} pieces captured`}>
       {captured.map((t, i) => (

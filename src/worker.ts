@@ -350,8 +350,14 @@ export class AppDO extends DurableObject<Env> {
         schedule.gameId = game.id;
       }
       schedule.status = "fired";
-      await this.enqueuePush(db, schedule.fromId, "scheduled_start", "Your scheduled game is starting.", `/game/${schedule.gameId}`);
-      await this.enqueuePush(db, schedule.toId, "scheduled_start", "Your scheduled game is starting.", `/game/${schedule.gameId}`);
+      // Human-first push copy (Tejas's iPhone-test order): put the OTHER
+      // player's handle in the title so the notification reads as a person,
+      // not a category. iOS renders this as the first line above "from
+      // Chess with Friends".
+      const fromHandle = db.users[schedule.fromId]?.handle || "your friend";
+      const toHandle = db.users[schedule.toId]?.handle || "your friend";
+      await this.enqueuePush(db, schedule.fromId, "scheduled_start", `Your game with @${toHandle} is starting`, `/game/${schedule.gameId}`);
+      await this.enqueuePush(db, schedule.toId, "scheduled_start", `Your game with @${fromHandle} is starting`, `/game/${schedule.gameId}`);
     }
     await this.save(db);
     await this.setNextScheduleAlarm(db);
@@ -629,7 +635,8 @@ export class AppDO extends DurableObject<Env> {
       createdAt: Date.now(),
     };
     db.friendRequests[request.id] = request;
-    await this.enqueuePush(db, target.id, "friend_request", `@${user.handle} sent you a friend request.`, "/");
+    // Human-first title (Tejas's iPhone-test order): "@handle sent a friend request".
+    await this.enqueuePush(db, target.id, "friend_request", `@${user.handle} sent a friend request`, "/");
     await this.save(db);
     return json({ request });
   }
@@ -662,7 +669,8 @@ export class AppDO extends DurableObject<Env> {
       createdAt: Date.now(),
     };
     db.challenges[challenge.id] = challenge;
-    await this.enqueuePush(db, target.id, "challenge", `@${user.handle} challenged you to a game.`, "/");
+    // Human-first title (Tejas's iPhone-test order): "@handle invited you to a game".
+    await this.enqueuePush(db, target.id, "challenge", `@${user.handle} invited you to a game`, "/");
     await this.save(db);
     return json({ challenge });
   }

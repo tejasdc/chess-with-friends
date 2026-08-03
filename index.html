@@ -6,6 +6,10 @@
     <meta name="theme-color" content="#f0e6d2" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <!-- iOS Safari ignores SVG for the home-screen icon and needs a PNG.
+         180×180 is the canonical apple-touch-icon size that Retina iPhones
+         sharpen to their native pixel density. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

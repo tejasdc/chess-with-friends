@@ -1,9 +1,17 @@
-const CACHE_NAME = "chess-with-friends-v1";
+// Bumped from v1 → v2: manifest + icon set changed. Clients on the old
+// cache key will pick up the new assets on next update.
+const CACHE_NAME = "chess-with-friends-v2";
 const PUSH_TYPES = new Set(["friend_request", "challenge", "scheduled_start"]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(["/", "/manifest.webmanifest", "/icon.svg"]))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll([
+      "/",
+      "/manifest.webmanifest",
+      "/icon.svg",
+      "/apple-touch-icon.png",
+      "/icon-512.png",
+    ]))
   );
   self.skipWaiting();
 });
@@ -51,16 +59,19 @@ async function showPolicyNotification(event) {
 
   if (!payload || !PUSH_TYPES.has(payload.type)) return;
 
-  const title =
-    payload.type === "friend_request"
-      ? "Friend request"
-      : payload.type === "challenge"
-        ? "Game challenge"
-        : "Scheduled game";
+  // The server's payload.body IS now the human-first title line
+  // ("@handle invited you to a game" etc.). One line, no separate body —
+  // iOS appends "from Chess with Friends" after the title so we don't
+  // double up. Fallback to the old generic titles only if payload.body
+  // is missing (should not happen with the current server).
+  const title = payload.body || (
+    payload.type === "friend_request" ? "Friend request" :
+    payload.type === "challenge" ? "Game challenge" :
+    "Your game is starting"
+  );
 
   await self.registration.showNotification(title, {
-    body: payload.body || "Open the app when you are ready.",
-    icon: "/icon.svg",
+    icon: "/apple-touch-icon.png",
     badge: "/icon.svg",
     tag: payload.type,
     data: { url: payload.url || "/" },
