@@ -92,6 +92,32 @@ Verification:
 - Prod: Worker version `a9d5cf43-00b9-4296-b496-dd45c0d75c96`. `/api/health` OK, `cloudflareinsights` beacon count 1, `chess.tejas.nyc` serves the new hashes (`index-CcjN3FRS.js`, `index-r-zxGPRJ.css`) after edge cache flush.
 - Committed as `ba7ea51 Auth screen: static board is the anchor`.
 
+## Addendum — iOS Safari board runaway fix (2026-08-03, urgent)
+
+Tejas caught a critical bug on his real iPhone during a live game: the board was rendering with squares ~330px each, board ~2600px wide, horizontal overflow that grew as he scrolled. Chromium never reproduced it because the layout algorithm settles the loop; iOS Safari re-solves on every viewport change (URL bar show/hide) and compounds.
+
+Root cause (an invariant violation, not a patch spot): the ancestor chain `.shell > .stage > .game > .board-column` was implicit-track grids (`display: grid` with no `grid-template-columns`). Implicit tracks are `auto`-sized — their width is content-derived. The `.board-holder` inside had `width: 100%; aspect-ratio: 1`, so the holder's width depended on the auto track, but the auto track also depended on the holder's content — a circular resolution. `aspect-ratio` turns each width into a height that can re-feed width on the next layout pass. Chromium settles this stably; iOS Safari doesn't, and any layout-viewport change (URL bar transitions, scroll) starts a compounding growth.
+
+Fix (invariant-based, applied to every layer at once):
+
+1. Every implicit-track grid in the chain now has an explicit `grid-template-columns: minmax(0, 1fr)`. Tracks are `1fr` (fill available), never content-derived. Applied to `.stage`, `.game` (mobile base), `.dashboard`, `.board-column`, `.game-side`, `.auth`.
+2. `min-width: 0` on every grid item so intrinsic content (board's 8-column grid full of pieces) can never push a track past `1fr`.
+3. `.board-holder` width has three definite caps: `min(100%, calc(100vw - 40px), 720px)`. The `100%` term now resolves against a definite parent; the `vw` term is a hard ceiling that survives even if some engine mis-resolves `100%`; `720px` is the desktop cap. Same shape for `.auth-board`.
+4. `.board` no longer carries a redundant `aspect-ratio: 1` — the holder is already square, and a second aspect-ratio gave iOS a second resolution path to compound on. Board grid also uses `minmax(0, 1fr)` columns/rows.
+5. `body { overflow-x: clip }` as a hard backstop — nothing in the tree can cause horizontal overflow, ever.
+
+Regression coverage:
+- New chromium test `board holds a stable size at mobile viewport under scroll` (`tests/e2e.spec.ts:77`) measures `.board-holder` width before and after 8 synthetic scroll events, asserts `< 1px` drift and no horizontal overflow. Catches any future breakage of the definite-width invariant.
+- `playwright.config.ts` now has two projects: `chromium` (full suite) and `mobile-webkit` (iPhone 13 emulation, layout tests only). Playwright's WebKit binary currently segfaults on Darwin 25 pre-release (upstream issue — the binary can launch a process but crashes before opening a page). The webkit project is wired and will run cleanly on any released macOS or CI environment.
+
+Deploy + verification:
+- Prod: Worker version `6929898b-dea2-49fb-902d-e56d7fc7cca9`.
+- `curl -s https://chess.tejas.nyc/api/health` → `{"ok":true,...}`, `cloudflareinsights` beacon count 1, new asset hashes served (`index-Cla6r561.js`, `index-DaREMmqy.css`) after cache flush.
+- Chromium e2e (all 3 tests including the new scroll regression) green.
+- **Real iPhone verification is the ground truth** — Tejas please open a live game on chess.tejas.nyc, scroll, and confirm the board holds a stable size that fits the viewport.
+
+Commit `c237c91` ("Fix iOS Safari: definite widths through the board's grid ancestor chain").
+
 ## Runbook if the deploy needs to roll back
 - `wrangler rollback` to a previous version, or
 - Revert commit `9f01e3e` (`Redesign: quiet warm-paper world, board is the hero`) and re-deploy.
