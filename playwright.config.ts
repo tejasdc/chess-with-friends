@@ -21,10 +21,22 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      testMatch: /e2e\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    // Hostile-conditions harness — simulates what a real phone does
+    // (socket death, offline/online, hidden/visible cycles, rapid
+    // input, CPU throttling). A round is not shippable unless this
+    // project is green. Runs as its own project so mechanics failures
+    // and adversity failures are triaged separately.
+    {
+      name: "adversity",
+      testMatch: /adversity\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile-webkit",
+      testMatch: /e2e\.spec\.ts$/,
       grep: /board holds a stable size|notification prompt/,
       use: { ...devices["iPhone 13"] },
     },

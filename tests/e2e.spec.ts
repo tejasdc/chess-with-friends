@@ -197,12 +197,15 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await openGame(alice.page, resignGame);
   await openGame(bob.page, resignGame);
   await bob.page.close();
-  await expect(alice.page.getByText("reconnecting")).toBeVisible();
+  // Presence now shows humane labels: "here" / "away" / "offline"
+  // instead of "connected" / "reconnecting" / "gone". State class names
+  // on the element are unchanged.
+  await expect(alice.page.getByText("away")).toBeVisible();
   await shot(alice.page, "08-opponent-reconnecting");
   bob.page = await bob.context.newPage();
   await addAuthenticator(bob.page);
   await openGame(bob.page, resignGame);
-  await expect(alice.page.getByText("connected")).toBeVisible();
+  await expect(alice.page.getByText("here")).toBeVisible();
   await shot(alice.page, "09-opponent-reconnected");
   await alice.page.getByRole("button", { name: "Resign" }).click();
   await alice.page.getByRole("button", { name: "Confirm resign" }).click();
