@@ -31,6 +31,9 @@ tmp/reviews/screens-r2/*
 !tmp/reviews/screens-r2/fix-mobile-game-dot-presence.png
 !tmp/reviews/screens-r2/fix-mobile-opponent-piece-tap-no-dots.png
 !tmp/reviews/screens-r2/fix-mobile-own-piece-tap-shows-dots.png
+!tmp/reviews/screens-r2/toast-info-fresh.png
+!tmp/reviews/screens-r2/toast-info-scrolled.png
+!tmp/reviews/screens-r2/toast-error.png
 # Round-3 iPhone-test-fix evidence
 !tmp/reviews/screens-r2/fix2-install-with-dismiss.png
 !tmp/reviews/screens-r2/fix2-install-after-dismiss.png
