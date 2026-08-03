@@ -69,6 +69,7 @@ ul, ol { list-style: none; }
   margin: 0 auto;
   padding: 20px 20px 96px;
   min-height: 100dvh;
+  overflow-x: clip;
 }
 
 .topbar {
@@ -654,7 +655,12 @@ select {
 }
 
 .board-holder {
-  width: 100%;
+  /* The width chain must end at something DEFINITE (vw), never only at
+     content-sized grid tracks: iOS Safari re-resolves the circular
+     track<->holder dependency on every viewport change and the board
+     compounds in size. The vw ceiling breaks the loop in any engine. */
+  width: min(100%, calc(100vw - 40px), 640px);
+  margin-inline: auto;
   aspect-ratio: 1;
   padding: 6px;
   background: var(--board-frame);
