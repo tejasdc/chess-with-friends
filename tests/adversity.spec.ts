@@ -417,5 +417,82 @@ test("game screen never scrolls at 390x844, 1280x700, or 1440x900", async ({ bro
   }
 });
 
+test("recurring schedule creates a game on each firing and can be ended by either party", async ({ browser }) => {
+  // Two friends. Alice proposes a daily schedule starting NOW-ish
+  // (server accepts anything within 60s of now); Bob accepts; the
+  // server's alarm fires and creates a game + queues scheduled_start
+  // pushes to both. The schedule stays "accepted" with nextFireAt one
+  // day ahead. Bob then cancels the series; the schedule becomes
+  // "cancelled".
+  const suffix = Date.now().toString(36).slice(-6);
+  const aliceCtx = await browser.newContext();
+  const bobCtx = await browser.newContext();
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  await addAuthenticator(alice);
+  await addAuthenticator(bob);
+  const aH = `rec_a${suffix}`;
+  const bH = `rec_b${suffix}`;
+  try {
+    await register(alice, aH);
+    await register(bob, bH);
+    await alice.getByPlaceholder("friend_handle").fill(bH);
+    await alice.getByRole("button", { name: "Add" }).click();
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await expect(bob.getByText(`@${aH}`)).toBeVisible();
+
+    // Propose a daily schedule starting ~30 seconds from now (server
+    // allows startAt within 60s in the past; a small future offset
+    // lets the alarm fire during the test window).
+    await alice.reload();
+    const startAt = Date.now() + 3_000;
+    const scheduleId = await alice.evaluate(async ([friendHandle, at]) => {
+      // Find friendId by fetching /api/me — the home data enumerates friends.
+      const me = await (await fetch("/api/me", { credentials: "include" })).json();
+      const friend = me.friends.find((f: { handle: string }) => f.handle === friendHandle);
+      const res = await fetch("/api/schedules", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ friendId: friend.id, timeControl: "10|0", startAt: at, recurrence: { kind: "daily" } }),
+      });
+      const data = await res.json();
+      return data.schedule.id as string;
+    }, [bH, startAt] as const);
+    expect(scheduleId).toMatch(/^sch_/);
+
+    // Bob accepts.
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+
+    // Wait for the alarm to fire — startAt is ~3s ahead; give the DO
+    // a beat past that.
+    await bob.waitForTimeout(6_000);
+
+    // Confirm a scheduled_start game exists and the schedule rolled
+    // forward instead of firing "fired" (recurring stays accepted).
+    const post = await alice.evaluate(async () => (await fetch("/api/me", { credentials: "include" })).json());
+    const scheduleAfter = post.schedules.find((s: { id: string }) => s.id === scheduleId);
+    expect(scheduleAfter.status).toBe("accepted");
+    expect(scheduleAfter.recurrence?.kind).toBe("daily");
+    expect(scheduleAfter.lastGameId).toMatch(/^gam_/);
+    // nextFireAt has advanced by ~1 day.
+    const dayLater = startAt + 24 * 60 * 60 * 1000;
+    expect(Math.abs(scheduleAfter.nextFireAt - dayLater)).toBeLessThan(60_000);
+
+    // Bob cancels the series.
+    await bob.evaluate(async (id) => {
+      await fetch(`/api/schedules/${id}/cancel`, { method: "POST", credentials: "include", body: "{}" });
+    }, scheduleId);
+    const finalState = await alice.evaluate(async () => (await fetch("/api/me", { credentials: "include" })).json());
+    const scheduleEnded = finalState.schedules.find((s: { id: string }) => s.id === scheduleId);
+    expect(scheduleEnded.status).toBe("cancelled");
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 // Silence unused-import warning if a future refactor drops CDPSession above.
 export type _KeepCDP = CDPSession;

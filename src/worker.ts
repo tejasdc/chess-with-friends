@@ -78,15 +78,51 @@ interface Challenge {
   createdAt: number;
 }
 
+// Recurrence rule on a schedule. Undefined = one-off (backcompat).
+// Only two kinds in v1: weekly on a specific weekday, or daily. Anything
+// else (monthly, N-times-per-week, exceptions) is deliberately out.
+type Recurrence =
+  | { kind: "once" }
+  | { kind: "weekly"; weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6 }
+  | { kind: "daily" };
+
 interface Schedule {
   id: string;
   fromId: string;
   toId: string;
   timeControl: TimeControl;
   startAt: number;
-  status: "pending" | "accepted" | "fired" | "declined";
-  gameId?: string;
+  // nextFireAt is the SCHEDULING cursor — set to startAt on create, advanced
+  // by the recurrence interval on each firing. For one-off schedules this
+  // equals startAt until the schedule fires (status → "fired").
+  nextFireAt: number;
+  // Recurrence is optional for backwards-compatibility with stored records
+  // written before this field existed; treat missing as {kind:"once"}.
+  recurrence?: Recurrence;
+  // "cancelled" is the series-level end (either party can trigger it).
+  // "fired" only applies to one-off schedules that have already run;
+  // recurring schedules stay "accepted" until cancelled.
+  status: "pending" | "accepted" | "fired" | "declined" | "cancelled";
+  gameId?: string;           // legacy one-off field — kept for old data
+  lastGameId?: string;       // most-recent fired game for recurring series
+  cancelledBy?: string;      // userId who ended the series
   createdAt: number;
+}
+
+function recurrenceOf(s: Schedule): Recurrence {
+  return s.recurrence || { kind: "once" };
+}
+
+// Advance a fire time by ONE interval per recurrence kind. Callers loop
+// until the returned time is strictly in the future — that's how a
+// missed catch-up firing skips forward without piling up games.
+function advanceFireTime(current: number, r: Recurrence): number {
+  const DAY = 24 * 60 * 60 * 1000;
+  switch (r.kind) {
+    case "weekly": return current + 7 * DAY;
+    case "daily":  return current + DAY;
+    case "once":   return current; // unreached — one-offs don't advance
+  }
 }
 
 interface GameMeta {
@@ -241,6 +277,20 @@ function validTimeControl(value: unknown): TimeControl {
   return value === "5|0" ? "5|0" : "10|0";
 }
 
+// Coerce a client-supplied recurrence into the strict Recurrence union.
+// Unknown shapes fall back to {kind: "once"} — safer than throwing on
+// malformed input, and the once-schedule flow was the pre-recurrence
+// default anyway.
+function validateRecurrence(value: unknown): Recurrence {
+  if (!value || typeof value !== "object") return { kind: "once" };
+  const v = value as { kind?: string; weekday?: number };
+  if (v.kind === "daily") return { kind: "daily" };
+  if (v.kind === "weekly" && typeof v.weekday === "number" && v.weekday >= 0 && v.weekday <= 6) {
+    return { kind: "weekly", weekday: v.weekday as 0|1|2|3|4|5|6 };
+  }
+  return { kind: "once" };
+}
+
 function friendshipId(a: string, b: string) {
   return [a, b].sort().join(":");
 }
@@ -346,6 +396,9 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname.match(/^\/api\/schedules\/[^/]+\/accept$/) && request.method === "POST") {
         return await this.acceptSchedule(url.pathname.split("/")[3], user);
       }
+      if (url.pathname.match(/^\/api\/schedules\/[^/]+\/cancel$/) && request.method === "POST") {
+        return await this.cancelSchedule(url.pathname.split("/")[3], user);
+      }
       if (url.pathname === "/api/debug/push-log" && request.method === "GET") return await this.debugPushLog(request);
 
       return json({ error: "Not found" }, { status: 404 });
@@ -357,21 +410,43 @@ export class AppDO extends DurableObject<Env> {
   async alarm() {
     const db = await this.db();
     const now = Date.now();
-    const due = Object.values(db.schedules).filter((schedule) => schedule.status === "accepted" && schedule.startAt <= now);
+    // Ensure legacy records without nextFireAt fall back to startAt on
+    // the first alarm pass — the field was added when recurring
+    // schedules shipped.
+    for (const s of Object.values(db.schedules)) {
+      if (s.status === "accepted" && s.nextFireAt === undefined) s.nextFireAt = s.startAt;
+    }
+    const due = Object.values(db.schedules).filter(
+      (s) => s.status === "accepted" && (s.nextFireAt ?? s.startAt) <= now,
+    );
     for (const schedule of due) {
-      if (!schedule.gameId) {
-        const game = await this.createGame(db, schedule.fromId, schedule.toId, schedule.timeControl, "schedule");
-        schedule.gameId = game.id;
-      }
-      schedule.status = "fired";
+      // Create ONE fresh game per firing — always a new game even for
+      // recurring, because each occurrence is a distinct playing session.
+      const game = await this.createGame(db, schedule.fromId, schedule.toId, schedule.timeControl, "schedule");
+      schedule.lastGameId = game.id;
+      if (!schedule.gameId) schedule.gameId = game.id;   // preserve legacy field for the first firing
       // Human-first push copy (Tejas's iPhone-test order): put the OTHER
       // player's handle in the title so the notification reads as a person,
       // not a category. iOS renders this as the first line above "from
       // two chairs".
       const fromHandle = db.users[schedule.fromId]?.handle || "your friend";
       const toHandle = db.users[schedule.toId]?.handle || "your friend";
-      await this.enqueuePush(db, schedule.fromId, "scheduled_start", `Your game with @${toHandle} is starting`, `/game/${schedule.gameId}`);
-      await this.enqueuePush(db, schedule.toId, "scheduled_start", `Your game with @${fromHandle} is starting`, `/game/${schedule.gameId}`);
+      await this.enqueuePush(db, schedule.fromId, "scheduled_start", `Your game with @${toHandle} is starting`, `/game/${game.id}`);
+      await this.enqueuePush(db, schedule.toId,   "scheduled_start", `Your game with @${fromHandle} is starting`, `/game/${game.id}`);
+      // Recurring schedules stay "accepted" and roll forward; one-offs
+      // are done. Cap advance to a single interval per wake so a missed
+      // week doesn't fire a stack of catch-up games — the loop below
+      // then skips further past occurrences without firing them.
+      const rec = recurrenceOf(schedule);
+      if (rec.kind === "once") {
+        schedule.status = "fired";
+      } else {
+        let next = advanceFireTime(schedule.nextFireAt ?? schedule.startAt, rec);
+        // If we slept through multiple occurrences, skip forward to the
+        // next FUTURE fire — only ONE catch-up game was created above.
+        while (next <= now) next = advanceFireTime(next, rec);
+        schedule.nextFireAt = next;
+      }
     }
     await this.save(db);
     await this.setNextScheduleAlarm(db);
@@ -725,17 +800,20 @@ export class AppDO extends DurableObject<Env> {
 
   private async createSchedule(request: Request, user: User) {
     const db = await this.db();
-    const body = await readJson<{ friendId: string; startAt: number; timeControl?: TimeControl }>(request);
+    const body = await readJson<{ friendId: string; startAt: number; timeControl?: TimeControl; recurrence?: Recurrence }>(request);
     const target = db.users[body.friendId];
     this.assertFriends(db, user.id, body.friendId);
     const startAt = Number(body.startAt);
     if (!Number.isFinite(startAt) || startAt < Date.now() - 60000) throw new Error("Choose a future time.");
+    const recurrence = validateRecurrence(body.recurrence);
     const schedule: Schedule = {
       id: newId("sch"),
       fromId: user.id,
       toId: target.id,
       timeControl: validTimeControl(body.timeControl),
       startAt,
+      nextFireAt: startAt,
+      recurrence,
       status: "pending",
       createdAt: Date.now(),
     };
@@ -749,6 +827,27 @@ export class AppDO extends DurableObject<Env> {
     const schedule = db.schedules[id];
     if (!schedule || schedule.toId !== user.id || schedule.status !== "pending") throw new Error("Schedule not available.");
     schedule.status = "accepted";
+    // Ensure nextFireAt is set for records that came in without it.
+    if (schedule.nextFireAt === undefined) schedule.nextFireAt = schedule.startAt;
+    await this.save(db);
+    await this.setNextScheduleAlarm(db);
+    return json({ schedule });
+  }
+
+  private async cancelSchedule(id: string, user: User) {
+    // Either party can end the series. Cancels future firings; past
+    // fired games remain playable (they're their own game objects).
+    const db = await this.db();
+    const schedule = db.schedules[id];
+    if (!schedule) throw new Error("Schedule not found.");
+    if (schedule.fromId !== user.id && schedule.toId !== user.id) throw new Error("Not your schedule.");
+    if (schedule.status !== "accepted" && schedule.status !== "pending") {
+      // Idempotent — a second cancel on an already-cancelled schedule
+      // is a no-op, not an error.
+      return json({ schedule });
+    }
+    schedule.status = "cancelled";
+    schedule.cancelledBy = user.id;
     await this.save(db);
     await this.setNextScheduleAlarm(db);
     return json({ schedule });
@@ -808,8 +907,9 @@ export class AppDO extends DurableObject<Env> {
   private async setNextScheduleAlarm(db: AppDb) {
     const next = Object.values(db.schedules)
       .filter((schedule) => schedule.status === "accepted")
-      .sort((a, b) => a.startAt - b.startAt)[0];
-    if (next) await this.ctx.storage.setAlarm(next.startAt);
+      .map((s) => ({ id: s.id, at: s.nextFireAt ?? s.startAt }))
+      .sort((a, b) => a.at - b.at)[0];
+    if (next) await this.ctx.storage.setAlarm(next.at);
   }
 
   private async updateGameStatus(request: Request) {

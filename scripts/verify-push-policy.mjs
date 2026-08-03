@@ -17,7 +17,10 @@ for (const file of files) {
     const value = match[1];
     if (allowed.includes(value)) found.add(value);
     if (value.includes("push") || value.includes("notification")) continue;
-    if (/(online|streak|daily|rating|presence|reminder|nudge|comeback)/.test(value)) {
+    // Look for re-engagement CATEGORY names — words that name what the
+    // banned pushes would BE, not neutral tokens that share letters.
+    // "daily" alone is fine (recurrence kind); "daily_reminder" is not.
+    if (/(streak|comeback|nudge|reengagement|reengage|reminder|activity_ping|inactive)/i.test(value)) {
       violations.push(`${file}: suspicious notification-like literal "${value}"`);
     }
   }

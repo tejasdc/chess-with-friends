@@ -112,6 +112,11 @@ type SetMessage = (value: string, kind?: ToastKind) => void;
 interface Friend { id: string; handle: string; online: boolean }
 interface FriendRequest { id: string; fromHandle?: string; toHandle?: string }
 interface Challenge { id: string; fromHandle?: string; toHandle?: string; timeControl: TimeControl }
+type Recurrence =
+  | { kind: "once" }
+  | { kind: "weekly"; weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6 }
+  | { kind: "daily" };
+
 interface Schedule {
   id: string;
   fromId: string;
@@ -120,8 +125,12 @@ interface Schedule {
   toHandle?: string;
   timeControl: TimeControl;
   startAt: number;
-  status: "pending" | "accepted" | "fired" | "declined";
+  nextFireAt?: number;
+  recurrence?: Recurrence;
+  status: "pending" | "accepted" | "fired" | "declined" | "cancelled";
   gameId?: string;
+  lastGameId?: string;
+  cancelledBy?: string;
 }
 interface GameMeta {
   id: string;
@@ -1063,8 +1072,7 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
         label: (
           <>
             <strong>@{schedule.fromHandle}</strong> proposed{" "}
-            {new Date(schedule.startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ·{" "}
-            {formatTimeControl(schedule.timeControl)}
+            {formatScheduleWhen(schedule.startAt, schedule.recurrence, schedule.nextFireAt)}
           </>
         ),
         onAccept: () => void acceptSchedule(schedule.id),
@@ -1158,6 +1166,7 @@ function PlaySection({
   const [friendId, setFriendId] = useState(home.friends[0]?.id || "");
   const [day, setDay] = useState<string>(() => defaultDayValue());
   const [time, setTime] = useState<string>("19:00");
+  const [repeat, setRepeat] = useState<"once" | "weekly" | "daily">("once");
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -1170,12 +1179,25 @@ function PlaySection({
       if (!Number.isFinite(startAt)) throw new Error("Pick a valid day and time.");
       // TIME CONTROL is hardcoded — 10 min IS the game. Server type still
       // accepts the union for future flexibility; UI never asks.
-      await api("/api/schedules", { method: "POST", body: JSON.stringify({ friendId, timeControl: "10|0", startAt }) });
+      const recurrence: Recurrence =
+        repeat === "daily"  ? { kind: "daily" } :
+        repeat === "weekly" ? { kind: "weekly", weekday: new Date(startAt).getDay() as 0|1|2|3|4|5|6 } :
+                              { kind: "once" };
+      await api("/api/schedules", { method: "POST", body: JSON.stringify({ friendId, timeControl: "10|0", startAt, recurrence }) });
       setMessage("Game time proposed.");
       setOpen(false);
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Schedule failed.", "error");
+    }
+  }
+
+  async function cancelSeries(schedule: Schedule) {
+    try {
+      await api(`/api/schedules/${schedule.id}/cancel`, { method: "POST", body: "{}" });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Couldn't end the series.", "error");
     }
   }
 
@@ -1218,6 +1240,14 @@ function PlaySection({
               <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
             </label>
           </div>
+          <label className="field">
+            <span className="field-label">Repeat</span>
+            <select value={repeat} onChange={(event) => setRepeat(event.target.value as "once" | "weekly" | "daily")}>
+              <option value="once">Once</option>
+              <option value="weekly">Weekly on {WEEKDAY_LONG[new Date(dayTimeToMillis(day, time)).getDay()]}</option>
+              <option value="daily">Daily</option>
+            </select>
+          </label>
           <div className="play-action">
             <button className="primary" onClick={propose} disabled={!friendId}>Propose</button>
           </div>
@@ -1226,16 +1256,23 @@ function PlaySection({
 
       {outgoingSchedules.length ? (
         <ul className="pending">
-          {outgoingSchedules.map((schedule) => (
-            <li key={schedule.id}>
-              @{schedule.fromHandle} → @{schedule.toHandle}{" "}
-              · {formatScheduleWhen(schedule.startAt)}{" "}
-              · {scheduleStatus(schedule.status)}
-              {schedule.gameId ? (
-                <button className="link" onClick={() => navigate(`/game/${schedule.gameId}`)}>Open</button>
-              ) : null}
-            </li>
-          ))}
+          {outgoingSchedules.map((schedule) => {
+            const gameLink = schedule.lastGameId || schedule.gameId;
+            const recurringActive = schedule.recurrence && schedule.recurrence.kind !== "once" && schedule.status === "accepted";
+            return (
+              <li key={schedule.id}>
+                @{schedule.fromHandle} → @{schedule.toHandle}{" "}
+                · {formatScheduleWhen(schedule.startAt, schedule.recurrence, schedule.nextFireAt)}{" "}
+                · {scheduleStatus(schedule.status)}
+                {gameLink ? (
+                  <button className="link" onClick={() => navigate(`/game/${gameLink}`)}>Open</button>
+                ) : null}
+                {recurringActive ? (
+                  <button className="link" onClick={() => void cancelSeries(schedule)}>End series</button>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </section>
@@ -1276,14 +1313,22 @@ function dayTimeToMillis(day: string, time: string): number {
   d.setHours(hour, minute, 0, 0);
   return d.getTime();
 }
-function formatScheduleWhen(startAt: number): string {
-  const d = new Date(startAt);
+const WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function formatScheduleWhen(startAt: number, recurrence?: Recurrence, nextFireAt?: number): string {
+  const timeLabel = new Date(startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  // For recurring schedules the SHAPE of the label changes: it's about
+  // the cadence, not the specific date. The next fire time is a
+  // secondary line the caller can render if useful; we just describe
+  // the series here.
+  if (recurrence?.kind === "daily") return `every day · ${timeLabel}`;
+  if (recurrence?.kind === "weekly") return `every ${WEEKDAY_LONG[recurrence.weekday]} · ${timeLabel}`;
+  const d = new Date(nextFireAt ?? startAt);
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
   const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
   const isTomorrow = d.toDateString() === tomorrow.toDateString();
   const dayLabel = sameDay ? "Today" : isTomorrow ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-  const timeLabel = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   return `${dayLabel} · ${timeLabel}`;
 }
 
@@ -2067,6 +2112,7 @@ function liveClock(game: GameState, color: "w" | "b", now: number) {
 
 function scheduleStatus(status: Schedule["status"]) {
   if (status === "fired") return "ready";
+  if (status === "cancelled") return "ended";
   return status;
 }
 
