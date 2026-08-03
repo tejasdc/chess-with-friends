@@ -34,6 +34,11 @@
   --walnut-2:   #3A2B1E;   /* darker walnut for piece-white outline stroke */
   --vermillion: #C43416;   /* THE accent, one moment per screen */
   --vermillion-2:#A02710;
+  /* Presence dots — functional signals, palette-exempt per team-lead.
+     Muted so they don't compete with the vermillion. */
+  --presence-online:      #5B8A5C;   /* muted moss */
+  --presence-reconnect:   #B77C29;   /* warm ochre */
+  --presence-offline-ring:#8B8478;   /* stone hairline */
   --hair:       rgba(74, 56, 38, 0.16);
   --hair-strong:rgba(74, 56, 38, 0.32);
   --focus:      rgba(196, 52, 22, 0.35);
@@ -537,25 +542,43 @@ a { color: inherit; }
   font-size: 14px;
   color: var(--ink);
 }
+/* Presence dot — team-lead demanded a plain colored dot in place of
+   here/away/offline words. Green = connected, amber pulse = reconnecting,
+   hollow gray = offline. Small enough that the color doesn't fight the
+   world; palette-exempt (green) per team-lead's explicit authorization. */
 .presence {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  color: var(--stone);
-  text-transform: uppercase;
-}
-.presence .dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: var(--stone);
   display: inline-block;
+  flex-shrink: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--presence-offline-ring);
+  vertical-align: 1px;
 }
-.presence.online .dot  { background: var(--vermillion); }
-.presence.offline .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--stone); }
+.presence.online,
+.presence.connected {
+  background: var(--presence-online);
+  box-shadow: none;
+}
+.presence.reconnecting {
+  background: var(--presence-reconnect);
+  box-shadow: none;
+  animation: presence-pulse 1.6s var(--ease) infinite;
+}
+.presence.offline,
+.presence.gone {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--presence-offline-ring);
+}
+@keyframes presence-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+/* Respect reduced-motion — hold the amber solid instead of pulsing. */
+@media (prefers-reduced-motion: reduce) {
+  .presence.reconnecting { animation: none; }
+}
 
 .invite-fallback {
   font-family: var(--mono);
@@ -632,13 +655,18 @@ a { color: inherit; }
   color: var(--paper);
   border-color: var(--vermillion);
 }
-.clock-strip.active-turn .connection { color: var(--paper); opacity: 0.85; }
 .clock-strip.active-turn .handle-line { color: var(--paper); }
+/* Presence dot on active (vermillion) strip: brighten the offline ring so
+   it doesn't disappear against vermillion; green/amber remain themselves. */
+.clock-strip.active-turn .presence.offline,
+.clock-strip.active-turn .presence.gone {
+  box-shadow: inset 0 0 0 1.5px rgba(240, 230, 210, 0.7);
+}
 
 .who {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
 }
 .handle-line {

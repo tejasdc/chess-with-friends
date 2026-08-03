@@ -317,12 +317,13 @@ function useRealtimeGame(
 }
 
 function presenceLabel(state: "connected" | "reconnecting" | "gone", _handle: string): string {
-  // Softer wording than raw state — "gone" reads insane at a glance;
-  // "offline" is what a person would say. "away" carries the shorter
-  // interruption that iOS lock/tab-switch produces without alarming.
-  if (state === "connected") return "here";
-  if (state === "reconnecting") return "away";
-  return "offline";
+  // Aria-label wording only — the visible signal is a colored dot. Words
+  // like "here"/"away" fought "offline" as antonyms; a dot doesn't lie.
+  // These strings are consumed by screen readers and by the e2e suite via
+  // getByRole("status", { name: ... }).
+  if (state === "connected") return "opponent connected";
+  if (state === "reconnecting") return "opponent reconnecting";
+  return "opponent offline";
 }
 
 function usePathname() {
@@ -875,10 +876,14 @@ function FriendsSection({
           {home.friends.map((friend) => (
             <li className="friend-card" key={friend.id}>
               <span className="friend-handle">@{friend.handle}</span>
-              <span className={`presence ${friend.online ? "online" : "offline"}`}>
-                <span className="dot" aria-hidden="true" />
-                {friend.online ? "online" : "offline"}
-              </span>
+              {/* Plain colored dot only — green for online, hollow gray for
+                  offline. The word carried no information the dot doesn't.
+                  State exposed via aria-label + status class only. */}
+              <span
+                className={`presence ${friend.online ? "online" : "offline"}`}
+                role="status"
+                aria-label={friend.online ? "online" : "offline"}
+              />
             </li>
           ))}
         </ul>
@@ -976,6 +981,14 @@ function GameScreen({
   async function choose(square: Square) {
     if (!game || game.status !== "active") return;
     if (!selected) {
+      // Only YOUR OWN pieces are selectable — empty squares and opponent
+      // pieces are silent no-ops (no selection state, no legal-move dots
+      // for opponent's pieces, no doomed move request, no error toast).
+      // Tapping an opponent piece to "see what it could do" is a chess.com
+      // affordance the anti-chess.com thesis explicitly rejects.
+      const chess = new Chess(game.fen);
+      const piece = chess.get(square);
+      if (!piece || piece.color !== myColor) return;
       setSelected(square);
       return;
     }
@@ -1041,8 +1054,15 @@ function GameScreen({
             className={`clock-strip top ${game.status === "active" && game.turn === opponentColor ? "active-turn" : ""}`}
           >
             <div className="who">
+              {/* Dot before the handle — presence is a state marker on the
+                  opponent, not a caption after their name. Same aria contract
+                  as the friend row: role=status + aria-label; no visible word. */}
+              <span
+                className={`presence ${opponentRawState}`}
+                role="status"
+                aria-label={opponentPresence}
+              />
               <span className="handle-line">@{opponentHandle}</span>
-              <span className={`connection ${opponentRawState}`}>{opponentPresence}</span>
             </div>
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>

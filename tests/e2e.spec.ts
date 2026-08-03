@@ -178,7 +178,12 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
 
   await alice.page.reload();
   await expect(alice.page.locator(".friend-card", { hasText: bob.handle })).toBeVisible();
-  await expect(alice.page.locator(".friend-card", { hasText: bob.handle }).getByText(/online|offline/)).toBeVisible();
+  // Presence is a plain colored dot now (green/amber/hollow) — the words
+  // "online"/"offline" are gone from the DOM, state lives in aria-label
+  // and the .presence.online / .presence.offline class contract.
+  await expect(
+    alice.page.locator(".friend-card", { hasText: bob.handle }).locator(".presence.online, .presence.offline"),
+  ).toBeVisible();
   await shot(alice.page, "05-presence-visible-in-app");
 
   const mateGame = await challengeAndAccept(alice.page, bob.page, "10|0");
@@ -197,15 +202,17 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await openGame(alice.page, resignGame);
   await openGame(bob.page, resignGame);
   await bob.page.close();
-  // Presence now shows humane labels: "here" / "away" / "offline"
-  // instead of "connected" / "reconnecting" / "gone". State class names
-  // on the element are unchanged.
-  await expect(alice.page.getByText("away")).toBeVisible();
+  // Presence is now a plain colored dot (green / amber-pulse / hollow gray).
+  // The old "here" / "away" / "offline" words are gone from the DOM per
+  // Tejas's direct order — state exposed via .presence.<state> class and
+  // aria-label only. The state class names on the element are unchanged,
+  // so we assert on those.
+  await expect(alice.page.locator(".presence.reconnecting")).toBeVisible();
   await shot(alice.page, "08-opponent-reconnecting");
   bob.page = await bob.context.newPage();
   await addAuthenticator(bob.page);
   await openGame(bob.page, resignGame);
-  await expect(alice.page.getByText("here")).toBeVisible();
+  await expect(alice.page.locator(".presence.connected")).toBeVisible();
   await shot(alice.page, "09-opponent-reconnected");
   await alice.page.getByRole("button", { name: "Resign" }).click();
   await alice.page.getByRole("button", { name: "Confirm resign" }).click();
