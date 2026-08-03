@@ -60,11 +60,17 @@
   --vermillion: #C43416;
   --vermillion-2:#A02710;
 
-  /* Presence dots — cream chip online, warm-ochre pulse reconnecting,
-     hollow navy ring offline. */
+  /* Presence dots — Tejas rejected the hollow-ring offline treatment
+     ("can't tell at arm's length, especially on celadon"). Both states
+     are now FILLED with distinct hues: cream (bright, alive) for
+     online; a muted teak-shifted stone for offline (dim but present,
+     reads as "was here recently"). A thin ink outline defines both
+     against the buff surface where cream + buff blur together. */
   --presence-online:      var(--cream);
+  --presence-online-ring: var(--ink);
   --presence-reconnect:   var(--teak);
-  --presence-offline-ring:#6b6a7a;
+  --presence-offline:     #8f8877;
+  --presence-offline-ring:#57544a;
 
   --hair:        rgba(46, 42, 61, 0.22);   /* navy-based hairline on ground */
   --hair-strong: rgba(46, 42, 61, 0.36);
@@ -375,6 +381,21 @@ body[data-screen="game"] .shell {
 .turn-status { color: var(--ink); }
 .turn-status .terminal { color: var(--vermillion); }
 .move-count { color: var(--stone); }
+
+/* Waiting-room readout — the clock slot on both strips shows a quiet
+   text label ("ready" / "10 min") instead of a running clock. Muted
+   type, no monospace-clock weight. */
+.clock.waiting-label {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--stone);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.clock-strip.top .clock.waiting-label,
+.clock-strip.bottom .clock.waiting-label { color: var(--ink); opacity: 0.7; }
+.clock-strip.bottom .clock.waiting-label { color: var(--paper); }
 
 /* Inspirations page — simple, in-world, on the ground. */
 .inspirations {
@@ -972,34 +993,34 @@ body[data-screen="game"] .shell {
   font-size: 14px;
   color: var(--ink);
 }
-/* Presence dot — team-lead demanded a plain colored dot in place of
-   here/away/offline words. Green = connected, amber pulse = reconnecting,
-   hollow gray = offline. Small enough that the color doesn't fight the
-   world; palette-exempt (green) per team-lead's explicit authorization. */
+/* Presence dot — Tejas rejected the hollow-ring offline: "can't tell
+   at arm's length, especially on celadon". Both states are now FILLED
+   with a distinct hue and an ink outline that reads on both celadon
+   ground and buff card. Bigger (12px) so a glance at 390 catches it. */
 .presence {
-  width: 9px;
-  height: 9px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--presence-offline-ring);
-  vertical-align: 1px;
+  background: var(--presence-offline);
+  box-shadow: 0 0 0 1px var(--presence-offline-ring);
+  vertical-align: -1px;
 }
 .presence.online,
 .presence.connected {
   background: var(--presence-online);
-  box-shadow: none;
+  box-shadow: 0 0 0 1px var(--presence-online-ring);
 }
 .presence.reconnecting {
   background: var(--presence-reconnect);
-  box-shadow: none;
+  box-shadow: 0 0 0 1px var(--ink);
   animation: presence-pulse 1.6s var(--ease) infinite;
 }
 .presence.offline,
 .presence.gone {
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--presence-offline-ring);
+  background: var(--presence-offline);
+  box-shadow: 0 0 0 1px var(--presence-offline-ring);
 }
 @keyframes presence-pulse {
   0%, 100% { opacity: 1; }

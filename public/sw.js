@@ -1,7 +1,7 @@
-// Bumped from v1 → v2: manifest + icon set changed. Clients on the old
-// cache key will pick up the new assets on next update.
-const CACHE_NAME = "chess-with-friends-v2";
-const PUSH_TYPES = new Set(["friend_request", "challenge", "scheduled_start"]);
+// Bumped v2 → v3: added challenge_accepted push type. Clients on the
+// old cache key will pick up the new assets on next update.
+const CACHE_NAME = "chess-with-friends-v3";
+const PUSH_TYPES = new Set(["friend_request", "challenge", "challenge_accepted", "scheduled_start"]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -67,6 +67,7 @@ async function showPolicyNotification(event) {
   const title = payload.body || (
     payload.type === "friend_request" ? "Friend request" :
     payload.type === "challenge" ? "Game challenge" :
+    payload.type === "challenge_accepted" ? "Your game is ready" :
     "Your game is starting"
   );
 

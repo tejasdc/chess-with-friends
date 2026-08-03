@@ -216,6 +216,7 @@ function App() {
   const path = usePathname();
   const gameMatch = path.match(/^\/game\/([^/]+)/);
   const inviteMatch = path.match(/^\/invite\/([^/]+)/);
+  const waitingMatch = path.match(/^\/waiting\/([^/]+)/);
 
   async function refresh() {
     try {
@@ -253,6 +254,7 @@ function App() {
   }
   if (!home) return <AuthScreen onSignedIn={refresh} message={message} messageKind={messageKind} setMessage={setMessage} />;
   if (gameMatch) return <GameScreen gameId={gameMatch[1]} home={home} message={message} messageKind={messageKind} setMessage={setMessage} onHome={() => navigate("/", refresh)} />;
+  if (waitingMatch) return <WaitingRoom challengeId={waitingMatch[1]} home={home} message={message} messageKind={messageKind} setMessage={setMessage} onHome={() => navigate("/", refresh)} />;
 
   return (
     <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} onSignedOut={() => setHome(null)}>
@@ -1082,9 +1084,13 @@ function PlaySection({
 
   async function sendChallenge() {
     try {
-      await api("/api/challenges", { method: "POST", body: JSON.stringify({ friendId, timeControl }) });
-      setMessage("Challenge sent.");
-      await refresh();
+      // Inviting means sitting down. The sender goes straight to the
+      // board in a waiting state — no "Challenge sent." toast, no
+      // return to the dashboard. When the invitee accepts, the waiting
+      // room's poll transitions them into the live game in-place; if
+      // they walked away, the challenge_accepted push brings them back.
+      const { challenge } = await api<{ challenge: { id: string } }>("/api/challenges", { method: "POST", body: JSON.stringify({ friendId, timeControl }) });
+      navigate(`/waiting/${challenge.id}`, refresh);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Challenge failed.", "error");
     }
@@ -1264,6 +1270,142 @@ function FriendsSection({
         <p className="muted">No friends yet. Share your invite link.</p>
       )}
     </section>
+  );
+}
+
+// Waiting room — the sender lands here IMMEDIATELY after sending a
+// challenge. Full board visible, opponent bar reads "waiting for @x".
+// The point of the flow (Tejas's directive): inviting means sitting
+// down. Polls the challenge state every 2s and transitions to the live
+// game in-place when the invitee accepts; if the invitee accepts while
+// the sender walked away, the challenge_accepted push brings them back.
+function WaitingRoom({
+  challengeId,
+  home,
+  message,
+  messageKind,
+  onHome,
+  setMessage,
+}: {
+  challengeId: string;
+  home: HomeData;
+  message: string;
+  messageKind: ToastKind;
+  onHome: () => void;
+  setMessage: SetMessage;
+}) {
+  const [challenge, setChallenge] = useState<Challenge & { gameId?: string; status?: string; toId?: string } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Waiting room borrows the game screen's no-scroll shell — same
+  // full-viewport board treatment, just with an idle bar.
+  useEffect(() => {
+    document.body.dataset.screen = "game";
+    return () => {
+      if (document.body.dataset.screen === "game") delete document.body.dataset.screen;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    async function poll() {
+      try {
+        const { challenge: next } = await api<{ challenge: Challenge & { gameId?: string; status?: string; toId?: string } }>(`/api/challenges/${challengeId}/state`);
+        if (cancelled) return;
+        setChallenge(next);
+        setLoadError(null);
+        if (next.status === "accepted" && next.gameId) {
+          navigate(`/game/${next.gameId}`);
+          return;
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setLoadError(error instanceof Error ? error.message : "Could not check the invite.");
+      }
+      timer = window.setTimeout(poll, 2000);
+    }
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [challengeId]);
+
+  const menuExtras = (closeMenu: () => void) => (
+    <li>
+      <button className="menu-item" onClick={() => { closeMenu(); onHome(); }}>
+        Home
+      </button>
+    </li>
+  );
+
+  if (loadError) {
+    return (
+      <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}>
+        <section className="game-error">
+          <h2 className="section-title">Can't open this invite</h2>
+          <p className="muted">{loadError}</p>
+          <div className="game-actions">
+            <button className="ghost" onClick={onHome}>Home</button>
+          </div>
+        </section>
+      </Shell>
+    );
+  }
+
+  if (!challenge) return <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}><LoadingLine /></Shell>;
+
+  // If we already sent the challenge, the invitee is toHandle from our
+  // side. Fall back on the friend list for a handle if the server did
+  // not enrich fromHandle/toHandle (it does, but be safe).
+  const inviteeHandle = challenge.toHandle
+    || home.friends.find((friend) => friend.id === (challenge as unknown as { toId?: string }).toId)?.handle
+    || "your friend";
+  const invitee = home.friends.find((friend) => friend.handle === inviteeHandle);
+  const inviteePresence: string = invitee?.online ? "online" : "offline";
+
+  return (
+    <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} menuExtras={menuExtras}>
+      <section className="game game-fixed">
+        <div className="board-column">
+          <div className="clock-strip top">
+            <div className="who">
+              <span
+                className={`presence ${inviteePresence}`}
+                role="status"
+                aria-label={inviteePresence}
+              />
+              <span className="handle-line">waiting for @{inviteeHandle}</span>
+            </div>
+            <span className="clock waiting-label">{formatTimeControl(challenge.timeControl)}</span>
+          </div>
+
+          <div className="board-holder">
+            <Board
+              fen="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+              orientation="w"
+              selected={null}
+              onSquare={() => { /* no-op — no game yet */ }}
+              interactive={false}
+              lastMove={null}
+            />
+          </div>
+
+          <div className="clock-strip bottom">
+            <div className="who">
+              <span className="handle-line">@{home.user.handle}</span>
+              <span className="you">you</span>
+            </div>
+            <span className="clock waiting-label">ready</span>
+          </div>
+        </div>
+
+        <div className="game-bottom">
+          <span className="turn-status">Sit tight — they'll come when they can.</span>
+        </div>
+      </section>
+    </Shell>
   );
 }
 

@@ -10,12 +10,23 @@ import {
 } from "@simplewebauthn/server";
 import { isoBase64URL } from "@simplewebauthn/server/helpers";
 
-type PushType = "friend_request" | "challenge" | "scheduled_start";
+type PushType = "friend_request" | "challenge" | "challenge_accepted" | "scheduled_start";
 type TimeControl = "10|0" | "5|0";
 type GameStatus = "active" | "checkmate" | "resigned" | "timeout" | "draw";
 type PlayerColor = "w" | "b";
 
-const PUSH_TYPES: PushType[] = ["friend_request", "challenge", "scheduled_start"];
+// Present set of push types. This list is a descriptive snapshot of what
+// the notification principle currently produces — NOT a locked cap. The
+// principle (see docs/requirements.md): notifications are minimal and
+// useful; one exists only when it serves the user's own intention (a
+// request to them, a handshake they initiated completing, a time they
+// agreed to arriving). Re-engagement categories (presence pings,
+// streaks, nudges) are banned permanently. Adding to this list means
+// the new push satisfies the principle — not that we're expanding a
+// cap. `challenge_accepted` is here because it completes the handshake
+// the inviter initiated (they invited, then went back to their life;
+// this tells them the game is ready).
+const PUSH_TYPES: PushType[] = ["friend_request", "challenge", "challenge_accepted", "scheduled_start"];
 const COOKIE = "cwf_session";
 const APP_DO_NAME = "app";
 
@@ -327,6 +338,9 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname === "/api/challenges" && request.method === "POST") return await this.createChallenge(request, user);
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/accept$/) && request.method === "POST") {
         return await this.acceptChallenge(url.pathname.split("/")[3], user);
+      }
+      if (url.pathname.match(/^\/api\/challenges\/[^/]+\/state$/) && request.method === "GET") {
+        return await this.challengeState(url.pathname.split("/")[3], user);
       }
       if (url.pathname === "/api/schedules" && request.method === "POST") return await this.createSchedule(request, user);
       if (url.pathname.match(/^\/api\/schedules\/[^/]+\/accept$/) && request.method === "POST") {
@@ -682,8 +696,31 @@ export class AppDO extends DurableObject<Env> {
     const game = await this.createGame(db, challenge.fromId, challenge.toId, challenge.timeControl, "challenge");
     challenge.status = "accepted";
     challenge.gameId = game.id;
+    // Tell the inviter their handshake completed — they invited, went
+    // back to their life, this brings them back to the ready game. The
+    // realtime poll on /waiting/:id transitions them in-place if they
+    // stayed at the table; the push covers the case where they left.
+    await this.enqueuePush(db, challenge.fromId, "challenge_accepted", `@${user.handle} accepted — your game is ready`, `/game/${game.id}`);
     await this.save(db);
     return json({ game });
+  }
+
+  private async challengeState(id: string, user: User) {
+    // Sender's waiting-room poll target. Only the sender (or the invited
+    // user) may read a challenge's state — no other user needs it. Enrich
+    // with fromHandle/toHandle so the client can render the invitee's
+    // handle without a second round-trip.
+    const db = await this.db();
+    const challenge = db.challenges[id];
+    if (!challenge || (challenge.fromId !== user.id && challenge.toId !== user.id)) {
+      throw new Error("Challenge not available.");
+    }
+    const enriched = {
+      ...challenge,
+      fromHandle: db.users[challenge.fromId]?.handle,
+      toHandle: db.users[challenge.toId]?.handle,
+    };
+    return json({ challenge: enriched });
   }
 
   private async createSchedule(request: Request, user: User) {

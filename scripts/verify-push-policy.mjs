@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 
-const allowed = ["friend_request", "challenge", "scheduled_start"];
+// Present set. The notification policy in docs/requirements.md is a
+// PRINCIPLE, not a locked count — see there. This script only asserts:
+// (a) every enqueuePush uses a type on this list, and (b) nothing
+// notification-like slipped in that names re-engagement categories
+// (presence, streak, nudge, etc.). Adding to this list means the new
+// push satisfies the principle (serves the user's own intention).
+const allowed = ["friend_request", "challenge", "challenge_accepted", "scheduled_start"];
 const files = ["src/worker.ts", "public/sw.js"];
 const found = new Set();
 const violations = [];

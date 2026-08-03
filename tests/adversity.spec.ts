@@ -260,6 +260,49 @@ test("move roundtrip stays under the perf budget on a throttled CPU", async ({ b
   }
 });
 
+test("sending a challenge takes the sender to the waiting room; accept transitions in-place", async ({ browser }) => {
+  // Inviting means sitting down. Alice sends a challenge and lands
+  // immediately on /waiting/{id} with the board visible and an
+  // "waiting for @bob" line. When Bob accepts, Alice's page transitions
+  // to /game/{id} via the poll — she never sees the dashboard again.
+  const suffix = Date.now().toString(36).slice(-6);
+  const aliceCtx = await browser.newContext();
+  const bobCtx = await browser.newContext();
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  await addAuthenticator(alice);
+  await addAuthenticator(bob);
+  const aH = `wait_a${suffix}`;
+  const bH = `wait_b${suffix}`;
+  try {
+    await register(alice, aH);
+    await register(bob, bH);
+    await alice.getByPlaceholder("friend_handle").fill(bH);
+    await alice.getByRole("button", { name: "Add" }).click();
+    await expect(alice.getByText("Friend request sent.")).toBeVisible();
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await expect(bob.getByText(`@${aH}`)).toBeVisible();
+    await alice.reload();
+    await alice.getByLabel("Time control").first().selectOption("10|0");
+    await alice.getByRole("button", { name: "Send" }).click();
+    // Sender lands on the waiting room, not the dashboard.
+    await expect(alice).toHaveURL(/\/waiting\/chl_/);
+    await expect(alice.getByText(new RegExp(`waiting for @${bH}`))).toBeVisible();
+    await expect(alice.locator(".board")).toBeVisible();
+    // Bob accepts.
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await expect(bob).toHaveURL(/\/game\/gam_/);
+    // Alice transitions in-place to the game via the waiting-room poll.
+    await expect(alice).toHaveURL(/\/game\/gam_/, { timeout: 5000 });
+    await expect(alice.locator(".board")).toBeVisible();
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 test("off-turn tap on own piece is silent — no toast, no selection, no request", async ({ browser }) => {
   // Silent-board principle: during play the BOARD is the only feedback
   // channel. Bob is black, so on the opening position it's white to
