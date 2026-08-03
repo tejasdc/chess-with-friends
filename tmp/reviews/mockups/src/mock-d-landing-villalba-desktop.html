@@ -1,0 +1,52 @@
+<!doctype html>
+<html><head><meta charset="utf-8"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
+<link rel="stylesheet" href="_tokens.css"/>
+<style>
+html, body { width: 1440px; height: 900px; overflow: hidden; }
+body { background: var(--field); }
+.shell { position: relative; z-index: 2; height: 100dvh; padding: 32px 48px 48px; display: flex; flex-direction: column; }
+.topbar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 20px; border-bottom: 1px solid rgba(46,42,61,0.28); }
+.wordmark { font-family: var(--mono); font-size: 15px; font-weight: 500; letter-spacing: 0.02em; text-transform: lowercase; color: var(--navy-ink); display: flex; align-items: center; gap: 12px; }
+.wordmark::before { content: ""; width: 10px; height: 10px; background: var(--cream-chip); display: inline-block; }
+.menu-dot { font-family: var(--mono); font-size: 24px; color: rgba(46,42,61,0.55); line-height: 1; padding: 6px 10px; letter-spacing: -0.05em; }
+
+.incision {
+  position: absolute; top: 32px; right: 34%; width: 4px; height: 340px;
+  background: var(--navy-ink); z-index: 3;
+}
+.incision::after {
+  content: ""; position: absolute; bottom: 6px; left: -6px; width: 16px; height: 10px;
+  background: var(--cream-chip);
+}
+
+.stage { flex: 1; display: grid; grid-template-columns: 1fr minmax(360px, 460px); gap: 96px; align-items: center; padding: 24px 24px 24px 24px; }
+.board-wrap { width: 560px; height: 560px; margin-left: auto; }
+.form-col { display: flex; flex-direction: column; gap: 28px; max-width: 460px; }
+.copy { font-family: var(--sans); font-size: 22px; line-height: 1.35; color: var(--navy-ink); max-width: 400px; }
+.form-row { display: flex; gap: 10px; width: 100%; }
+.input { flex: 1; min-width: 60px; font-family: var(--sans); font-size: 16px; padding: 14px 14px; background: var(--field); border: 1px solid var(--navy-ink); color: var(--navy-ink); }
+.input::placeholder { color: rgba(46,42,61,0.55); font-family: var(--mono); font-size: 15px; }
+.btn { font-family: var(--mono); font-size: 14px; font-weight: 500; letter-spacing: 0.01em; padding: 14px 22px; background: var(--navy-ink); color: var(--buff); border: 0; white-space: nowrap; }
+</style></head>
+<body data-world="villalba">
+<div class="shell">
+  <div class="incision"></div>
+  <div class="topbar">
+    <span class="wordmark">chess with friends</span>
+    <span class="menu-dot">···</span>
+  </div>
+  <div class="stage">
+    <div class="board-wrap" id="board"></div>
+    <div class="form-col">
+      <p class="copy">No infinite pool of opponents. A game happens when two friends sit down.</p>
+      <div class="form-row">
+        <input class="input" placeholder="your_handle" value="tejas"/>
+        <button class="btn">Log in or create account</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="_shared.js"></script>
+<script>mount("#board", INITIAL_FEN);</script>
+</body></html>

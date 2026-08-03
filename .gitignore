@@ -19,6 +19,9 @@ tmp/reviews/moodboard/*
 !tmp/reviews/moodboard/final/
 !tmp/reviews/moodboard/contact-sheet.jpg
 !tmp/reviews/composites/
+# Round-4 mockup exploration (six surfaces × two registers) for Tejas to judge
+!tmp/reviews/mockups/
+!tmp/reviews/mockups/**
 # Specific screens-r2 files kept as bar-fix evidence
 !tmp/reviews/screens-r2/
 tmp/reviews/screens-r2/*

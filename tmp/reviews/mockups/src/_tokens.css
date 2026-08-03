@@ -1,0 +1,81 @@
+/* Shared design tokens for both design registers. Individual mockups
+   override --paper / --walnut for the Villalba pieces. */
+:root {
+  /* Current world (Bauhaus workshop, warm paper) */
+  --paper: #F0E6D2;
+  --paper-2: #E7DBBE;
+  --ink: #12100C;
+  --ink-2: #3B342A;
+  --stone: #6B6455;
+  --walnut: #4A3826;
+  --walnut-2: #3A2B1E;
+  --vermillion: #C43416;
+  --presence-online: #5B8A5C;
+  --presence-reconnect: #B77C29;
+
+  /* Villalba register — overridden per body[data-world="villalba"] below */
+  --field: #7CA898;
+  --field-2: #6E9F91;
+  --buff: #E8DBBE;
+  --buff-2: #D9CBA6;
+  --teal-dark: #5F8A7A;
+  --navy-ink: #2E2A3D;
+  --cream-chip: #EEE3C4;
+  --wood: #8C5A2E;
+  --wood-2: #6E4620;
+
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --sans: "IBM Plex Sans", -apple-system, sans-serif;
+}
+
+body[data-world="villalba"] {
+  --paper: var(--field);
+  --paper-2: var(--field-2);
+  --ink: var(--navy-ink);
+  --ink-2: var(--navy-ink);
+  --stone: rgba(46, 42, 61, 0.55);
+  --walnut: var(--teal-dark);
+  --walnut-2: var(--navy-ink);
+  --vermillion: var(--cream-chip);   /* accent replaced by cream chip */
+  --presence-online: var(--cream-chip);
+  --presence-reconnect: var(--wood);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { font-family: var(--sans); color: var(--ink); font-size: 15px; background: var(--paper); }
+
+/* Paper grain — same as prod for the current world; disabled for Villalba
+   (the celadon field is flat-glossy oil, not paper). */
+body:not([data-world="villalba"])::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  opacity: 0.045; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='4' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.07 0 0 0 0 0.06 0 0 0 0 0.05 0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 240px 240px;
+}
+
+/* Board — shared shape, colors from tokens */
+.board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: 100%; height: 100%; aspect-ratio: 1/1; border: 1px solid var(--walnut); background: var(--paper); }
+body[data-world="villalba"] .board {
+  border: 1px solid var(--navy-ink);
+  /* Warm wood frame edge — teak. Subtle outer glow to hint at the frame. */
+  box-shadow: 0 0 0 6px var(--wood), 0 8px 24px rgba(46, 42, 61, 0.25);
+}
+.sq { position: relative; display: grid; place-items: center; }
+.sq.light { background: var(--paper); }
+.sq.dark  { background: var(--walnut); }
+body[data-world="villalba"] .sq.light { background: var(--buff); }
+body[data-world="villalba"] .sq.dark  { background: var(--teal-dark); }
+
+.piece { font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", sans-serif; font-size: clamp(20px, 8vw, 40px); line-height: 1; user-select: none; transform: translateY(-1px); }
+.pw { color: var(--paper); text-shadow: -1px -1px 0 var(--walnut-2), 1px -1px 0 var(--walnut-2), -1px 1px 0 var(--walnut-2), 1px 1px 0 var(--walnut-2); }
+.pb { color: var(--ink); }
+body[data-world="villalba"] .pw { color: var(--buff); text-shadow: -1px -1px 0 var(--navy-ink), 1px -1px 0 var(--navy-ink), -1px 1px 0 var(--navy-ink), 1px 1px 0 var(--navy-ink); }
+body[data-world="villalba"] .pb { color: var(--navy-ink); }
+
+.legal-dot { position: absolute; width: 22%; height: 22%; border-radius: 50%; background: var(--vermillion); opacity: 0.85; pointer-events: none; }
+.legal-capture { position: absolute; inset: 6%; border-radius: 6%; border: 3px solid var(--vermillion); pointer-events: none; opacity: 0.85; }
+.sq.selected::after { content: ""; position: absolute; inset: 2px; border: 1.5px solid var(--vermillion); pointer-events: none; }
+.sq.last-from::after, .sq.last-to::after { content: ""; position: absolute; inset: 0; border: 1.5px solid var(--vermillion); opacity: 0.55; }
+
+/* Fake data grain for handle names */
+.mono { font-family: var(--mono); }

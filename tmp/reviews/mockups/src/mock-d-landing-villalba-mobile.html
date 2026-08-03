@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
+<link rel="stylesheet" href="_tokens.css"/>
+<style>
+html, body { width: 390px; height: 844px; overflow: hidden; }
+body { background: var(--field); }
+.shell { position: relative; z-index: 2; height: 100dvh; padding: 20px 16px; display: grid; grid-template-rows: auto 1fr auto; gap: 18px; }
+
+.topbar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid rgba(46,42,61,0.28); }
+.wordmark { font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.02em; text-transform: lowercase; color: var(--navy-ink); display: flex; align-items: center; gap: 10px; }
+/* Wordmark identity mark — swap vermillion square for the cream chip
+   (Villalba's tiny cream chip in the incision) */
+.wordmark::before { content: ""; width: 9px; height: 9px; background: var(--cream-chip); display: inline-block; }
+.menu-dot { font-family: var(--mono); font-size: 22px; color: rgba(46,42,61,0.55); line-height: 1; padding: 4px 8px; letter-spacing: -0.05em; }
+
+/* Villalba incision — a tall, narrow deep-navy bar descending from the top,
+   one-third from the right, ~30% of the viewport height. Purely decorative,
+   references the reference image. */
+.incision {
+  position: absolute; top: 0; right: 33%; width: 3px; height: 260px;
+  background: var(--navy-ink); z-index: 3;
+}
+.incision::after {
+  content: ""; position: absolute; bottom: 4px; left: -5px; width: 14px; height: 9px;
+  background: var(--cream-chip);
+}
+
+.hero { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 24px; }
+.board-wrap { width: 280px; height: 280px; }
+.copy { font-family: var(--sans); font-size: 15px; line-height: 1.45; color: var(--navy-ink); text-align: center; max-width: 340px; }
+
+.form-row { display: flex; gap: 8px; width: 100%; }
+.input { flex: 1; min-width: 60px; font-family: var(--sans); font-size: 16px; padding: 12px 12px; background: var(--field); border: 1px solid var(--navy-ink); color: var(--navy-ink); }
+.input::placeholder { color: rgba(46,42,61,0.55); font-family: var(--mono); font-size: 15px; }
+.btn { font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.01em; padding: 12px 12px; background: var(--navy-ink); color: var(--buff); border: 0; white-space: nowrap; }
+</style></head>
+<body data-world="villalba">
+<div class="shell">
+  <div class="incision"></div>
+  <div class="topbar">
+    <span class="wordmark">chess with friends</span>
+    <span class="menu-dot">···</span>
+  </div>
+  <div class="hero">
+    <div class="board-wrap" id="board"></div>
+    <p class="copy">No infinite pool of opponents. A game happens when two friends sit down.</p>
+  </div>
+  <div class="form-row">
+    <input class="input" placeholder="your_handle" value="tejas"/>
+    <button class="btn">Log in or create account</button>
+  </div>
+</div>
+<script src="_shared.js"></script>
+<script>mount("#board", INITIAL_FEN);</script>
+</body></html>
