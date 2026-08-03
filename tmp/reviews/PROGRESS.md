@@ -1,64 +1,48 @@
 # Progress
 
-## Done
-- Redesign/bug-fix round started. Read `docs/requirements.md`, `tmp/reviews/PROGRESS.md`, and `tmp/reviews/build-report.md`.
-- Read `design-taste-frontend` and `high-end-visual-design`; selected a Mewar/Rajasthani miniature-inspired direction grounded in flat divided space, confident line work, earthy ochre/olive grounds, precise red accents, and chaturanga/gaja heritage.
-- Preserved v1 screenshot evidence in `tmp/reviews/screens-before/` before regenerating after-redesign screenshots.
-- Fixed the notification prompt root cause: `InstallPanel` previously rendered unconditionally after subscribing and did not derive UI state from `Notification.permission` plus `pushManager.getSubscription()`. It now hides only when the browser has granted permission and reports an actual subscription.
-- Added focused e2e evidence for the notification prompt disappearing after permission/subscription and staying gone after reload. `npx playwright test -g "notification prompt"` passed.
-- First full visual pass implemented in `src/main.tsx` and `src/styles.css`: neutral brand copy, gaja mark, Mewar-inspired manuscript panels, styled controls, stronger board frame, and redesigned clocks/game side. `npm run typecheck` passed.
-- Iterated desktop dashboard from a vertical panel stack into an asymmetric grid. `npm run typecheck` and `npm run build` passed; visually inspected `tmp/reviews/inspect-home-desktop.png` and `tmp/reviews/inspect-home-mobile.png`.
-- Full local verification passed once: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`. Visually inspected notification prompt screenshots, desktop board, and mobile board; removed the empty move-list container from fresh games afterward and `npm run typecheck` passed.
-- Final local verification after the move-list cleanup passed: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`. Visually inspected `00-notifications-enabled-*`, `06-challenge-game-started`, `07-checkmate-terminal`, and `16-mobile-game-board`.
-- Updated PWA theme color and icon to match the redesigned gaja/manuscript visual system. `npm run typecheck` and `npm run build` passed.
-- Design reviewer blocked the first redesign pass as too much parchment-styled web UI. Saved the review to `tmp/reviews/design-redesign-review.md`.
-- Second-pass design fixes implemented: dashboard now leads with a board-table register, custom chaturanga piece SVGs replace Unicode glyphs, bishops render as gaja motifs, ashtapada-style square marks were added, and native selects/inputs were further absorbed into framed controls. `npm run test:push && npm run typecheck && npm run build && npm run test:e2e` passed. Visually inspected `05-presence-visible-in-app`, `06-challenge-game-started`, and `16-mobile-game-board`.
-- Correctness reviewer approved with no required fixes. Saved the review to `tmp/reviews/correctness-redesign-review.md`.
-- Deployed second-pass redesign to production, Worker version `e2b75fe1-5da8-45ec-a291-062c6832ec58`; smoke checks passed on `https://chess.tejas.nyc`: `/api/health`, manifest theme color, latest asset hashes, and `curl -s https://chess.tejas.nyc/ | grep -c cloudflareinsights` returned `1`.
-- Design re-review approved after second-pass fixes; appended the PASS addendum to `tmp/reviews/design-redesign-review.md`.
-- Read `docs/requirements.md` and extracted the required v1 contract.
-- Committed scaffold: Vite/React entry, Cloudflare Worker config, PWA manifest, service worker, dependencies.
-- Committed backend: singleton `AppDO` for accounts, friends, invites, schedules, push queue/policy, and `GameDO` for live chess state, WebSocket presence, legal moves, clocks, resign/checkmate/timeout.
-- `npm run typecheck` passed after the backend implementation.
-- Added React client logic for passkey signup/login, invite links, friend requests, challenge accept/start, schedule proposal/accept, notification opt-in, game list, live board, WebSocket reconnect state, clocks, moves, and resign.
-- `npm run typecheck` passed after the client logic file.
-- Added responsive CSS for the PWA shell, forms, friend/challenge/schedule panels, board, clocks, move list, and connection states.
-- `npm run typecheck && npm run build` passed after CSS.
-- Added `scripts/generate-vapid.mjs` for Web Push VAPID key generation without committing private keys.
-- Added `scripts/verify-push-policy.mjs`; `npm run test:push && npm run typecheck && npm run build` passed.
-- Added lean Playwright config and e2e scenario using one Chromium browser instance with two contexts, virtual WebAuthn authenticators, API-level push checks, and screenshots under `tmp/reviews/screens/`.
-- Hardened Web Push sending so bad/stale subscriptions cannot break friend/challenge/schedule flows.
-- `npm run test:push && npm run typecheck` passed after adding the e2e harness.
-- First `npm run test:e2e` failed immediately because Playwright had no `baseURL`; added `baseURL: http://127.0.0.1:8787`.
-- Second `npm run test:e2e` reached passkey registration but failed because WebAuthn rejects `127.0.0.1` as an RP ID; switched Playwright to `http://localhost:8787`.
-- Third `npm run test:e2e` showed friend request succeeded but the client cleared the success message during refresh; fixed `refresh()` to preserve status text. `npm run typecheck` passed.
-- Fourth `npm run test:e2e` advanced through acceptance and failed on a strict locator ambiguity for a friend handle; narrowed the assertion to `.friend-card`. `npm run typecheck` passed.
-- Fifth `npm run test:e2e` advanced through checkmate, reconnect, and resign, then failed because the timeout debug route saw the DO-internal `game.local` host; added a local-only debug header from the public Worker and buffered DO proxy request bodies. `npm run test:push && npm run typecheck` passed.
-- Sixth `npm run test:e2e` showed Miniflare still presented `game.local` inside `GameDO`; moved the local-only debug guard fully to the public Worker boundary. `npm run test:push && npm run typecheck` passed.
-- Seventh `npm run test:e2e` advanced to scheduling and failed on another strict handle locator; narrowed `scheduleSoon()` to `.friend-card`. `npm run typecheck` passed.
-- Eighth `npm run test:e2e` proved scheduled pushes fired but Bob had older challenge pushes queued first; changed push assertions to drain until the expected allowed type. `npm run typecheck` passed.
-- Ninth `npm run test:e2e` passed end-to-end with one Chromium browser process and screenshots written to `tmp/reviews/screens/`.
-- Visual inspection found screenshot `14-invite-link-friend-accepted` still showed the pre-accept request row and `13-scheduled-push-fired` needed a refreshed page state; tightened both waits. `npm run typecheck` passed.
-- Regenerated screenshots with `npm run test:e2e` passing; visually inspected the evidence, including corrected `13-scheduled-push-fired` and `14-invite-link-friend-accepted`.
-- Generated Web Push VAPID keys, wrote the public key to `wrangler.jsonc`, and set `VAPID_PRIVATE_KEY` as a Wrangler secret for Worker `chess-with-friends`.
-- Full local verification passed: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`.
-- First deploy succeeded at `https://chess-with-friends.thnkring.workers.dev`, but remote smoke checks returned Cloudflare 1042 for API/assets. Updated Worker static-asset routing to SPA fallback with `run_worker_first` limited to `/api/*` and `/_auth/*`. `npm run test:push && npm run typecheck && npm run build` passed.
-- Redeployed version `5d38ee36-3a14-449e-9c95-4fa326005faa` to `https://chess-with-friends.thnkring.workers.dev`; remote smoke checks passed for `/`, `/manifest.webmanifest`, and `/api/health` with exactly `friend_request`, `challenge`, `scheduled_start`.
-- Correctness review blocked on production debug leakage and multi-device empty-push payload consumption. Fixed `/api/debug/push-log` to be allowed only at the public Worker boundary on localhost, and changed pending push payloads to queue per subscription endpoint with service-worker endpoint lookup. `npm run test:push && npm run typecheck` passed.
-- Addressed UX/correctness polish: required resident/user-verified passkeys, exact notification-policy copy before permission, visible labels, two-step resign, friendlier schedule status text, stable ticking clocks, focus styles, and mobile screenshot coverage in e2e. `npm run test:push && npm run typecheck` passed.
-- Full verification after review fixes failed in e2e because fake push endpoints were stored on `window` and lost across reload; moved the test endpoint to `localStorage`. `npm run typecheck` passed.
-- Full verification passed after review fixes. Visual inspection of new screenshots confirmed mobile home/board coverage and notification copy; found stale confirm controls after resign terminal and cleared confirm state after resign. `npm run typecheck` passed.
-- Final local verification after resign cleanup passed: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`. Visually confirmed `10-resign-terminal.png` after regeneration.
-- Deployed reviewed fixes to `https://chess-with-friends.thnkring.workers.dev`, version `edd56469-4645-475b-b283-0e28abb264c1`; remote smoke checks passed for `/api/health`, `/manifest.webmanifest`, and production `/api/debug/push-log` returns 404.
-- Reviewer re-review loop completed: correctness and UX re-reviews approved; invariants review had already approved.
-- Wrote final report to `tmp/reviews/build-report.md`.
+## Prior round (Codex chaturanga redesign) — REJECTED
+Tejas: "still looks super rudimentary… ugly boxes." Custom chaturanga piece
+glyphs rejected as illegible; "Chaturanga lineage", "Sit down when your friend
+is ready", "Board table", "Circle", "Time & place" copy rejected as self-annotating;
+the whole cards-with-kicker-labels layout rejected. Two-button auth (Create passkey /
+Sign in) rejected as confusing.
 
-## Current constraints
-- Work lean due to machine memory pressure.
-- Commit after every coherent small change.
-- Run at most one headless browser instance during testing and close it promptly.
+## This round — chess-designer (Claude)
+- Direction: one quiet warm-paper world, board is the hero, no boxes, no ornament,
+  copy is functional labels only. Standard Unicode Staunton pieces
+  (outline ♔♕♖♗♘♙ for white, filled ♚♛♜♝♞♟ for black) — universally legible on
+  every device, zero custom glyphs needed.
+- Palette: paper #f5f1e8, ink #17140f, walnut board #7a6248, moss accent #3f5d4a
+  used sparingly; terracotta #b04a2f only for destructive/error.
+- Type: system-ui for UI, New York/Iowan Old Style serif for the auth title only,
+  monospace for clocks + moves.
+- Auth flow: single input + single primary button. Button says "Continue"; on
+  "no account with that handle" from the server, it morphs to "Create passkey"
+  with an inline explainer. Same button element throughout — no more forked
+  register/login choice on first sight.
+- Dashboard: unified single column with type + whitespace hierarchy. No boxed
+  cards, no kickers. Sections: play (friend + time control + Send / Schedule),
+  friends (add + list), incoming (requests + challenges shown as inline callouts
+  only when present), games (minimal rows), install prompt only when needed.
+- Game screen: board centered; two thin clock rows above/below carry only the
+  handle and time; a compact side rail holds only Home + Resign + moves.
 
-## Next
-- Complete the full visual redesign in `src/main.tsx`, `src/styles.css`, and app assets without changing v1 mechanics.
-- Run typecheck/build/full e2e, visually inspect desktop/mobile screenshots, iterate, then deploy and run reviewer agents.
-- Write `tmp/reviews/redesign-report.md` with root cause, screenshot inventory, review outcomes, and production verification.
+## Selectors preserved for e2e (never weakened)
+- placeholders: `your_handle`, `friend_handle`
+- buttons: `Enable notifications`, `Accept`, `Add`, `Send`, `Propose`,
+  `Resign`, `Confirm resign`, `Home`, `Send friend request`, `Create passkey`
+- text signals: `Friend request sent.`,
+  `Notifications enabled for friend requests, challenges, and scheduled games.`,
+  `checkmate`, `timeout`, `resigned`, `accepted`, `ready`, `connected`,
+  `reconnecting`, `online`, `offline`
+- classes / attrs: `.friend-card`, `.board`, `[data-square="…"]`
+
+## Test change
+- `register()` helper now clicks Continue first (server confirms handle is
+  unknown), then Create passkey. Same flow the real UX will surface.
+
+## Files touched
+- src/main.tsx — full rewrite
+- src/styles.css — full rewrite
+- index.html — theme-color updated
+- tests/e2e.spec.ts — register() helper: Continue then Create passkey

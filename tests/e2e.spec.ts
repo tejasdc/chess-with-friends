@@ -161,8 +161,12 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   const dev = await client(browser, `dev_${suffix}`);
   await register(clara.page, clara.handle);
   await register(dev.page, dev.handle);
-  const inviteUrl = await clara.page.locator(".break-all").first().textContent();
-  await dev.page.goto(inviteUrl || "/");
+  const inviteUrl = await clara.page.evaluate(async () => {
+    const response = await fetch("/api/me");
+    const data = (await response.json()) as { inviteUrl: string };
+    return `${window.location.origin}${data.inviteUrl}`;
+  });
+  await dev.page.goto(inviteUrl);
   await dev.page.getByRole("button", { name: "Send friend request" }).click();
   await waitForPush(clara.page, "friend_request");
   await clara.page.reload();
@@ -197,6 +201,7 @@ async function addAuthenticator(page: Page) {
 
 async function register(page: Page, handle: string) {
   await page.getByPlaceholder("your_handle").fill(handle);
+  await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Create passkey" }).click();
   await expect(page.getByText(`@${handle}`)).toBeVisible();
 }
@@ -270,7 +275,8 @@ async function expireClock(page: Page, gameId: string) {
 
 async function scheduleSoon(page: Page, friendHandle: string) {
   await page.locator(".friend-card", { hasText: friendHandle }).waitFor();
-  await page.getByLabel("Time control").nth(1).selectOption("10|0");
+  await page.getByRole("tab", { name: "Schedule" }).click();
+  await page.getByLabel("Time control").selectOption("10|0");
   await page.getByLabel("Start in minutes").fill("0.03");
   await page.getByRole("button", { name: "Propose" }).click();
 }
