@@ -1031,6 +1031,78 @@ body[data-screen="game"] .shell {
   .presence.reconnecting { animation: none; }
 }
 
+/* Made-by attribution — landing / dashboard / inspirations ONLY. Never
+   on the game screen. Follows Tejas's own site convention: small, mono,
+   muted, one line, bottom of the page. */
+.made-by {
+  margin: 48px 0 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--stone);
+  text-align: center;
+}
+.made-by a {
+  color: var(--stone);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.made-by a:hover { color: var(--ink); }
+
+/* Friends-list-as-action: each row is a mini invite widget. Row has
+   dot + handle + button. Button is disabled when the friend is offline
+   — the disabled state IS a second presence signal to complement the
+   dot. Compact size so many rows fit without dashboard spam. */
+.friend-list .friend-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--hair);
+}
+.friend-list .friend-card:last-child { border-bottom: 0; }
+.friend-invite {
+  min-width: 68px;
+  padding: 6px 12px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.friend-invite:disabled {
+  background: transparent;
+  color: var(--stone);
+  border: 1px solid var(--hair);
+  cursor: not-allowed;
+  opacity: 1;
+}
+.more-friends {
+  display: block;
+  margin: 10px auto 0;
+  font-size: 13px;
+  color: var(--stone);
+}
+
+/* Scheduling picker — two-column row for day + time. Falls back to
+   stacked columns below 380px so nothing crowds. */
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 380px) { .field-row { grid-template-columns: 1fr; } }
+
+/* Inspirations — sub-paragraph nested under a list item for the
+   Workers' Club context. Slightly muted from the primary line so the
+   nesting reads. */
+.insp-note {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--stone);
+  max-width: 60ch;
+}
+.insp-note em { font-style: italic; color: var(--ink); }
+
 .invite-fallback {
   font-family: var(--mono);
   font-size: 12px;

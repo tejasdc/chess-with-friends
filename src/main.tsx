@@ -257,9 +257,43 @@ function App() {
   if (waitingMatch) return <WaitingRoom challengeId={waitingMatch[1]} home={home} message={message} messageKind={messageKind} setMessage={setMessage} onHome={() => navigate("/", refresh)} />;
 
   return (
-    <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} onSignedOut={() => setHome(null)}>
+    <Shell
+      home={home}
+      message={message}
+      messageKind={messageKind}
+      setMessage={setMessage}
+      onSignedOut={() => setHome(null)}
+      menuExtras={dashboardMenuExtras(home, setMessage)}
+    >
       <Dashboard home={home} inviteToken={inviteMatch?.[1]} refresh={refresh} setMessage={setMessage} />
     </Shell>
+  );
+}
+
+// Copy invite link — moved from dashboard furniture to the ⋯ menu. It's
+// an occasional action; every friend already has a "reach me" surface
+// via the friends list itself.
+function dashboardMenuExtras(home: HomeData, setMessage: SetMessage) {
+  const invite = `${window.location.origin}${home.inviteUrl}`;
+  return (closeMenu: () => void) => (
+    <li>
+      <button
+        className="menu-item"
+        onClick={async () => {
+          closeMenu();
+          try {
+            await navigator.clipboard.writeText(invite);
+            setMessage("Invite link copied.");
+          } catch {
+            // Clipboard permission blocked — fall back to a toast with
+            // the link so the user can select-and-copy manually.
+            setMessage(invite);
+          }
+        }}
+      >
+        Copy invite link
+      </button>
+    </li>
   );
 }
 
@@ -417,6 +451,13 @@ function InspirationsPage() {
         <li>
           <strong>Alexander Rodchenko</strong> · Chess table for the workers' club, 1925.
           Two chairs and a board built as one piece of furniture — sitting IS the invitation.
+          <p className="insp-note">
+            The chess table was part of Rodchenko's design for the USSR Workers' Club,
+            shown at the 1925 Paris <em>Exposition Internationale des Arts Décoratifs</em> and
+            now in the MoMA collection. The Workers' Club reconceived leisure as
+            <em> active and collective</em> rather than passive and solitary — chess played sitting
+            across from someone you know, not scrolled alone. It's the philosophy this app inherits.
+          </p>
         </li>
         <li>
           <strong>Josef Hartwig</strong> · Bauhaus chess set, 1924. Pieces as pure geometry;
@@ -428,6 +469,7 @@ function InspirationsPage() {
           register borrows from.
         </li>
       </ul>
+      <MadeByTejas />
     </div>
   );
 }
@@ -766,6 +808,7 @@ function AuthScreen({
               no subline / no recovery toast until that directive lands.
               The morphing button label stays. */}
         </form>
+        <MadeByTejas />
       </section>
     </Shell>
   );
@@ -796,7 +839,20 @@ function Dashboard({
       <PlaySection home={home} refresh={refresh} setMessage={setMessage} />
       <FriendsSection home={home} refresh={refresh} setMessage={setMessage} />
       <PastGamesSection games={home.games} />
+      <MadeByTejas />
     </div>
+  );
+}
+
+// "made by tejas.nyc" — quiet attribution line. Landing (auth), Dashboard,
+// and /inspirations only. NEVER on the game screen — the game stays pure.
+// Style follows Tejas's own site convention: small, mono, muted, one line.
+function MadeByTejas() {
+  return (
+    <p className="made-by">
+      made by{" "}
+      <a href="https://tejas.nyc" target="_blank" rel="noreferrer">tejas.nyc</a>
+    </p>
   );
 }
 
@@ -1073,34 +1129,28 @@ function PlaySection({
   refresh: () => void;
   setMessage: SetMessage;
 }) {
+  // "Play now" is a per-friend row action on the Friends list — Play here
+  // is now ONLY the "propose a time" surface. Kept as a compact form
+  // because "day + time" needs two inputs; hidden by default behind a
+  // Schedule toggle so it doesn't fight for space with the friends list.
   const [friendId, setFriendId] = useState(home.friends[0]?.id || "");
-  const [timeControl, setTimeControl] = useState<TimeControl>("10|0");
-  const [minutes, setMinutes] = useState("10");
-  const [mode, setMode] = useState<"now" | "later">("now");
+  const [day, setDay] = useState<string>(() => defaultDayValue());
+  const [time, setTime] = useState<string>("19:00");
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     if (!friendId && home.friends[0]) setFriendId(home.friends[0].id);
   }, [friendId, home.friends]);
 
-  async function sendChallenge() {
-    try {
-      // Inviting means sitting down. The sender goes straight to the
-      // board in a waiting state — no "Challenge sent." toast, no
-      // return to the dashboard. When the invitee accepts, the waiting
-      // room's poll transitions them into the live game in-place; if
-      // they walked away, the challenge_accepted push brings them back.
-      const { challenge } = await api<{ challenge: { id: string } }>("/api/challenges", { method: "POST", body: JSON.stringify({ friendId, timeControl }) });
-      navigate(`/waiting/${challenge.id}`, refresh);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Challenge failed.", "error");
-    }
-  }
-
   async function propose() {
     try {
-      const startAt = Date.now() + Math.max(0.02, Number(minutes)) * 60 * 1000;
-      await api("/api/schedules", { method: "POST", body: JSON.stringify({ friendId, timeControl, startAt }) });
+      const startAt = dayTimeToMillis(day, time);
+      if (!Number.isFinite(startAt)) throw new Error("Pick a valid day and time.");
+      // TIME CONTROL is hardcoded — 10 min IS the game. Server type still
+      // accepts the union for future flexibility; UI never asks.
+      await api("/api/schedules", { method: "POST", body: JSON.stringify({ friendId, timeControl: "10|0", startAt }) });
       setMessage("Game time proposed.");
+      setOpen(false);
       await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Schedule failed.", "error");
@@ -1111,71 +1161,53 @@ function PlaySection({
     (schedule) => schedule.fromId === home.user.id || (schedule.toId === home.user.id && schedule.status !== "pending"),
   );
 
+  if (home.friends.length === 0 && outgoingSchedules.length === 0) return null;
+
   return (
     <section className="play">
-      <div className="section-heading">
-        <h2 className="section-title">Play</h2>
-        <div className="tabs" role="tablist">
-          <button
-            className={`tab ${mode === "now" ? "active" : ""}`}
-            role="tab"
-            aria-selected={mode === "now"}
-            onClick={() => setMode("now")}
-          >
-            Now
-          </button>
-          <button
-            className={`tab ${mode === "later" ? "active" : ""}`}
-            role="tab"
-            aria-selected={mode === "later"}
-            onClick={() => setMode("later")}
-          >
-            Schedule
-          </button>
-        </div>
-      </div>
+      <button
+        type="button"
+        className="section-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        disabled={home.friends.length === 0}
+      >
+        <span className="section-title">Schedule a game</span>
+        <span className="section-toggle-caret" aria-hidden="true">{open ? "−" : "+"}</span>
+      </button>
 
-      {home.friends.length === 0 ? (
-        <p className="muted">Add a friend to start a game.</p>
-      ) : (
+      {open && home.friends.length > 0 ? (
         <div className="play-form">
           <label className="field">
             <span className="field-label">Friend</span>
             <FriendSelect friends={home.friends} value={friendId} onChange={setFriendId} />
           </label>
-          <label className="field">
-            <span className="field-label">Time control</span>
-            <TimeSelect value={timeControl} onChange={setTimeControl} />
-          </label>
-          {mode === "later" ? (
+          <div className="field-row">
             <label className="field">
-              <span className="field-label">Start in minutes</span>
-              <input value={minutes} onChange={(event) => setMinutes(event.target.value)} inputMode="decimal" />
+              <span className="field-label">Day</span>
+              <select value={day} onChange={(event) => setDay(event.target.value)}>
+                {dayOptions().map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </label>
-          ) : null}
+            <label className="field">
+              <span className="field-label">Time</span>
+              <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
+            </label>
+          </div>
           <div className="play-action">
-            {mode === "now" ? (
-              <button className="primary" onClick={sendChallenge} disabled={!friendId}>Send</button>
-            ) : (
-              <button className="primary" onClick={propose} disabled={!friendId}>Propose</button>
-            )}
+            <button className="primary" onClick={propose} disabled={!friendId}>Propose</button>
           </div>
         </div>
-      )}
-
-      {home.sentChallenges.length ? (
-        <ul className="pending">
-          {home.sentChallenges.map((challenge) => (
-            <li key={challenge.id}>Challenge sent to @{challenge.toHandle}</li>
-          ))}
-        </ul>
       ) : null}
+
       {outgoingSchedules.length ? (
         <ul className="pending">
           {outgoingSchedules.map((schedule) => (
             <li key={schedule.id}>
               @{schedule.fromHandle} → @{schedule.toHandle}{" "}
-              · {new Date(schedule.startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{" "}
+              · {formatScheduleWhen(schedule.startAt)}{" "}
               · {scheduleStatus(schedule.status)}
               {schedule.gameId ? (
                 <button className="link" onClick={() => navigate(`/game/${schedule.gameId}`)}>Open</button>
@@ -1188,6 +1220,62 @@ function PlaySection({
   );
 }
 
+// Day picker options: today, tomorrow, then each of the next five
+// named weekdays (Tue, Wed, ..., Sun). Encodes the friction Tejas wanted
+// — "a real day + time, not minutes from now." A future round adds
+// recurrence (every Tuesday 9pm); the schedule shape already allows an
+// optional `recurrence` field on the server side (documented invariant,
+// not yet populated), so recurring can layer on without a data change.
+function dayOptions(): Array<{ value: string; label: string }> {
+  const now = new Date();
+  const out: Array<{ value: string; label: string }> = [];
+  const iso = (offset: number) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() + offset);
+    d.setHours(0, 0, 0, 0);
+    return d.toISOString().slice(0, 10);
+  };
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  out.push({ value: iso(0), label: "Today" });
+  out.push({ value: iso(1), label: "Tomorrow" });
+  for (let i = 2; i <= 6; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + i);
+    out.push({ value: iso(i), label: weekday[d.getDay()] });
+  }
+  return out;
+}
+function defaultDayValue(): string { return dayOptions()[0].value; }
+function dayTimeToMillis(day: string, time: string): number {
+  const [year, month, date] = day.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const d = new Date();
+  d.setFullYear(year, month - 1, date);
+  d.setHours(hour, minute, 0, 0);
+  return d.getTime();
+}
+function formatScheduleWhen(startAt: number): string {
+  const d = new Date(startAt);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+  const dayLabel = sameDay ? "Today" : isTomorrow ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const timeLabel = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `${dayLabel} · ${timeLabel}`;
+}
+
+// Friends list IS the action surface (Tejas's simplification directive):
+// no dropdown, no separate Send form. Each friend row has an Invite
+// button. Online friends sort first and their button is enabled — the
+// button's presence IS the presence signal, with the dot as a second
+// cue. Offline rows still list the handle so you know they exist, but
+// the button is disabled — you can't play a friend who isn't around.
+//
+// Scale guard: show N rows (INITIAL_VISIBLE), rest behind a "more
+// friends" disclosure — designed for hundreds without dashboard spam.
+const INITIAL_VISIBLE_FRIENDS = 8;
+
 function FriendsSection({
   home,
   refresh,
@@ -1198,8 +1286,7 @@ function FriendsSection({
   setMessage: SetMessage;
 }) {
   const [handle, setHandle] = useState("");
-  const [showInvite, setShowInvite] = useState(false);
-  const invite = `${window.location.origin}${home.inviteUrl}`;
+  const [showAll, setShowAll] = useState(false);
 
   async function requestFriend() {
     try {
@@ -1212,21 +1299,71 @@ function FriendsSection({
     }
   }
 
-  async function copyInvite() {
+  async function invite(friend: Friend) {
     try {
-      await navigator.clipboard.writeText(invite);
-      setMessage("Invite link copied.");
-    } catch {
-      setShowInvite(true);
+      const { challenge } = await api<{ challenge: { id: string } }>("/api/challenges", {
+        method: "POST",
+        // 10 min is the game — no choice to render, no choice to make.
+        body: JSON.stringify({ friendId: friend.id, timeControl: "10|0" }),
+      });
+      navigate(`/waiting/${challenge.id}`, refresh);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Invite failed.", "error");
     }
   }
 
+  // Online first, then offline; each group alphabetized so the order
+  // stays stable across refreshes.
+  const sortedFriends = [...home.friends].sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    return a.handle.localeCompare(b.handle);
+  });
+  const visibleFriends = showAll ? sortedFriends : sortedFriends.slice(0, INITIAL_VISIBLE_FRIENDS);
+  const hiddenCount = sortedFriends.length - visibleFriends.length;
+
   return (
     <section className="friends">
-      <div className="section-heading">
-        <h2 className="section-title">Friends</h2>
-        <button className="ghost" onClick={copyInvite}>Copy invite link</button>
-      </div>
+      <h2 className="section-title">Friends</h2>
+
+      {home.sentRequests.length ? (
+        <ul className="pending">
+          {home.sentRequests.map((request) => (
+            <li key={request.id}>Request sent to @{request.toHandle}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      {home.friends.length ? (
+        <>
+          <ul className="friend-list">
+            {visibleFriends.map((friend) => (
+              <li className="friend-card" key={friend.id}>
+                <span
+                  className={`presence ${friend.online ? "online" : "offline"}`}
+                  role="status"
+                  aria-label={friend.online ? "online" : "offline"}
+                />
+                <span className="friend-handle">@{friend.handle}</span>
+                <button
+                  className="primary compact friend-invite"
+                  onClick={() => void invite(friend)}
+                  disabled={!friend.online}
+                  aria-label={friend.online ? `Invite @${friend.handle}` : `@${friend.handle} is offline`}
+                >
+                  {friend.online ? "Invite" : "Offline"}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {hiddenCount > 0 && !showAll ? (
+            <button className="ghost more-friends" onClick={() => setShowAll(true)}>
+              More friends ({hiddenCount})
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <p className="muted">No friends yet. Add one below, or share your invite link from the ⋯ menu.</p>
+      )}
 
       <div className="add-friend">
         <input
@@ -1239,36 +1376,6 @@ function FriendsSection({
         />
         <button className="primary" onClick={requestFriend} disabled={!handle}>Add</button>
       </div>
-
-      {showInvite ? <p className="invite-fallback">{invite}</p> : null}
-
-      {home.sentRequests.length ? (
-        <ul className="pending">
-          {home.sentRequests.map((request) => (
-            <li key={request.id}>Request sent to @{request.toHandle}</li>
-          ))}
-        </ul>
-      ) : null}
-
-      {home.friends.length ? (
-        <ul className="friend-list">
-          {home.friends.map((friend) => (
-            <li className="friend-card" key={friend.id}>
-              <span className="friend-handle">@{friend.handle}</span>
-              {/* Plain colored dot only — green for online, hollow gray for
-                  offline. The word carried no information the dot doesn't.
-                  State exposed via aria-label + status class only. */}
-              <span
-                className={`presence ${friend.online ? "online" : "offline"}`}
-                role="status"
-                aria-label={friend.online ? "online" : "offline"}
-              />
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="muted">No friends yet. Share your invite link.</p>
-      )}
     </section>
   );
 }
@@ -1903,15 +2010,6 @@ function FriendSelect({
       {friends.map((friend) => (
         <option key={friend.id} value={friend.id}>@{friend.handle}</option>
       ))}
-    </select>
-  );
-}
-
-function TimeSelect({ value, onChange }: { value: TimeControl; onChange: (value: TimeControl) => void }) {
-  return (
-    <select value={value} onChange={(event) => onChange(event.target.value as TimeControl)} aria-label="Time control">
-      <option value="10|0">10 min</option>
-      <option value="5|0">5 min</option>
     </select>
   );
 }

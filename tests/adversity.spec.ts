@@ -64,16 +64,31 @@ async function twoClientsInGame(browser: Browser, suffix: string, opts: { instru
   await expect(bob.getByText(`@${aH}`)).toBeVisible();
 
   await alice.reload();
-  await alice.getByLabel("Time control").first().selectOption("10|0");
-  await alice.getByRole("button", { name: "Send" }).click();
+  // Presence heartbeat takes a moment to register the peer as online —
+  // the Invite button unlocks once bob's presence is fresh.
+  await presenceHeartbeat(bob);
+  await alice.reload();
+  await alice.getByRole("button", { name: `Invite @${bH}` }).click();
+  await expect(alice).toHaveURL(/\/waiting\/chl_/);
   await bob.reload();
   await bob.getByRole("button", { name: "Accept" }).first().click();
   await expect(bob).toHaveURL(/\/game\/gam_/);
   const gameId = bob.url().split("/game/")[1];
-  await alice.goto(`/game/${gameId}`);
+  // Sender transitions to the game via the waiting-room poll — no need
+  // to navigate them manually.
+  await expect(alice).toHaveURL(/\/game\/gam_/, { timeout: 6000 });
   await expect(alice.locator(".board")).toBeVisible();
   await expect(bob.locator(".board")).toBeVisible();
   return { aliceCtx, bobCtx, alice, bob, gameId, handles: { a: aH, b: bH } };
+}
+
+async function presenceHeartbeat(page: Page) {
+  // Force a heartbeat POST from the page so the server marks this user
+  // online in the friend list immediately. Home data refresh in the
+  // sibling client picks that up on their next reload.
+  await page.evaluate(() => {
+    return fetch("/api/presence/heartbeat", { method: "POST" });
+  });
 }
 
 async function move(page: Page, from: string, to: string) {
@@ -284,8 +299,9 @@ test("sending a challenge takes the sender to the waiting room; accept transitio
     await bob.getByRole("button", { name: "Accept" }).first().click();
     await expect(bob.getByText(`@${aH}`)).toBeVisible();
     await alice.reload();
-    await alice.getByLabel("Time control").first().selectOption("10|0");
-    await alice.getByRole("button", { name: "Send" }).click();
+    await presenceHeartbeat(bob);
+    await alice.reload();
+    await alice.getByRole("button", { name: `Invite @${bH}` }).click();
     // Sender lands on the waiting room, not the dashboard.
     await expect(alice).toHaveURL(/\/waiting\/chl_/);
     await expect(alice.getByText(new RegExp(`waiting for @${bH}`))).toBeVisible();
