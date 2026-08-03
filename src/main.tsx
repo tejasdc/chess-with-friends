@@ -8,6 +8,7 @@ import "./styles.css";
 
 type TimeControl = "10|0" | "5|0";
 type GameStatus = "active" | "checkmate" | "resigned" | "timeout" | "draw";
+type PushStatus = "checking" | "ready" | "enabled" | "blocked" | "unsupported";
 
 interface Friend {
   id: string;
@@ -239,31 +240,71 @@ function AuthScreen({ onSignedIn, message, setMessage }: { onSignedIn: () => voi
 }
 
 function InstallPanel({ home, setMessage }: { home: HomeData; setMessage: (value: string) => void }) {
+  const [pushStatus, setPushStatus] = useState<PushStatus>("checking");
+
+  async function checkPushStatus() {
+    if (!home.pushPublicKey || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setPushStatus("unsupported");
+      return;
+    }
+    if (Notification.permission === "denied") {
+      setPushStatus("blocked");
+      return;
+    }
+    if (Notification.permission !== "granted") {
+      setPushStatus("ready");
+      return;
+    }
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    setPushStatus(subscription ? "enabled" : "ready");
+  }
+
+  useEffect(() => {
+    void checkPushStatus().catch(() => setPushStatus("ready"));
+  }, [home.pushPublicKey]);
+
   async function enablePush() {
     try {
       if (!home.pushPublicKey) throw new Error("Push key is not configured on this deployment.");
+      if (!("Notification" in window)) throw new Error("Notifications are not supported in this browser.");
+      if (Notification.permission === "denied") throw new Error("Notifications are blocked in this browser.");
+      if (Notification.permission !== "granted") {
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") throw new Error("Notification permission was not granted.");
+      }
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(home.pushPublicKey),
       });
       await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) });
+      await checkPushStatus();
       setMessage("Notifications enabled for friend requests, challenges, and scheduled games.");
     } catch (error) {
+      await checkPushStatus().catch(() => undefined);
       setMessage(error instanceof Error ? error.message : "Notification setup failed.");
     }
   }
+
+  if (pushStatus === "enabled") return null;
 
   return (
     <section className="panel install">
       <div>
         <h2>Install</h2>
-        <p>On iPhone, open Share and choose Add to Home Screen before enabling notifications. Notifications are only for friend requests, game challenges, and scheduled games starting.</p>
+        {pushStatus === "blocked" ? (
+          <p>Notifications are blocked in this browser. They are only for friend requests, game challenges, and scheduled games starting.</p>
+        ) : (
+          <p>On iPhone, open Share and choose Add to Home Screen before enabling notifications. Notifications are only for friend requests, game challenges, and scheduled games starting.</p>
+        )}
       </div>
-      <button onClick={enablePush}>
-        <Bell size={18} />
-        Enable notifications
-      </button>
+      {pushStatus === "ready" ? (
+        <button onClick={enablePush}>
+          <Bell size={18} />
+          Enable notifications
+        </button>
+      ) : null}
     </section>
   );
 }

@@ -5,6 +5,67 @@ const screenDir = "tmp/reviews/screens";
 
 test.describe.configure({ mode: "serial" });
 
+test("notification prompt disappears after permission is granted and stays gone on reload", async ({ browser }) => {
+  mkdirSync(screenDir, { recursive: true });
+  const suffix = Date.now().toString(36).slice(-6);
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    const subscription = {
+      endpoint: "https://push.invalid/ui-notification-test",
+      keys: { p256dh: "test", auth: "test" },
+      toJSON() {
+        return { endpoint: this.endpoint, keys: this.keys };
+      },
+    };
+    class FakeNotification {
+      static get permission() {
+        return window.localStorage.getItem("notificationPermission") || "default";
+      }
+
+      static async requestPermission() {
+        window.localStorage.setItem("notificationPermission", "granted");
+        return "granted";
+      }
+    }
+    const registration = {
+      pushManager: {
+        async getSubscription() {
+          return window.localStorage.getItem("notificationSubscription") ? subscription : null;
+        },
+        async subscribe() {
+          window.localStorage.setItem("notificationSubscription", "true");
+          return subscription;
+        },
+      },
+    };
+    Object.defineProperty(window, "Notification", { configurable: true, value: FakeNotification });
+    Object.defineProperty(window, "PushManager", { configurable: true, value: function PushManager() {} });
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: {
+        ready: Promise.resolve(registration),
+        register: async () => registration,
+      },
+    });
+  });
+  const page = await context.newPage();
+  await addAuthenticator(page);
+  await page.goto("/");
+  const handle = `notify_${suffix}`;
+  await register(page, handle);
+
+  await expect(page.getByRole("button", { name: "Enable notifications" })).toBeVisible();
+  await page.getByRole("button", { name: "Enable notifications" }).click();
+  await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
+  await expect(page.getByText("Notifications enabled for friend requests, challenges, and scheduled games.")).toBeVisible();
+  await shot(page, "00-notifications-enabled-prompt-gone");
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
+  await shot(page, "00-notifications-enabled-after-reload");
+  await context.close();
+});
+
 test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   mkdirSync(screenDir, { recursive: true });
   const suffix = Date.now().toString(36).slice(-6);

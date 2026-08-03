@@ -1,6 +1,11 @@
 # Progress
 
 ## Done
+- Redesign/bug-fix round started. Read `docs/requirements.md`, `tmp/reviews/PROGRESS.md`, and `tmp/reviews/build-report.md`.
+- Read `design-taste-frontend` and `high-end-visual-design`; selected a Mewar/Rajasthani miniature-inspired direction grounded in flat divided space, confident line work, earthy ochre/olive grounds, precise red accents, and chaturanga/gaja heritage.
+- Preserved v1 screenshot evidence in `tmp/reviews/screens-before/` before regenerating after-redesign screenshots.
+- Fixed the notification prompt root cause: `InstallPanel` previously rendered unconditionally after subscribing and did not derive UI state from `Notification.permission` plus `pushManager.getSubscription()`. It now hides only when the browser has granted permission and reports an actual subscription.
+- Added focused e2e evidence for the notification prompt disappearing after permission/subscription and staying gone after reload. `npx playwright test -g "notification prompt"` passed.
 - Read `docs/requirements.md` and extracted the required v1 contract.
 - Committed scaffold: Vite/React entry, Cloudflare Worker config, PWA manifest, service worker, dependencies.
 - Committed backend: singleton `AppDO` for accounts, friends, invites, schedules, push queue/policy, and `GameDO` for live chess state, WebSocket presence, legal moves, clocks, resign/checkmate/timeout.
@@ -44,5 +49,6 @@
 - Run at most one headless browser instance during testing and close it promptly.
 
 ## Next
-- Build/typecheck/test, deploy with Wrangler, then run independent reviewer agents.
-- Write `tmp/reviews/build-report.md` with deployed URL, test commands, screenshot inventory, known gaps, and human verification items.
+- Complete the full visual redesign in `src/main.tsx`, `src/styles.css`, and app assets without changing v1 mechanics.
+- Run typecheck/build/full e2e, visually inspect desktop/mobile screenshots, iterate, then deploy and run reviewer agents.
+- Write `tmp/reviews/redesign-report.md` with root cause, screenshot inventory, review outcomes, and production verification.
