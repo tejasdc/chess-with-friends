@@ -289,10 +289,18 @@ body[data-screen="game"] {
 body[data-screen="game"] .shell {
   height: 100dvh;
   min-height: 100dvh;
-  padding-top: 12px;
-  padding-bottom: 12px;
-  gap: 12px;
+  /* Tighter shell chrome on the game screen so the board can be the
+     dominant object. Horizontal gutters compress hard at mobile so
+     the width constraint doesn't waste half the viewport. */
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: clamp(6px, 1.5vw, 24px);
+  padding-right: clamp(6px, 1.5vw, 24px);
+  gap: 6px;
   overflow: hidden;
+}
+body[data-screen="game"] .topbar {
+  padding-bottom: 8px;
 }
 /* Compound selector wins over `.game` at same specificity + later
    position — critical because `.game { display: grid }` further down in
@@ -317,14 +325,15 @@ body[data-screen="game"] .shell {
 /* Board-column matches the board's max-width so the clock strips and
    bottom bar don't stretch across a huge desktop viewport — the whole
    game-screen composition stays visually locked to the board width.
-   Vertical budget (measured, not estimated): topbar 53 + shell pad
-   ~24 + shell gap 12 + clock strips 2×77 + captured 2×36 + bottom bar
-   34 + game-fixed inner gaps (6×5) ≈ 393. So board side = min(640, vw,
-   vh-400). The 7px cushion keeps the bottom bar inside the viewport
-   even when a mobile browser bar decorates the frame. */
+   Compressed chrome (see .game-fixed .clock-strip and .clock overrides
+   below) drops the vertical budget: topbar ~44 + shell pad 16 + gap 6
+   + clock strips 2×50 + captured 2×32 + bottom bar 28 + inner gaps ≈
+   280. So board side = min(cap, vw, vh-290). The cap is now large
+   enough on desktop that the board becomes the dominant object like
+   the prototype's — up to 820px, matching prototype-scale presence. */
 .game.game-fixed .board-column {
   width: 100%;
-  max-width: min(640px, 100%, calc(100dvh - 400px));
+  max-width: min(820px, 100%, calc(100dvh - 290px));
 }
 .game-fixed .board-column {
   flex: 1;
@@ -339,9 +348,9 @@ body[data-screen="game"] .shell {
   min-width: 0;
   display: grid;
   place-items: center;
-  /* Board cap so a huge desktop doesn't blow it to 900px. Real board
-     size ends up min(width, height, 640px) via aspect-ratio + max-*. */
-  max-width: 640px;
+  /* Board cap raised to 820 so the board dominates on laptops. Real
+     board size ends up min(width, height, cap) via aspect-ratio + max-*. */
+  max-width: 820px;
   margin: 0 auto;
   width: 100%;
   /* Reserve space for the teak frame's box-shadow (5px desktop / 3px
@@ -350,6 +359,23 @@ body[data-screen="game"] .shell {
 }
 @media (max-width: 480px) {
   .game-fixed .board-holder { padding: 4px; }
+}
+
+/* Compress the clock strips + clock font on the game screen so the
+   board can be bigger. Same visual language, tighter proportions. */
+.game.game-fixed .clock-strip {
+  padding: 6px 12px;
+  gap: 8px;
+}
+.game.game-fixed .clock-strip .clock {
+  font-size: 26px;
+}
+.game.game-fixed .captured-strip {
+  min-height: 26px;
+}
+.game.game-fixed .game-bottom {
+  padding: 4px 4px 2px;
+  font-size: 11px;
 }
 .game-fixed .board-holder .board {
   /* Both dimensions bounded — whichever the container narrows first
@@ -1419,13 +1445,15 @@ body[data-screen="game"] .shell {
 .board:not(.board-static) .square:hover.light { background: var(--paper-2); }
 .board:not(.board-static) .square:hover.dark  { background: color-mix(in oklab, var(--walnut) 85%, var(--ink)); }
 
-/* Board indicators — sourced from mock E crop (Tejas's own mockup).
-   SELECTED gets a THICK cream inset frame — wide inset from the square
-   edge, heavy border, same treatment on both light and dark squares.
-   LAST-MOVE uses the same shape at HALF-weight for secondary status.
-   Both use --cream (the identity chip color) rather than the buff paper
-   so the indicator reads distinctly against the buff light square as
-   well as the teal-dark square. */
+/* Board indicators — sourced from mock E crop (Tejas's own mockup),
+   plus his live-play verdict that last-move-as-border reads as stale
+   selection. Two distinct vocabularies now:
+     SELECTION  = the thick cream inset frame (the ONLY border on the
+                  board — it means "acting now").
+     LAST-MOVE  = a flat tint WASH on the from + to squares (a color
+                  shift of the square itself — information about the
+                  past, no border, no frame).
+   The wash version reads on both cream light AND teal-dark squares. */
 .square.selected::after {
   content: "";
   position: absolute;
@@ -1435,19 +1463,37 @@ body[data-screen="game"] .shell {
 }
 .square.dark.selected::after { border-color: var(--cream); }
 
-.square.last-from::after,
-.square.last-to::after {
-  content: "";
-  position: absolute;
-  inset: 3px;
-  border: 1.5px solid var(--cream);
-  pointer-events: none;
-  opacity: 0.75;
+/* Selection border scales with board size — on small squares (mobile
+   ~44px) the 3px+4px frame overlaps pawn glyphs. Container-query the
+   board and thin the frame at small container sizes so it surrounds
+   the piece rather than covers it. */
+@container (max-width: 420px) {
+  .square.selected::after { inset: 2px; border-width: 2px; }
 }
-.square.dark.last-from::after,
-.square.dark.last-to::after { border-color: var(--cream); }
-.square.selected.last-from::after,
-.square.selected.last-to::after { opacity: 1; border-width: 3px; inset: 4px; }
+@container (max-width: 340px) {
+  .square.selected::after { inset: 1.5px; border-width: 1.5px; }
+}
+
+/* LAST-MOVE — flat wash, no border. Color-mix each square with cream
+   at a modest ratio so both the light (buff) and dark (teal-dark)
+   variants read as "was here" without competing with the selection
+   frame. */
+.square.last-from.light, .square.last-to.light {
+  background: color-mix(in oklab, var(--paper) 82%, var(--cream));
+}
+.square.last-from.dark, .square.last-to.dark {
+  background: color-mix(in oklab, var(--walnut) 82%, var(--cream));
+}
+/* Hover on last-move squares stays inside the family — no jarring
+   jump between wash and hover state. */
+.board:not(.board-static) .square.last-from.light:hover,
+.board:not(.board-static) .square.last-to.light:hover {
+  background: color-mix(in oklab, var(--paper-2) 82%, var(--cream));
+}
+.board:not(.board-static) .square.last-from.dark:hover,
+.board:not(.board-static) .square.last-to.dark:hover {
+  background: color-mix(in oklab, color-mix(in oklab, var(--walnut) 85%, var(--ink)) 82%, var(--cream));
+}
 
 /* In-check — subtle warm ochre wash (palette-family adjacent, reads as
    "attention" without red). Retained on both square colors. */
