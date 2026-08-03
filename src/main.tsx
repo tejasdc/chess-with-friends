@@ -6,93 +6,640 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/server";
+import shelfPositions from "./data/positions.json";
 import "./styles.css";
 
-// Standard starting position — the auth screen shows a real board in
-// this position (the OBJECT arrives before any framing text does, per
-// Rodchenko: the furniture IS the invitation to play).
-const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+type ShelfPosition = {
+  id: string;
+  title: string;
+  credit: string;
+  fen: string;
+  sideToMove: Color;
+  solution: { from: Square; to: Square };
+};
 
-// Sandbox board — the landing interaction. Real chess.js legality (both
-// colors playable, no goal, no scoring), quiet reset to the initial
-// position after ~20 seconds of idle. Encapsulated as its own component
-// so a rejection is a one-commit removal (swap this back to a static
-// <Board interactive={false} />).
-function SandboxBoard() {
-  const [fen, setFen] = useState(INITIAL_FEN);
+type ShelfPiece = {
+  id: string;
+  sq: Square | null;
+  color: Color;
+  type: PieceSymbol;
+  char: string;
+  x: number;
+  y: number;
+  rot: number;
+  live: boolean;
+  fadeIn?: boolean;
+};
+
+type ShelfMetrics = {
+  stageW: number;
+  stageH: number;
+  boardX: number;
+  boardY: number;
+  boardW: number;
+  boardH: number;
+  sqSize: number;
+};
+
+const LANDING_COPY = "No infinite pool of opponents. A game happens when two friends sit down.";
+const shelf = shelfPositions as ShelfPosition[];
+
+function LandingPuzzleShelf() {
+  const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<Square | null>(null);
-  const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
-  const idleTimer = React.useRef<number | null>(null);
+  const [pieces, setPieces] = useState<ShelfPiece[]>([]);
+  const [animating, setAnimating] = useState(false);
+  const [metrics, setMetrics] = useState<ShelfMetrics | null>(null);
+  const stageRef = React.useRef<HTMLDivElement | null>(null);
+  const piecesLayerRef = React.useRef<HTMLDivElement | null>(null);
+  const pieceEls = React.useRef(new Map<string, HTMLSpanElement>());
+  const piecesRef = React.useRef<ShelfPiece[]>([]);
+  const gameRef = React.useRef(new Chess(shelf[0].fen));
+  const selectedRef = React.useRef<Square | null>(null);
+  const animatingRef = React.useRef(false);
+  const moveTimer = React.useRef<number | null>(null);
+  const rafRef = React.useRef<number | null>(null);
 
-  const IDLE_RESET_MS = 20_000;
+  const position = shelf[index];
 
-  function bumpIdleTimer() {
-    if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
-    idleTimer.current = window.setTimeout(() => {
-      setFen(INITIAL_FEN);
-      setSelected(null);
-      setLastMove(null);
-    }, IDLE_RESET_MS);
-  }
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  useEffect(() => { animatingRef.current = animating; }, [animating]);
 
   useEffect(() => {
-    bumpIdleTimer();
+    function measure() {
+      const node = stageRef.current;
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      const stageW = rect.width;
+      const stageH = rect.height;
+      const frameInset = stageW * 0.06;
+      const framePad = stageW * 0.0175;
+      const frameW = stageW * 0.88;
+      const boardX = frameInset + framePad;
+      const boardY = frameInset + framePad;
+      const boardW = frameW - framePad * 2;
+      const sqSize = boardW / 8;
+      setMetrics({ stageW, stageH, boardX, boardY, boardW, boardH: boardW, sqSize });
+    }
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (stageRef.current) observer.observe(stageRef.current);
+    window.addEventListener("resize", measure);
     return () => {
-      if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function choose(square: Square) {
-    const chess = new Chess(fen);
-    const piece = chess.get(square);
-    // No color-to-move gating — both sides are playable so a tap on any
-    // own-color piece works. But the tapped piece MUST match chess.turn()
-    // for chess.js to accept the move. Cheat by rewriting whose turn it
-    // is when the user selects a piece of the other color first.
-    if (!selected) {
-      if (!piece) return;
-      // If this piece isn't the side-to-move, flip the FEN's turn flag
-      // so chess.js will accept moves from either color. Silent.
-      if (piece.color !== chess.turn()) {
-        const flipped = fen.replace(/ (w|b) /, ` ${piece.color} `);
-        setFen(flipped);
+  useEffect(() => {
+    if (!metrics) return;
+    const next = piecesFromFen(position.fen, metrics);
+    piecesRef.current = next;
+    gameRef.current = new Chess(position.fen);
+    setPieces(next);
+    setSelected(null);
+  }, [metrics]);
+
+  useEffect(() => {
+    if (!metrics || animatingRef.current) return;
+    for (const piece of piecesRef.current) {
+      if (piece.sq) {
+        const { x, y } = squareToXY(piece.sq, metrics);
+        piece.x = x;
+        piece.y = y;
       }
-      setSelected(square);
-      bumpIdleTimer();
-      return;
+      const el = pieceEls.current.get(piece.id);
+      if (el) sizeAndPlacePiece(el, piece, metrics);
     }
-    if (selected === square) {
-      setSelected(null);
-      bumpIdleTimer();
-      return;
+  }, [metrics]);
+
+  useEffect(() => {
+    return () => {
+      if (moveTimer.current !== null) window.clearTimeout(moveTimer.current);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  const legalTargets = useMemo(() => {
+    if (!selected || animating) return new Map<string, "move" | "capture">();
+    const moves = gameRef.current.moves({ square: selected, verbose: true }) as Array<{ to: string; captured?: string; flags: string }>;
+    const map = new Map<string, "move" | "capture">();
+    for (const move of moves) {
+      map.set(move.to, move.captured || move.flags.includes("e") ? "capture" : "move");
     }
-    // Attempt move via chess.js. If illegal, silently discard selection.
-    try {
-      const move = chess.move({ from: selected, to: square, promotion: "q" });
-      if (!move) {
-        setSelected(null);
+    return map;
+  }, [selected, animating]);
+
+  function clearSelection() {
+    setSelected(null);
+    selectedRef.current = null;
+  }
+
+  function wobble(square: Square) {
+    const piece = piecesRef.current.find((p) => p.sq === square);
+    if (!piece) return;
+    const el = pieceEls.current.get(piece.id);
+    if (!el) return;
+    el.classList.add("stuck");
+    const start = performance.now();
+    const dur = 360;
+    const amp = 4;
+    const tick = (now: number) => {
+      const t = (now - start) / dur;
+      if (t >= 1) {
+        piece.rot = 0;
+        el.style.transform = landingPieceTransform(piece.x, piece.y, 0, 1);
+        el.classList.remove("stuck");
         return;
       }
-      setFen(chess.fen());
-      setLastMove({ from: move.from, to: move.to });
-      setSelected(null);
-      bumpIdleTimer();
-    } catch {
-      setSelected(null);
+      const angleDeg = Math.sin(t * Math.PI * 1.5) * amp * (1 - t);
+      el.style.transform = landingPieceTransform(piece.x, piece.y, angleDeg, 1);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  function choose(square: Square) {
+    if (animatingRef.current || !metrics) return;
+    const chess = gameRef.current;
+    const targetPiece = chess.get(square);
+    const solution = position.solution;
+    const selectedSquare = selectedRef.current;
+
+    if (!selectedSquare) {
+      if (!targetPiece) return;
+      if (targetPiece.color !== chess.turn()) {
+        wobble(square);
+        clearSelection();
+        return;
+      }
+      const moves = chess.moves({ square, verbose: true }) as Array<{ to: string }>;
+      if (!moves.some((move) => move.to === solution.to && square === solution.from)) {
+        wobble(square);
+        clearSelection();
+        return;
+      }
+      setSelected(square);
+      selectedRef.current = square;
+      return;
     }
+
+    if (selectedSquare === square) {
+      clearSelection();
+      return;
+    }
+
+    if (targetPiece && targetPiece.color === chess.turn()) {
+      const moves = chess.moves({ square, verbose: true }) as Array<{ to: string }>;
+      if (moves.some((move) => move.to === solution.to && square === solution.from)) {
+        setSelected(square);
+        selectedRef.current = square;
+      } else {
+        wobble(square);
+        clearSelection();
+      }
+      return;
+    }
+
+    const legalMoves = chess.moves({ square: selectedSquare, verbose: true }) as Array<{ to: string }>;
+    if (!legalMoves.some((move) => move.to === square)) {
+      clearSelection();
+      return;
+    }
+    if (selectedSquare !== solution.from || square !== solution.to) {
+      clearSelection();
+      return;
+    }
+
+    try {
+      const move = chess.move({ from: selectedSquare, to: square, promotion: "q" });
+      if (!move) return clearSelection();
+      applyLandingMove(selectedSquare, square, metrics);
+      clearSelection();
+      moveTimer.current = window.setTimeout(() => {
+        void transitionToNext();
+      }, 280);
+    } catch {
+      clearSelection();
+    }
+  }
+
+  async function transitionToNext() {
+    if (!metrics || animatingRef.current) return;
+    setAnimating(true);
+    animatingRef.current = true;
+    const nextIndex = (index + 1) % shelf.length;
+    const nextPosition = shelf[nextIndex];
+    setIndex(nextIndex);
+    gameRef.current = new Chess(nextPosition.fen);
+    await walkLandingPieces(nextPosition, metrics);
+    setAnimating(false);
+    animatingRef.current = false;
+  }
+
+  function applyLandingMove(from: Square, to: Square, m: ShelfMetrics) {
+    const mover = piecesRef.current.find((piece) => piece.sq === from);
+    if (!mover) return;
+    const captured = piecesRef.current.find((piece) => piece.sq === to && piece !== mover);
+    if (captured) {
+      const capturedEl = pieceEls.current.get(captured.id);
+      capturedEl?.remove();
+      piecesRef.current = piecesRef.current.filter((piece) => piece !== captured);
+      setPieces([...piecesRef.current]);
+    }
+    mover.sq = to;
+    const { x, y } = squareToXY(to, m);
+    mover.x = x;
+    mover.y = y;
+    const el = pieceEls.current.get(mover.id);
+    if (el) {
+      el.style.transition = "transform 220ms cubic-bezier(0.16, 1, 0.3, 1)";
+      el.style.transform = landingPieceTransform(x, y, 0, 1);
+      window.setTimeout(() => { el.style.transition = ""; }, 260);
+    }
+  }
+
+  function walkLandingPieces(nextPosition: ShelfPosition, m: ShelfMetrics) {
+    return new Promise<void>((resolve) => {
+      const targets = piecesFromFen(nextPosition.fen, m).map((piece) => ({
+        ...piece,
+        end: squareCenter(piece.sq as Square, m),
+        assigned: null as ShelfPiece | null,
+      }));
+      const pool = piecesRef.current.slice();
+
+      for (const target of targets) {
+        let bestI = -1;
+        let bestD = Infinity;
+        for (let i = 0; i < pool.length; i++) {
+          const candidate = pool[i];
+          if (!candidate || candidate.color !== target.color || candidate.type !== target.type) continue;
+          const pcx = candidate.x + m.sqSize / 2;
+          const pcy = candidate.y + m.sqSize / 2;
+          const distance = (pcx - target.end.x) ** 2 + (pcy - target.end.y) ** 2;
+          if (distance < bestD) {
+            bestD = distance;
+            bestI = i;
+          }
+        }
+        if (bestI >= 0) {
+          target.assigned = pool[bestI];
+          pool[bestI] = null as unknown as ShelfPiece;
+        }
+      }
+
+      const nextLive: ShelfPiece[] = [];
+      for (const target of targets) {
+        if (!target.assigned) {
+          const spawn = pickEdgeSpawn(target.end, m);
+          const spawned: ShelfPiece = {
+            id: `landing-piece-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            sq: target.sq,
+            color: target.color,
+            type: target.type,
+            char: target.char,
+            x: spawn.x - m.sqSize / 2,
+            y: spawn.y - m.sqSize / 2,
+            rot: 0,
+            live: false,
+            fadeIn: true,
+          };
+          target.assigned = spawned;
+          pool.push(spawned);
+        }
+      }
+
+      const walks: Array<{
+        piece: ShelfPiece;
+        waypoints: Array<{ x: number; y: number }>;
+        segCount: number;
+        startAt: number;
+        duration: number;
+        endCX: number;
+        endCY: number;
+        fadeIn: boolean;
+      }> = [];
+      const nextTray: ShelfPiece[] = [];
+      const used = new Set<ShelfPiece>();
+      const now = performance.now();
+      const segMs = 360;
+      const maxSegs = 6;
+      const settleMs = 200;
+
+      function pushIntermediate(points: Array<{ x: number; y: number }>, target: { x: number; y: number }) {
+        const last = points[points.length - 1];
+        const dx = target.x - last.x;
+        const dy = target.y - last.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 0.5) return;
+        const steps = Math.max(1, Math.round(len / m.sqSize));
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          points.push({ x: last.x + dx * t, y: last.y + dy * t });
+        }
+      }
+
+      function buildWaypoints(startCX: number, startCY: number, endCX: number, endCY: number, prefer: "file-first" | "rank-first") {
+        const corner = prefer === "file-first" ? { x: endCX, y: startCY } : { x: startCX, y: endCY };
+        const points = [{ x: startCX, y: startCY }];
+        pushIntermediate(points, corner);
+        pushIntermediate(points, { x: endCX, y: endCY });
+        return points;
+      }
+
+      function pushWalk(piece: ShelfPiece, endCX: number, endCY: number, rankHint: number) {
+        const startCX = piece.x + m.sqSize / 2;
+        const startCY = piece.y + m.sqSize / 2;
+        const totalDist = Math.hypot(endCX - startCX, endCY - startCY);
+        if (totalDist < m.sqSize * 0.06) return;
+        const dxAbs = Math.abs(endCX - startCX);
+        const dyAbs = Math.abs(endCY - startCY);
+        const bias = dxAbs > dyAbs * 1.4 ? 0.30 : 0.65;
+        const prefer = seededWalkChoice(piece.id, nextPosition.id) < bias ? "file-first" : "rank-first";
+        const waypoints = buildWaypoints(startCX, startCY, endCX, endCY, prefer);
+        let segCount = waypoints.length - 1;
+        if (segCount > maxSegs) {
+          const stride = Math.ceil(segCount / maxSegs);
+          const collapsed = [waypoints[0]];
+          for (let i = stride; i < waypoints.length; i += stride) collapsed.push(waypoints[i]);
+          const final = waypoints[waypoints.length - 1];
+          if (collapsed[collapsed.length - 1] !== final) collapsed.push(final);
+          waypoints.length = 0;
+          waypoints.push(...collapsed);
+          segCount = waypoints.length - 1;
+        }
+        const rankDelay = (8 - rankHint) * 90;
+        const jitter = seededWalkChoice(nextPosition.id, piece.id) * 220;
+        walks.push({
+          piece,
+          waypoints,
+          segCount,
+          startAt: now + rankDelay + jitter,
+          duration: segCount * segMs,
+          endCX,
+          endCY,
+          fadeIn: Boolean(piece.fadeIn),
+        });
+      }
+
+      for (const target of targets) {
+        const piece = target.assigned;
+        if (!piece) continue;
+        const targetSq = target.sq as Square;
+        used.add(piece);
+        piece.sq = targetSq;
+        piece.live = false;
+        pushWalk(piece, target.end.x, target.end.y, Number(targetSq[1]));
+        nextLive.push(piece);
+      }
+
+      const stragglers = pool.filter((piece) => piece && !used.has(piece));
+      const trayGap = m.sqSize * 0.43;
+      const trayYWhite = m.boardY + m.boardH + m.sqSize * 0.22;
+      const trayYBlack = m.boardY - m.sqSize * 0.22;
+      stragglers.filter((piece) => piece.color === "w").forEach((piece, i) => {
+        const endCX = m.boardX + m.sqSize * 0.55 + i * trayGap;
+        piece.sq = null;
+        piece.live = false;
+        pushWalk(piece, endCX, trayYWhite, 1);
+        nextTray.push(piece);
+      });
+      stragglers.filter((piece) => piece.color === "b").forEach((piece, i) => {
+        const endCX = m.boardX + m.sqSize * 0.55 + i * trayGap;
+        piece.sq = null;
+        piece.live = false;
+        pushWalk(piece, endCX, trayYBlack, 8);
+        nextTray.push(piece);
+      });
+
+      piecesRef.current = [...nextLive, ...nextTray];
+      setPieces([...piecesRef.current]);
+
+      window.setTimeout(() => {
+        for (const piece of piecesRef.current) {
+          const el = pieceEls.current.get(piece.id);
+          if (!el) continue;
+          sizeAndPlacePiece(el, piece, m);
+          el.style.transition = "none";
+        }
+        void piecesLayerRef.current?.offsetHeight;
+
+        const globalEnd = walks.length
+          ? walks.reduce((acc, walk) => Math.max(acc, walk.startAt + walk.duration + settleMs), now) + 160
+          : now + 380;
+
+        function easeInOut(t: number) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+        function frame(tNow: number) {
+          for (const walk of walks) {
+            const t = tNow - walk.startAt;
+            if (t < 0) continue;
+            const total = walk.duration + settleMs;
+            if (t >= total) {
+              const tx = walk.endCX - m.sqSize / 2;
+              const ty = walk.endCY - m.sqSize / 2;
+              walk.piece.x = tx;
+              walk.piece.y = ty;
+              walk.piece.rot = 0;
+              const el = pieceEls.current.get(walk.piece.id);
+              if (el) {
+                el.style.opacity = "1";
+                el.style.transform = landingPieceTransform(tx, ty, 0, 1);
+              }
+              continue;
+            }
+
+            let point: { x: number; y: number };
+            if (t < walk.duration) {
+              const globalFrac = t / walk.duration;
+              const segFloat = globalFrac * walk.segCount;
+              const segIdx = Math.min(walk.segCount - 1, Math.floor(segFloat));
+              const segT = easeInOut(segFloat - segIdx);
+              const a = walk.waypoints[segIdx];
+              const b = walk.waypoints[segIdx + 1];
+              point = { x: a.x + (b.x - a.x) * segT, y: a.y + (b.y - a.y) * segT };
+            } else {
+              point = walk.waypoints[walk.waypoints.length - 1];
+            }
+
+            const settleT = t >= walk.duration ? (t - walk.duration) / settleMs : 0;
+            const scale = t >= walk.duration ? 1 - 0.04 * Math.sin(settleT * Math.PI) : 1;
+            const tx = point.x - m.sqSize / 2;
+            const ty = point.y - m.sqSize / 2;
+            walk.piece.x = tx;
+            walk.piece.y = ty;
+            const el = pieceEls.current.get(walk.piece.id);
+            if (el) {
+              if (walk.fadeIn) el.style.opacity = String(Math.min(1, t / 260));
+              el.style.transform = landingPieceTransform(tx, ty, 0, scale);
+            }
+          }
+
+          if (tNow < globalEnd) {
+            rafRef.current = requestAnimationFrame(frame);
+          } else {
+            for (const piece of nextLive) {
+              piece.live = true;
+              piece.fadeIn = false;
+            }
+            for (const piece of nextTray) piece.fadeIn = false;
+            piecesRef.current = [...nextLive, ...nextTray];
+            setPieces([...piecesRef.current]);
+            resolve();
+          }
+        }
+        rafRef.current = requestAnimationFrame(frame);
+      }, 0);
+    });
   }
 
   return (
-    <Board
-      fen={fen}
-      orientation="w"
-      selected={selected}
-      onSquare={choose}
-      interactive={true}
-      lastMove={lastMove}
-    />
+    <div className="puzzle-shelf" data-puzzle-id={position.id} data-animating={animating ? "true" : "false"}>
+      <div className="puzzle-stage" ref={stageRef}>
+        <div className="landing-board-frame">
+          <div className="landing-board" role="grid" aria-label="Landing chess puzzle">
+            {ranks.flatMap((rank) =>
+              files.map((file) => {
+                const square = `${file}${rank}` as Square;
+                const dark = (files.indexOf(file) + Number(rank)) % 2 === 0;
+                const target = legalTargets.get(square);
+                const showFile = rank === "1";
+                const showRank = file === "a";
+                return (
+                  <button
+                    className={`landing-square ${dark ? "dark" : "light"} ${selected === square ? "selected" : ""}`}
+                    data-square={square}
+                    key={square}
+                    onClick={() => choose(square)}
+                    aria-label={square}
+                    disabled={animating}
+                    type="button"
+                  >
+                    {showRank ? <span className="coord coord-rank" aria-hidden="true">{rank}</span> : null}
+                    {showFile ? <span className="coord coord-file" aria-hidden="true">{file}</span> : null}
+                    {target === "move" ? <span className="legal-dot" aria-hidden="true" /> : null}
+                    {target === "capture" ? <span className="legal-capture" aria-hidden="true" /> : null}
+                  </button>
+                );
+              }),
+            )}
+          </div>
+        </div>
+        <div className="landing-pieces" ref={piecesLayerRef} aria-hidden="true">
+          {pieces.map((piece) => (
+            <span
+              className={`landing-piece landing-piece-${piece.color} ${piece.live && !animating ? "live" : ""} ${selected === piece.sq ? "selected" : ""}`}
+              data-piece-id={piece.id}
+              data-square={piece.sq || "tray"}
+              data-piece={`${piece.color}${piece.type}`}
+              key={piece.id}
+              ref={(node) => {
+                if (node) {
+                  pieceEls.current.set(piece.id, node);
+                  if (metrics) sizeAndPlacePiece(node, piece, metrics);
+                } else {
+                  pieceEls.current.delete(piece.id);
+                }
+              }}
+            >
+              {filledGlyphs[piece.type]}
+            </span>
+          ))}
+        </div>
+      </div>
+      <p className="puzzle-caption">{position.sideToMove === "w" ? "WHITE" : "BLACK"} TO MOVE · {position.credit}</p>
+    </div>
   );
+}
+
+function piecesFromFen(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
+  const placement = fen.split(" ")[0];
+  const pieces: ShelfPiece[] = [];
+  let fileIndex = 0;
+  let rank = 8;
+  for (const char of placement) {
+    if (char === "/") {
+      rank -= 1;
+      fileIndex = 0;
+      continue;
+    }
+    if (/\d/.test(char)) {
+      fileIndex += Number(char);
+      continue;
+    }
+    const file = files[fileIndex];
+    const sq = `${file}${rank}` as Square;
+    const { x, y } = squareToXY(sq, metrics);
+    pieces.push({
+      id: `landing-piece-${pieces.length}-${char}-${sq}`,
+      sq,
+      color: char === char.toUpperCase() ? "w" : "b",
+      type: char.toLowerCase() as PieceSymbol,
+      char,
+      x,
+      y,
+      rot: 0,
+      live: true,
+    });
+    fileIndex += 1;
+  }
+  return pieces;
+}
+
+function squareToXY(sq: Square, metrics: ShelfMetrics) {
+  const file = sq.charCodeAt(0) - 97;
+  const rank = Number(sq[1]);
+  return {
+    x: metrics.boardX + file * metrics.sqSize,
+    y: metrics.boardY + (8 - rank) * metrics.sqSize,
+  };
+}
+
+function squareCenter(sq: Square, metrics: ShelfMetrics) {
+  const { x, y } = squareToXY(sq, metrics);
+  return { x: x + metrics.sqSize / 2, y: y + metrics.sqSize / 2 };
+}
+
+function pickEdgeSpawn(dest: { x: number; y: number }, metrics: ShelfMetrics) {
+  const half = metrics.sqSize / 2;
+  const options = [
+    { x: half, y: dest.y },
+    { x: metrics.stageW - half, y: dest.y },
+    { x: dest.x, y: half },
+    { x: dest.x, y: metrics.stageH - half },
+  ];
+  let best = options[0];
+  let bestD = Infinity;
+  for (const option of options) {
+    const distance = Math.hypot(option.x - dest.x, option.y - dest.y);
+    if (distance < bestD) {
+      best = option;
+      bestD = distance;
+    }
+  }
+  return best;
+}
+
+function sizeAndPlacePiece(el: HTMLElement, piece: ShelfPiece, metrics: ShelfMetrics) {
+  el.style.width = `${metrics.sqSize}px`;
+  el.style.height = `${metrics.sqSize}px`;
+  el.style.fontSize = `${Math.round(metrics.sqSize * 0.82)}px`;
+  el.style.opacity = piece.fadeIn ? "0" : "1";
+  el.style.transform = landingPieceTransform(piece.x, piece.y, piece.rot, 1);
+}
+
+function landingPieceTransform(x: number, y: number, angleDeg: number, scale: number) {
+  return `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px) rotate(${angleDeg.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+}
+
+function seededWalkChoice(a: string, b: string) {
+  let hash = 2166136261;
+  const input = `${a}:${b}`;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967295;
 }
 
 type TimeControl = "10|0" | "5|0";
@@ -797,9 +1344,7 @@ function AuthScreen({
     <Shell message={message} messageKind={messageKind} setMessage={setMessage} hideMenu>
       <section className="auth">
         <div className="auth-scene">
-          {/* Sandbox — real legal moves, no goal, resets after 20s idle.
-              Feels like a real set to touch, not a puzzle. */}
-          <SandboxBoard />
+          <LandingPuzzleShelf />
         </div>
         <form
           className="auth-form"
@@ -812,6 +1357,7 @@ function AuthScreen({
               names the outcome ("Log in or create account") so we
               don't need a separate "HANDLE" label or a footnote —
               Apple's and Google's passkey sheets do the explaining. */}
+          <p className="landing-copy">{LANDING_COPY}</p>
           <div className="auth-row">
             <input
               className="auth-input"

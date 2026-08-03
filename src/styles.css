@@ -355,23 +355,33 @@ body[data-screen="inspirations"] .shell {
 body[data-screen="landing"] .auth {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   padding: 0;
   min-height: 0;
 }
 body[data-screen="landing"] .auth-scene {
-  width: min(100%, 88vw, 640px);
+  width: min(100%, 94vw, 560px, calc(100dvh - 160px));
   flex: 0 1 auto;
 }
 @media (max-width: 640px) {
-  body[data-screen="landing"] .auth-scene { width: min(100%, 82vw, 420px); }
+  body[data-screen="landing"] .auth-scene { width: min(100%, 94vw, 430px); }
 }
 @media (min-width: 900px) {
   body[data-screen="landing"] .auth {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+    grid-template-rows: minmax(0, 1fr) auto;
     align-items: center;
     gap: 48px;
+  }
+  body[data-screen="landing"] .auth-scene,
+  body[data-screen="landing"] .auth-form {
+    grid-row: 1;
+  }
+  body[data-screen="landing"] .landing-footer {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    align-self: end;
   }
 }
 
@@ -703,9 +713,9 @@ body[data-screen="landing"] .auth-scene {
   width: 100%;
   height: 100%;
 }
-/* Landing sandbox board — INTERACTIVE (real legal moves via chess.js,
-   auto-resets after 20s idle). Suppress iOS Safari's default tap
-   highlight so taps look intentional rather than "broken". */
+/* Landing puzzle shelf — real mate-in-one positions with pieces walking
+   through the celadon tray between puzzles. Suppress iOS Safari's default
+   tap highlight so taps look intentional. */
 .auth-scene .board {
   -webkit-tap-highlight-color: transparent;
 }
@@ -734,14 +744,144 @@ body[data-screen="landing"] .auth-scene {
   background: var(--paper-2);
 }
 
+.puzzle-shelf {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.puzzle-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: visible;
+  -webkit-tap-highlight-color: transparent;
+}
+.landing-board-frame {
+  position: absolute;
+  left: 6%;
+  top: 6%;
+  width: 88%;
+  height: 88%;
+  padding: 1.75%;
+  background: var(--teak);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--cream) 18%, transparent),
+    inset 0 -2px 0 color-mix(in oklab, var(--ink) 24%, transparent),
+    0 10px 22px color-mix(in oklab, var(--ink) 22%, transparent);
+}
+.landing-board {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
+  width: 100%;
+  height: 100%;
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  touch-action: manipulation;
+}
+.landing-square {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  transition: background-color 100ms var(--ease);
+  -webkit-tap-highlight-color: transparent;
+}
+.landing-square:disabled {
+  cursor: default;
+  opacity: 1;
+}
+.landing-square.light { background: var(--paper); }
+.landing-square.dark  { background: var(--walnut); }
+.landing-square:hover:not(:disabled).light { background: var(--paper-2); }
+.landing-square:hover:not(:disabled).dark  { background: color-mix(in oklab, var(--walnut) 85%, var(--ink)); }
+.landing-square.selected::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 3px solid var(--cream);
+  pointer-events: none;
+}
+.landing-square.dark.selected::after { border-color: var(--cream); }
+.landing-square.dark .legal-dot { background: var(--paper); }
+.landing-square.dark .legal-capture { border-color: var(--paper); }
+.landing-pieces {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.landing-piece {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", "IBM Plex Sans", sans-serif;
+  line-height: 1;
+  user-select: none;
+  will-change: transform;
+  transform-origin: 50% 58%;
+}
+.landing-piece-w {
+  color: var(--paper);
+  text-shadow:
+    -1px -1px 0 var(--walnut-2),
+     1px -1px 0 var(--walnut-2),
+    -1px  1px 0 var(--walnut-2),
+     1px  1px 0 var(--walnut-2),
+     0 2px 4px color-mix(in oklab, var(--ink) 18%, transparent);
+}
+.landing-piece-b {
+  color: var(--ink);
+  text-shadow:
+    -1px -1px 0 var(--cream),
+     1px -1px 0 var(--cream),
+    -1px  1px 0 var(--cream),
+     1px  1px 0 var(--cream),
+     0 2px 4px color-mix(in oklab, var(--ink) 18%, transparent);
+}
+.landing-piece.selected {
+  filter: drop-shadow(0 0 6px var(--cream));
+}
+.landing-piece.stuck {
+  filter: drop-shadow(0 0 4px color-mix(in oklab, var(--ink) 35%, transparent));
+}
+.puzzle-caption {
+  margin: 0;
+  min-height: 18px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.35;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--stone-on-ground);
+  text-align: center;
+}
+
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
   max-width: 420px;
   width: 100%;
   min-width: 0;              /* allow grid/flex shrink below intrinsic content */
   justify-self: start;
+}
+.landing-copy {
+  margin: 0;
+  max-width: 38ch;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--ink);
 }
 
 /* One-row auth — DESIGNED, not just placed. Input and button share:
@@ -814,6 +954,15 @@ body[data-screen="landing"] .auth-scene {
     min-width: 178px;
     padding: 0 12px;
     letter-spacing: 0;
+  }
+  .puzzle-caption {
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+  }
+  .landing-copy {
+    font-size: 13px;
+    line-height: 1.28;
+    max-width: none;
   }
 }
 

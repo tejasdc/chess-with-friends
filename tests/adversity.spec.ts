@@ -495,5 +495,51 @@ test("recurring schedule creates a game on each firing and can be ended by eithe
   }
 });
 
+test("landing puzzle solve walks to a new caption and position without chrome regressions", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  const shelf = page.locator(".puzzle-shelf");
+  await expect(shelf).toBeVisible();
+  const firstPuzzle = await shelf.getAttribute("data-puzzle-id");
+  const firstCaption = await page.locator(".puzzle-caption").innerText();
+
+  await expect(page.locator(".menu-dot")).toHaveCount(0);
+  await expect(page.locator(".toast")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/$/);
+  const initialScroll = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    clientHeight: document.documentElement.clientHeight,
+    innerHeight: window.innerHeight,
+  }));
+  expect(initialScroll.scrollHeight).toBeLessThanOrEqual(initialScroll.clientHeight + 1);
+  expect(initialScroll.scrollHeight).toBeLessThanOrEqual(initialScroll.innerHeight + 1);
+
+  await page.locator('.landing-square[data-square="d8"]').click();
+  await expect(page.locator('.landing-square[data-square="h4"] .legal-dot, .landing-square[data-square="h4"] .legal-capture')).toBeVisible();
+  await page.locator('.landing-square[data-square="h4"]').click();
+
+  await expect(shelf).toHaveAttribute("data-animating", "true", { timeout: 1200 });
+  await expect(page.locator(".puzzle-caption")).not.toHaveText(firstCaption);
+  await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 8000 });
+
+  const nextPuzzle = await shelf.getAttribute("data-puzzle-id");
+  const nextCaption = await page.locator(".puzzle-caption").innerText();
+  expect(nextPuzzle).not.toBe(firstPuzzle);
+  expect(nextCaption).not.toBe(firstCaption);
+  await expect(page.locator('.landing-piece[data-square="g2"][data-piece="wq"]')).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator(".toast")).toHaveCount(0);
+  await expect(page.locator(".menu-dot")).toHaveCount(0);
+
+  const finalScroll = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    clientHeight: document.documentElement.clientHeight,
+    innerHeight: window.innerHeight,
+  }));
+  expect(finalScroll.scrollHeight).toBeLessThanOrEqual(finalScroll.clientHeight + 1);
+  expect(finalScroll.scrollHeight).toBeLessThanOrEqual(finalScroll.innerHeight + 1);
+});
+
 // Silence unused-import warning if a future refactor drops CDPSession above.
 export type _KeepCDP = CDPSession;
