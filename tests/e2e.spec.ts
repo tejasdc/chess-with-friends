@@ -133,6 +133,63 @@ test("sign out returns to the auth screen", async ({ browser }) => {
   await context.close();
 });
 
+// WebAuthn cancel taxonomy — team-lead's explicit matrix. NEVER surface raw
+// platform text; NEVER go silent; the truthful interpretation lives on the
+// toast immediately. Sign-up cancel → "Passkey wasn't created — try again."
+// Sign-in cancel  → "That handle may be taken — try a different one."
+//
+// Simulated by stubbing navigator.credentials.{create,get} at page-init time
+// to reject with a real DOMException("...", "NotAllowedError"). The stub runs
+// before any script — including simplewebauthn — so both flows hit the
+// browser-native cancel path exactly as a real user tap-dismiss would.
+async function stubCredentialsCancel(context: import("@playwright/test").BrowserContext) {
+  await context.addInitScript(() => {
+    const reject = () => Promise.reject(new DOMException("The request is not allowed.", "NotAllowedError"));
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: { create: reject, get: reject },
+    });
+  });
+}
+
+test("sign-up cancel surfaces \"Passkey wasn't created — try again.\"", async ({ browser }) => {
+  const context = await browser.newContext();
+  await stubCredentialsCancel(context);
+  const page = await context.newPage();
+  await page.goto("/");
+  const handle = `cancsu_${Date.now().toString(36).slice(-5)}`;
+  await page.getByPlaceholder("your_handle").fill(handle);
+  // Wait for the probe → button label morphs to "Sign up as @…"
+  await expect(page.getByRole("button", { name: new RegExp(`Sign up as @${handle}`) })).toBeVisible({ timeout: 5000 });
+  await page.getByRole("button", { name: new RegExp(`Sign up as @${handle}`) }).click();
+  await expect(page.getByText("Passkey wasn't created — try again.")).toBeVisible({ timeout: 5000 });
+  await context.close();
+});
+
+test("sign-in cancel surfaces \"That handle may be taken — try a different one.\"", async ({ browser }) => {
+  // Setup: register a handle in a throwaway context so it's confirmed taken.
+  const takenHandle = `cancsi_${Date.now().toString(36).slice(-5)}`;
+  const setupCtx = await browser.newContext();
+  const setupPage = await setupCtx.newPage();
+  await addAuthenticator(setupPage);
+  await setupPage.goto("/");
+  await register(setupPage, takenHandle);
+  await setupCtx.close();
+
+  // Fresh context with the credentials stub → probe finds the handle
+  // (server call, not credentials), button morphs to "Sign in as @…",
+  // click triggers startAuthentication which hits the stubbed reject.
+  const context = await browser.newContext();
+  await stubCredentialsCancel(context);
+  const page = await context.newPage();
+  await page.goto("/");
+  await page.getByPlaceholder("your_handle").fill(takenHandle);
+  await expect(page.getByRole("button", { name: new RegExp(`Sign in as @${takenHandle}`) })).toBeVisible({ timeout: 5000 });
+  await page.getByRole("button", { name: new RegExp(`Sign in as @${takenHandle}`) }).click();
+  await expect(page.getByText("That handle may be taken — try a different one.")).toBeVisible({ timeout: 5000 });
+  await context.close();
+});
+
 // Regression guard for the install-panel-disappears-in-private-browsing bug:
 // install guidance must show independently of push support.
 test("install guidance shows even when push is unsupported", async ({ browser }) => {

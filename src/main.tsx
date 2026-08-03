@@ -445,29 +445,39 @@ function AuthScreen({
       }
       await onSignedIn();
     } catch (error) {
-      // Error taxonomy — never surface raw platform text. Tejas hit the
-      // verbatim WebAuthn "The request is not allowed by the user agent
-      // or the platform in the current context…" in the toast, which
-      // reads as broken software.
-      //
-      // 1. NotAllowedError (WebAuthn cancel / dismiss / timeout) —
-      //    almost always intentional. Silence is correct.
-      // 2. Any other DOMException or platform-shaped error — short
-      //    human line. Never the platform's own words.
-      // 3. Regular Error from api() — the server message is already
-      //    human-readable ("No account with that handle."). Surface it.
+      // Explicit terminal-error matrix (team-lead's verbatim phrases).
+      // Reverses the earlier silence-on-cancel policy: user-dismissal is
+      // rare, so on failure default to the truthful interpretation and
+      // say it immediately. Never the platform's own words.
       const name = error instanceof Error ? error.name : "";
       const msg = error instanceof Error ? error.message : "";
-      const isNotAllowed = name === "NotAllowedError" || /not allowed by the user agent/i.test(msg);
-      if (isNotAllowed) return;   // silence
+      const isNotAllowed = name === "NotAllowedError"
+        || /not allowed by the user agent|cancel|timeout|no.*credential/i.test(msg);
       const isPlatform = error instanceof DOMException
         || /^(Not|Invalid|Security|Timeout|Constraint|Abort|Unknown)[A-Z][A-Za-z]*Error$/.test(name)
         || /\bDOMException\b/i.test(msg);
-      if (isPlatform) {
-        setMessage("Sign in failed. Try again.", "error");
-        return;
+
+      if (decided === "register") {
+        // Sign-up flow terminals:
+        if (isNotAllowed) {
+          setMessage("Passkey wasn't created — try again.", "error");
+        } else if (isPlatform) {
+          setMessage("Couldn't create a passkey on this device.", "error");
+        } else {
+          // Server error — includes "That handle is already taken."
+          // race when two clients register the same handle at once.
+          setMessage(msg || "Sign up failed.", "error");
+        }
+      } else {
+        // Sign-in flow terminals — cancel / no-credential is guidance,
+        // not failure ("info" tint per team-lead — it reads calmer than
+        // vermillion and matches the "handle may be taken" intent).
+        if (isNotAllowed || isPlatform) {
+          setMessage("That handle may be taken — try a different one.", "info");
+        } else {
+          setMessage(msg || "Sign in failed.", "error");
+        }
       }
-      setMessage(msg || "Sign in failed.", "error");
     } finally {
       setBusy(false);
     }
