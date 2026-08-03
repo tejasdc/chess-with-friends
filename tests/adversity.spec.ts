@@ -449,16 +449,16 @@ test("recurring schedule creates a game on each firing and can be ended by eithe
     const startAt = Date.now() + 3_000;
     const scheduleId = await alice.evaluate(async ([friendHandle, at]) => {
       // Find friendId by fetching /api/me — the home data enumerates friends.
-      const me = await (await fetch("/api/me", { credentials: "include" })).json();
-      const friend = me.friends.find((f: { handle: string }) => f.handle === friendHandle);
+      const me = await (await fetch("/api/me", { credentials: "include" })).json() as { friends: Array<{ id: string; handle: string }> };
+      const friend = me.friends.find((f) => f.handle === friendHandle)!;
       const res = await fetch("/api/schedules", {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ friendId: friend.id, timeControl: "10|0", startAt: at, recurrence: { kind: "daily" } }),
       });
-      const data = await res.json();
-      return data.schedule.id as string;
+      const data = await res.json() as { schedule: { id: string } };
+      return data.schedule.id;
     }, [bH, startAt] as const);
     expect(scheduleId).toMatch(/^sch_/);
 
@@ -472,8 +472,9 @@ test("recurring schedule creates a game on each firing and can be ended by eithe
 
     // Confirm a scheduled_start game exists and the schedule rolled
     // forward instead of firing "fired" (recurring stays accepted).
-    const post = await alice.evaluate(async () => (await fetch("/api/me", { credentials: "include" })).json());
-    const scheduleAfter = post.schedules.find((s: { id: string }) => s.id === scheduleId);
+    type HomeShape = { schedules: Array<{ id: string; status: string; recurrence?: { kind: string }; lastGameId?: string; nextFireAt: number }> };
+    const post = await alice.evaluate(async () => (await fetch("/api/me", { credentials: "include" })).json() as Promise<HomeShape>);
+    const scheduleAfter = post.schedules.find((s) => s.id === scheduleId)!;
     expect(scheduleAfter.status).toBe("accepted");
     expect(scheduleAfter.recurrence?.kind).toBe("daily");
     expect(scheduleAfter.lastGameId).toMatch(/^gam_/);
@@ -485,8 +486,8 @@ test("recurring schedule creates a game on each firing and can be ended by eithe
     await bob.evaluate(async (id) => {
       await fetch(`/api/schedules/${id}/cancel`, { method: "POST", credentials: "include", body: "{}" });
     }, scheduleId);
-    const finalState = await alice.evaluate(async () => (await fetch("/api/me", { credentials: "include" })).json());
-    const scheduleEnded = finalState.schedules.find((s: { id: string }) => s.id === scheduleId);
+    const finalState = await alice.evaluate(async () => (await fetch("/api/me", { credentials: "include" })).json() as Promise<HomeShape>);
+    const scheduleEnded = finalState.schedules.find((s) => s.id === scheduleId)!;
     expect(scheduleEnded.status).toBe("cancelled");
   } finally {
     await aliceCtx.close();

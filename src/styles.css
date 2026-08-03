@@ -321,27 +321,34 @@ body[data-screen="inspirations"] .shell {
   gap: 12px;
   overflow: hidden;
 }
-/* Content column stretches to fill available height; footer aligned to
-   viewport bottom via margin-top: auto on the .made-by footer. */
-body[data-screen="landing"] .stage,
-body[data-screen="inspirations"] .stage {
+/* .made-by is a PATTERN, not a per-page fix — pin to viewport bottom on
+   EVERY page it appears on (Tejas's standing rule: patterns applied
+   everywhere they exist). The flex-column chain runs unconditionally:
+   .shell already is flex-column min-height 100dvh; .stage grows;
+   whichever screen-root sits inside .stage grows too; .made-by inside
+   that root uses margin-top: auto to sink to the bottom of its parent.
+   When content is short the parent equals the viewport, so bottom-of-
+   parent = bottom-of-viewport; when content is long the parent grows
+   past the viewport and .made-by sits at end-of-content — bottom
+   either way, never mid-screen. */
+.stage {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-body[data-screen="landing"] .stage > .auth,
-body[data-screen="inspirations"] .stage > .inspirations {
+.stage > .auth,
+.stage > .inspirations,
+.stage > .dashboard {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-body[data-screen="landing"] .made-by,
-body[data-screen="inspirations"] .made-by {
+.made-by {
   margin-top: auto;
   margin-bottom: 0;
-  padding-top: 12px;
+  padding-top: 24px;
 }
 /* Mobile landing compression — sandbox board and form take the top,
    auth stack is a flex column not a grid so it lays out predictably. */

@@ -456,24 +456,32 @@ function MenuSheet({
 // Simple in-world layout; back link at top; ⋯ menu still available in
 // the Shell topbar for consistency.
 function InspirationsPage() {
-  // Same no-scroll shell as landing/game — Tejas's general law now that
-  // nothing on this page NEEDS to scroll.
-  useEffect(() => {
-    document.body.dataset.screen = "inspirations";
-    return () => {
-      if (document.body.dataset.screen === "inspirations") delete document.body.dataset.screen;
-    };
-  }, []);
   return (
     <div className="inspirations">
       <button className="link" onClick={() => navigate("/")}>← back</button>
       <h1 className="insp-title">Inspirations</h1>
       <p className="insp-body">
-        Leisure reconceived as active and collective, not passive and solitary.
+        This app's visual world sits on top of chess design history and one
+        painting.
       </p>
       <ul className="insp-list">
-        <li><strong>Alexander Rodchenko</strong> · Chess table for the workers' club, 1925.</li>
-        <li><strong>Virgilio Villalba</strong> · Untitled, 1955.</li>
+        <li>
+          <strong>Alexander Rodchenko</strong> · Chess table for the workers' club, 1925.
+          Two chairs and a board built as one piece of furniture — sitting IS the invitation.
+          <p className="insp-note">
+            The Workers' Club reconceived leisure as <em>active and collective</em> rather
+            than passive and solitary — chess played sitting across from someone you know,
+            not scrolled alone. It's the philosophy this app inherits.
+          </p>
+        </li>
+        <li>
+          <strong>Josef Hartwig</strong> · Bauhaus chess set, 1924. Pieces as pure geometry;
+          the shape encodes the movement.
+        </li>
+        <li>
+          <strong>Virgilio Villalba</strong> · Untitled, 1955. Muted celadon field, deep
+          incision, one cream chip. The composition this register borrows from.
+        </li>
       </ul>
       <MadeByTejas />
     </div>
