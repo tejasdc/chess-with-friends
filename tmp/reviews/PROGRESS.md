@@ -14,6 +14,8 @@
 - Design reviewer blocked the first redesign pass as too much parchment-styled web UI. Saved the review to `tmp/reviews/design-redesign-review.md`.
 - Second-pass design fixes implemented: dashboard now leads with a board-table register, custom chaturanga piece SVGs replace Unicode glyphs, bishops render as gaja motifs, ashtapada-style square marks were added, and native selects/inputs were further absorbed into framed controls. `npm run test:push && npm run typecheck && npm run build && npm run test:e2e` passed. Visually inspected `05-presence-visible-in-app`, `06-challenge-game-started`, and `16-mobile-game-board`.
 - Correctness reviewer approved with no required fixes. Saved the review to `tmp/reviews/correctness-redesign-review.md`.
+- Deployed second-pass redesign to production, Worker version `e2b75fe1-5da8-45ec-a291-062c6832ec58`; smoke checks passed on `https://chess.tejas.nyc`: `/api/health`, manifest theme color, latest asset hashes, and `curl -s https://chess.tejas.nyc/ | grep -c cloudflareinsights` returned `1`.
+- Design re-review approved after second-pass fixes; appended the PASS addendum to `tmp/reviews/design-redesign-review.md`.
 - Read `docs/requirements.md` and extracted the required v1 contract.
 - Committed scaffold: Vite/React entry, Cloudflare Worker config, PWA manifest, service worker, dependencies.
 - Committed backend: singleton `AppDO` for accounts, friends, invites, schedules, push queue/policy, and `GameDO` for live chess state, WebSocket presence, legal moves, clocks, resign/checkmate/timeout.

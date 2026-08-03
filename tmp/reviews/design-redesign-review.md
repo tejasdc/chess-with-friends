@@ -20,3 +20,20 @@ Positive notes:
 - Live game screenshots make board and clocks the main focus.
 - Mobile screenshots show no obvious overlap or horizontal jank.
 - The calm friends-only thesis is preserved with no ratings, feeds, streaks, or matchmaking.
+
+## Second-Pass Design Re-review Addendum
+
+Verdict: PASS
+
+The second-pass fixes resolve the prior design blockers.
+
+Evidence:
+- Dashboard center of gravity now starts with the board-table register. `Games` appears before friend/admin controls on desktop and mobile, with a miniature ashtapada board and game register. See `src/main.tsx`, `src/styles.css`, screenshots `05-presence-visible-in-app.png` and `15-mobile-home-ready-schedule.png`.
+- Unicode pieces have been replaced with custom chaturanga SVG glyphs. Piece naming now maps to `padati`, `ashva`, `gaja`, `ratha`, `mantri`, and `raja`; bishops render as explicit gaja motifs. See `src/main.tsx` and screenshots `06-challenge-game-started.png`, `07-checkmate-terminal.png`, and `16-mobile-game-board.png`.
+- Ashtapada-style board markings now appear on the live board and miniature board.
+- Form controls are sufficiently absorbed into the visual world. Inputs and selects now use framed styling, custom select arrows, inset register treatment, and no default browser dropdown chrome.
+- Desktop and mobile layouts avoid visible overlap/jank in the reviewed screenshots. The game screen keeps board, pieces, clocks, and game state as the center of gravity; the dashboard keeps games/board state above setup actions.
+
+Residual notes:
+- The art direction is still a pragmatic web implementation rather than a fully illustrated miniature manuscript, but it now meets the requested product bar for a committed, coherent, heritage-grounded visual world.
+- No code changes were made during this re-review.
