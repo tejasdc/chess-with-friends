@@ -24,7 +24,7 @@ async function addAuth(page) {
 async function register(page, handle) {
   await page.getByPlaceholder("your_handle").fill(handle);
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Log in or create account" }).click();
   await page.getByPlaceholder("friend_handle").waitFor({ timeout: 15000 });
 }
 async function fakePushSubscribe(page) {

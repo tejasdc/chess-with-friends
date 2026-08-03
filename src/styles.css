@@ -283,8 +283,30 @@ a { color: inherit; }
   width: 100%;
   height: 100%;
 }
-/* Static landing board: no interactive affordances, no hover states. */
-.auth-scene .board.board-static .square:hover { background: none; }
+/* Static landing board — FULLY non-interactive. On iOS Safari, taps on a
+   div without a click handler still fire the tap-highlight overlay AND
+   activate :hover state until the next tap elsewhere, which made dark
+   squares appear to lighten and pieces to fade. Kill it all: no pointer
+   events (taps pass through), no tap-highlight color, no user select,
+   default cursor. */
+.auth-scene .board,
+.board.board-static {
+  pointer-events: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+.auth-scene .board .square,
+.board.board-static .square {
+  pointer-events: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: default;
+}
+.auth-scene .board .square:hover,
+.board.board-static .square:hover {
+  background: none;
+}
 
 .auth-scene-fallback {
   width: 100%;
@@ -301,9 +323,50 @@ a { color: inherit; }
   display: flex;
   flex-direction: column;
   gap: 20px;
-  max-width: 380px;
+  max-width: 420px;
   width: 100%;
+  min-width: 0;              /* allow grid/flex shrink below intrinsic content */
   justify-self: start;
+}
+
+/* One-row auth: input flexes to fill, button takes its natural width.
+   Tejas explicitly rejected the stacked input-above-button pattern —
+   on phone the two elements should live on a single line. */
+.auth-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.auth-input {
+  flex: 1 1 auto;
+  min-width: 60px;           /* keep the input tappable even when button is wide */
+  font-family: var(--sans);
+  font-size: 16px;
+  color: var(--ink);
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--walnut);
+  border-radius: 0;
+  transition: border-color 120ms var(--ease);
+}
+.auth-input:focus { outline: none; border-color: var(--ink); }
+.auth-input::placeholder { color: var(--stone); font-family: var(--mono); font-size: 15px; }
+.auth-primary {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* Compress the auth button at mobile so "Log in or create account" fits
+   next to the input at 390px. Font drops from 14 to 12, padding tightens
+   proportionally. Desktop keeps the roomier default. */
+@media (max-width: 480px) {
+  .auth-primary {
+    font-size: 12px;
+    padding: 10px 12px;
+    letter-spacing: 0.01em;
+  }
+  .auth-input { padding: 10px 10px; }
 }
 
 .auth-brand {

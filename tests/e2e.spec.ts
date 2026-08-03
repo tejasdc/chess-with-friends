@@ -300,7 +300,7 @@ async function register(page: Page, handle: string) {
   // based on a debounced preflight of the handle. Wait a moment so the
   // preflight has a chance to land before we click.
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Log in or create account" }).click();
   await expect(page.getByText(`@${handle}`)).toBeVisible();
 }
 

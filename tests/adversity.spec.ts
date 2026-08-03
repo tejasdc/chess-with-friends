@@ -33,7 +33,7 @@ async function register(page: Page, handle: string) {
   await page.goto("/");
   await page.getByPlaceholder("your_handle").fill(handle);
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Log in or create account" }).click();
   await expect(page.getByText(`@${handle}`)).toBeVisible();
 }
 

@@ -439,9 +439,13 @@ function AuthScreen({
             void submit();
           }}
         >
-          <label className="field">
-            <span className="field-label">Handle</span>
+          {/* One row: input flexes, button fixed. The button label
+              names the outcome ("Log in or create account") so we
+              don't need a separate "HANDLE" label or a footnote —
+              Apple's and Google's passkey sheets do the explaining. */}
+          <div className="auth-row">
             <input
+              className="auth-input"
               value={handle}
               onChange={(event) => setHandle(event.target.value)}
               placeholder="your_handle"
@@ -449,12 +453,12 @@ function AuthScreen({
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
+              aria-label="Handle"
             />
-          </label>
-          <button className="primary" type="submit" disabled={busy || !handle}>
-            {busy ? "Working…" : "Continue"}
-          </button>
-          <p className="footnote">Passkeys only.</p>
+            <button className="primary auth-primary" type="submit" disabled={busy || !handle}>
+              {busy ? "Working…" : "Log in or create account"}
+            </button>
+          </div>
         </form>
       </section>
     </Shell>

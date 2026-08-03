@@ -31,7 +31,7 @@ async function register(page, handle) {
   await page.getByPlaceholder("your_handle").fill(handle);
   // One-press auth: wait for the preflight to land, then click.
   await page.waitForTimeout(500);
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Log in or create account" }).click();
   await page.getByText(`@${handle}`).waitFor();
 }
 
