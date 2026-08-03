@@ -59,3 +59,23 @@ Sign in) rejected as confusing.
   `/api/health`, CF Insights beacon count = 1, `chess.tejas.nyc` serves the new
   asset hashes after CF edge cache flush.
 - Final report at `tmp/reviews/claude-redesign-report.md`.
+
+## Round: Villalba build (2026-08-03, chess-design-2)
+
+Register decided: Villalba wins with palette from tejas.nyc/projects (not the photo). Locked tokens:
+
+- Grounds: `#081a18` deepest / `#0F201E` deep / `#1b2a26` panel
+- Teals: `#3E8C82` mid (site ground) / `#4E9E92` teal-2 / `#57A89B` teal-light
+- Cream: `#E9DFA0` (khaki-cream — jewel accent, ex-vermillion)
+- Board light = cream `#E9DFA0`, board dark = deep teal `#0F201E`
+- Ink for text: `#081a18` on light grounds; cream on deep
+
+Vermillion DEAD (except perhaps as a still-red pin state signal — TBD by masterwork bar).
+
+Scope:
+- Drop incision line unless it earns place on dark ground (default drop).
+- Sandbox landing board — real chess.js legal moves, no goal, 20s idle reset.
+- ONE ⋯ menu pattern top-right on every screen; build open state (Sign out / Install / Inspirations).
+- New /inspirations attribution page (Rodchenko / Hartwig / Villalba + photo credits).
+- Game screen fixed viewport, captured pieces stay BIG.
+- Carry over untouched: auth matrix, morph, toast, presence, reconnect.

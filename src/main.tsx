@@ -8,10 +8,92 @@ import type {
 } from "@simplewebauthn/server";
 import "./styles.css";
 
-// Standard starting position — the auth screen shows a real, static board
-// in this position so the OBJECT arrives before any framing text does
-// (per Rodchenko's chess table: the furniture IS the invitation to play).
+// Standard starting position — the auth screen shows a real board in
+// this position (the OBJECT arrives before any framing text does, per
+// Rodchenko: the furniture IS the invitation to play).
 const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+// Sandbox board — the landing interaction. Real chess.js legality (both
+// colors playable, no goal, no scoring), quiet reset to the initial
+// position after ~20 seconds of idle. Encapsulated as its own component
+// so a rejection is a one-commit removal (swap this back to a static
+// <Board interactive={false} />).
+function SandboxBoard() {
+  const [fen, setFen] = useState(INITIAL_FEN);
+  const [selected, setSelected] = useState<Square | null>(null);
+  const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(null);
+  const idleTimer = React.useRef<number | null>(null);
+
+  const IDLE_RESET_MS = 20_000;
+
+  function bumpIdleTimer() {
+    if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
+    idleTimer.current = window.setTimeout(() => {
+      setFen(INITIAL_FEN);
+      setSelected(null);
+      setLastMove(null);
+    }, IDLE_RESET_MS);
+  }
+
+  useEffect(() => {
+    bumpIdleTimer();
+    return () => {
+      if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function choose(square: Square) {
+    const chess = new Chess(fen);
+    const piece = chess.get(square);
+    // No color-to-move gating — both sides are playable so a tap on any
+    // own-color piece works. But the tapped piece MUST match chess.turn()
+    // for chess.js to accept the move. Cheat by rewriting whose turn it
+    // is when the user selects a piece of the other color first.
+    if (!selected) {
+      if (!piece) return;
+      // If this piece isn't the side-to-move, flip the FEN's turn flag
+      // so chess.js will accept moves from either color. Silent.
+      if (piece.color !== chess.turn()) {
+        const flipped = fen.replace(/ (w|b) /, ` ${piece.color} `);
+        setFen(flipped);
+      }
+      setSelected(square);
+      bumpIdleTimer();
+      return;
+    }
+    if (selected === square) {
+      setSelected(null);
+      bumpIdleTimer();
+      return;
+    }
+    // Attempt move via chess.js. If illegal, silently discard selection.
+    try {
+      const move = chess.move({ from: selected, to: square, promotion: "q" });
+      if (!move) {
+        setSelected(null);
+        return;
+      }
+      setFen(chess.fen());
+      setLastMove({ from: move.from, to: move.to });
+      setSelected(null);
+      bumpIdleTimer();
+    } catch {
+      setSelected(null);
+    }
+  }
+
+  return (
+    <Board
+      fen={fen}
+      orientation="w"
+      selected={selected}
+      onSquare={choose}
+      interactive={true}
+      lastMove={lastMove}
+    />
+  );
+}
 
 type TimeControl = "10|0" | "5|0";
 type GameStatus = "active" | "checkmate" | "resigned" | "timeout" | "draw";
@@ -149,7 +231,18 @@ function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const isInspirations = path === "/inspirations";
+
   if (loading) return <Shell onSignedOut={() => setHome(null)}><LoadingLine /></Shell>;
+  // /inspirations is reachable authenticated OR not — attribution has no
+  // gating. Renders inside a Shell (with topbar + ⋯) for consistency.
+  if (isInspirations) {
+    return (
+      <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} onSignedOut={() => setHome(null)}>
+        <InspirationsPage />
+      </Shell>
+    );
+  }
   if (!home) return <AuthScreen onSignedIn={refresh} message={message} messageKind={messageKind} setMessage={setMessage} />;
   if (gameMatch) return <GameScreen gameId={gameMatch[1]} home={home} message={message} messageKind={messageKind} setMessage={setMessage} onHome={() => navigate("/", refresh)} />;
 
@@ -167,6 +260,7 @@ function Shell({
   messageKind,
   setMessage,
   onSignedOut,
+  menuExtras,
 }: {
   children?: React.ReactNode;
   home?: HomeData | null;
@@ -174,22 +268,48 @@ function Shell({
   messageKind?: ToastKind;
   setMessage?: SetMessage;
   onSignedOut?: () => void;
+  /* Optional menu items to inject above the universal Sign out / state /
+     Inspirations items. Used by GameScreen to expose Home + Resign inside
+     the same ⋯ menu (team-lead: one menu pattern, one position). */
+  menuExtras?: (closeMenu: () => void) => React.ReactNode;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Close menu when route changes.
+  const path = usePathname();
+  useEffect(() => { setMenuOpen(false); }, [path]);
+  // Close on Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   return (
     <main className="shell">
       <header className="topbar">
         <button className="wordmark" onClick={() => navigate("/")}>Chess with friends</button>
-        {home ? (
-          <div className="account">
-            <span className="handle">@{home.user.handle}</span>
-            <button className="ghost" onClick={() => void signOut(onSignedOut || (() => undefined))}>Sign out</button>
-          </div>
-        ) : null}
+        <div className="topbar-right">
+          {home ? <span className="handle">@{home.user.handle}</span> : null}
+          {/* Universal ⋯ menu — top-right on every screen per team-lead.
+              Kept as one pattern so users learn "menu lives here" once. */}
+          <button
+            className="menu-dot"
+            type="button"
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(v => !v)}
+          >···</button>
+        </div>
       </header>
-      {/* Toast — fixed to viewport bottom, safe-area aware, auto-dismisses
-          after 4s (timer in App). Renders OUTSIDE the topbar block so it
-          floats above scrolled content. Kept inside Shell so it inherits
-          the same shell-level z-context. */}
+      {menuOpen ? (
+        <MenuSheet
+          home={home || null}
+          onClose={() => setMenuOpen(false)}
+          onSignedOut={onSignedOut}
+          extras={menuExtras}
+        />
+      ) : null}
       {message ? (
         <div className={`toast ${messageKind === "error" ? "toast-error" : "toast-info"}`} role="status" aria-live="polite">
           <span>{message}</span>
@@ -200,6 +320,109 @@ function Shell({
       ) : null}
       <div className="stage">{children}</div>
     </main>
+  );
+}
+
+// Bottom sheet menu — one pattern, one position (⋯ top-right on every
+// screen). Lists Sign out, install state, notification state, Inspirations.
+function MenuSheet({
+  home,
+  onClose,
+  onSignedOut,
+  extras,
+}: {
+  home: HomeData | null;
+  onClose: () => void;
+  onSignedOut?: () => void;
+  extras?: (closeMenu: () => void) => React.ReactNode;
+}) {
+  const [notifState, setNotifState] = useState<"unknown" | "granted" | "denied" | "default" | "unsupported">("unknown");
+  const [installed, setInstalled] = useState<boolean>(() => detectInstalled());
+  useEffect(() => {
+    if (!("Notification" in window)) { setNotifState("unsupported"); return; }
+    setNotifState(Notification.permission as "granted" | "denied" | "default");
+    const media = window.matchMedia("(display-mode: standalone)");
+    const update = () => setInstalled(detectInstalled());
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  return (
+    <>
+      <div className="menu-backdrop" onClick={onClose} />
+      <div className="menu-sheet" role="dialog" aria-label="App menu">
+        <ul className="menu-list">
+          {extras ? extras(onClose) : null}
+          {home ? (
+            <li>
+              <button className="menu-item" onClick={() => { onClose(); void signOut(onSignedOut || (() => undefined)); }}>
+                Sign out
+              </button>
+            </li>
+          ) : null}
+          <li>
+            <div className="menu-state">
+              <span className="menu-state-label">Installed</span>
+              <span className="menu-state-value">{installed ? "yes" : "not yet"}</span>
+            </div>
+          </li>
+          <li>
+            <div className="menu-state">
+              <span className="menu-state-label">Notifications</span>
+              <span className="menu-state-value">
+                {notifState === "granted" ? "on"
+                  : notifState === "denied" ? "blocked"
+                  : notifState === "unsupported" ? "unsupported"
+                  : "not yet"}
+              </span>
+            </div>
+          </li>
+          <li>
+            <button
+              className="menu-item"
+              onClick={() => { onClose(); navigate("/inspirations"); }}
+            >
+              Inspirations
+            </button>
+          </li>
+        </ul>
+      </div>
+    </>
+  );
+}
+
+// Attribution page — Rodchenko / Hartwig / Villalba + palette credit.
+// Simple in-world layout; back link at top; ⋯ menu still available in
+// the Shell topbar for consistency.
+function InspirationsPage() {
+  return (
+    <div className="inspirations">
+      <button className="link" onClick={() => navigate("/")}>← back</button>
+      <h1 className="insp-title">Inspirations</h1>
+      <p className="insp-body">
+        This app's visual world sits on top of chess design history and one
+        painting.
+      </p>
+      <ul className="insp-list">
+        <li>
+          <strong>Alexander Rodchenko</strong> · Chess table for the workers' club, 1925.
+          Two chairs and a board built as one piece of furniture — sitting IS the invitation.
+        </li>
+        <li>
+          <strong>Josef Hartwig</strong> · Bauhaus chess set, 1924. Pieces as pure geometry;
+          the shape encodes the movement.
+        </li>
+        <li>
+          <strong>Virgilio Villalba</strong> · Untitled, 1955 (MoMA collection). Muted
+          celadon field, deep incision, one cream chip. The composition this
+          register borrows from.
+        </li>
+        <li>
+          <strong>Palette family</strong> · adapted from <a className="insp-link" href="https://tejas.nyc/projects" target="_blank" rel="noreferrer">tejas.nyc/projects</a> so the two properties read as siblings.
+        </li>
+      </ul>
+      <p className="insp-footnote">Photo of the Villalba painting by Tejas.</p>
+    </div>
   );
 }
 
@@ -501,14 +724,10 @@ function AuthScreen({
   return (
     <Shell message={message} messageKind={messageKind} setMessage={setMessage}>
       <section className="auth">
-        <div className="auth-scene" aria-hidden="true">
-          <Board
-            fen={INITIAL_FEN}
-            orientation="w"
-            selected={null}
-            onSquare={() => undefined}
-            interactive={false}
-          />
+        <div className="auth-scene">
+          {/* Sandbox — real legal moves, no goal, resets after 20s idle.
+              Feels like a real set to touch, not a puzzle. */}
+          <SandboxBoard />
         </div>
         <form
           className="auth-form"
@@ -1158,19 +1377,59 @@ function GameScreen({
   const opponentPresence = presenceLabel(opponentRawState, opponentHandle);
   const lastMove = game.moves.length ? { from: game.moves[game.moves.length - 1].from, to: game.moves[game.moves.length - 1].to } : null;
 
+  // Home + Resign live inside the universal ⋯ menu (team-lead: one menu
+  // pattern, one position). Rendered via Shell's menuExtras hook so the
+  // game screen doesn't need its own bespoke menu chrome.
+  const gameMenuExtras = (closeMenu: () => void) => (
+    <>
+      <li>
+        <button className="menu-item" onClick={() => { closeMenu(); onHome(); }}>
+          Home
+        </button>
+      </li>
+      {confirmResign ? (
+        <>
+          <li>
+            <button
+              className="menu-item menu-item-danger"
+              disabled={game.status !== "active"}
+              onClick={() => { closeMenu(); void resign(); }}
+            >
+              Confirm resign
+            </button>
+          </li>
+          <li>
+            <button className="menu-item" onClick={() => setConfirmResign(false)}>
+              Cancel
+            </button>
+          </li>
+        </>
+      ) : (
+        <li>
+          <button
+            className="menu-item menu-item-warn"
+            disabled={game.status !== "active"}
+            onClick={() => setConfirmResign(true)}
+          >
+            Resign
+          </button>
+        </li>
+      )}
+    </>
+  );
+
+  const activeCount = game.moves.length;
+
   return (
-    <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}>
-      <section className="game">
+    <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} menuExtras={gameMenuExtras}>
+      <section className="game game-fixed">
         <div className="board-column">
-          {/* active-turn class paints the strip vermillion — the whole strip
-              IS the turn indicator (Rodchenko: your seat is your color). */}
+          {/* active-turn class paints the strip DEEP-INK (Villalba
+              incision made large). Cream text on the ink band. */}
           <div
             className={`clock-strip top ${game.status === "active" && game.turn === opponentColor ? "active-turn" : ""}`}
           >
             <div className="who">
-              {/* Dot before the handle — presence is a state marker on the
-                  opponent, not a caption after their name. Same aria contract
-                  as the friend row: role=status + aria-label; no visible word. */}
               <span
                 className={`presence ${opponentRawState}`}
                 role="status"
@@ -1199,9 +1458,10 @@ function GameScreen({
             className={`clock-strip bottom ${game.status === "active" && game.turn === myColor ? "active-turn" : ""}`}
           >
             <div className="who">
+              {/* No self-presence dot — you're obviously here. Opponent's
+                  strip carries the only presence indicator. "you" span
+                  preserved for a11y (visually clipped). */}
               <span className="handle-line">@{myHandle}</span>
-              {/* "you" preserved for a11y — visually clipped via CSS.
-                  The vermillion strip is what a human reads. */}
               <span className="you">you</span>
             </div>
             <time className="clock">{formatClock(myClock)}</time>
@@ -1216,49 +1476,21 @@ function GameScreen({
           />
         ) : null}
 
-        <aside className="game-side">
-          <div className="game-status">
+        {/* Slim bottom bar — turn status + move count only, per team-lead.
+            Home + Resign live in the ⋯ menu (topbar). */}
+        <div className="game-bottom">
+          <span className="turn-status">
             {game.status === "active" ? (
-              /* Turn indicator is visually communicated by the vermillion
-                 strip on the active player's clock band (Rodchenko chair
-                 duality). This span carries the same signal for screen
-                 readers and for the adversity suite's turn-advance probe. */
-              <span className="sr-only">{game.turn === myColor ? "Your move" : "Their move"}</span>
+              game.turn === myColor ? "Your move" : "Their move"
             ) : (
               <span className="terminal">
                 {game.status}
                 {game.result ? ` · ${game.result}` : ""}
               </span>
             )}
-          </div>
-
-          <div className="game-actions">
-            <button className="link" onClick={onHome}>Home</button>
-            {confirmResign ? (
-              <>
-                <button className="danger" onClick={() => void resign()} disabled={game.status !== "active"}>
-                  Confirm resign
-                </button>
-                <button className="link" onClick={() => setConfirmResign(false)}>Cancel</button>
-              </>
-            ) : (
-              <button className="link warn" onClick={() => setConfirmResign(true)} disabled={game.status !== "active"}>
-                Resign
-              </button>
-            )}
-          </div>
-
-          {game.moves.length ? (
-            <ol className="moves">
-              {game.moves.map((move, index) => (
-                <li key={`${move.at}-${index}`}>
-                  <span className="move-num">{Math.floor(index / 2) + 1}{index % 2 ? "…" : "."}</span>
-                  <span className="move-san">{move.san}</span>
-                </li>
-              ))}
-            </ol>
-          ) : null}
-        </aside>
+          </span>
+          <span className="move-count">{activeCount} move{activeCount === 1 ? "" : "s"}</span>
+        </div>
       </section>
     </Shell>
   );

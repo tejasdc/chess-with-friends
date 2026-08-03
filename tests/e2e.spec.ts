@@ -126,6 +126,9 @@ test("sign out returns to the auth screen", async ({ browser }) => {
   await register(page, handle);
   await expect(page.getByText(`@${handle}`)).toBeVisible();
 
+  // Sign out lives inside the universal ⋯ menu now (one menu pattern,
+  // one position — team-lead's spec). Open the menu, then click Sign out.
+  await page.getByRole("button", { name: "Open menu" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByPlaceholder("your_handle")).toBeVisible();
   await expect(page.getByText(`@${handle}`)).toBeHidden();
@@ -271,6 +274,10 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await openGame(bob.page, resignGame);
   await expect(alice.page.locator(".presence.connected")).toBeVisible();
   await shot(alice.page, "09-opponent-reconnected");
+  // Resign / Confirm resign live inside the game screen's ⋯ menu.
+  // The menu STAYS OPEN after tapping Resign so Confirm resign appears
+  // right there — no need to re-open the sheet between the two taps.
+  await alice.page.getByRole("button", { name: "Open menu" }).click();
   await alice.page.getByRole("button", { name: "Resign" }).click();
   await alice.page.getByRole("button", { name: "Confirm resign" }).click();
   await expect(alice.page.getByText("resigned")).toBeVisible();
@@ -283,7 +290,10 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await expect(alice.page.getByText("timeout")).toBeVisible();
   await shot(alice.page, "11-timeout-terminal");
 
+  // Home lives inside the game screen's ⋯ menu.
+  await alice.page.getByRole("button", { name: "Open menu" }).click();
   await alice.page.getByRole("button", { name: "Home" }).click();
+  await bob.page.getByRole("button", { name: "Open menu" }).click();
   await bob.page.getByRole("button", { name: "Home" }).click();
   await scheduleSoon(alice.page, bob.handle);
   await bob.page.reload();

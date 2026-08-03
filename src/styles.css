@@ -1,69 +1,85 @@
 /* =========================================================================
-   Round 2 — a Bauhaus workshop, warm daylight, printed on cardstock.
+   Villalba build — teal grounds + cream chip + deep incision.
 
-   Anchor references (see tmp/reviews/moodboard/final/):
-   - 01 Rodchenko workers'-club chess table: two players, one furniture.
-       Structural vermillion, black. Palette accent + the game-strip "turn"
-       treatment (whose turn it is → their whole strip goes vermillion).
-   - 02 Hartwig Bauhaus chess set: warm bone (paper) + walnut board palette;
-       geometry over ornament.
-   - 03 Man Ray chess set: pieces as sculpture on a plain plane.
-   - 04 Duchamp The Chess Game 1910: the emotional register — a shared
-       quiet space between people, not spectacle.
-   - 05 Spassky playing 1966: a plain board, a plain set, absorbed attention;
-       the board is the whole frame.
-   - 06 Fischer 1972 press-photo: subtle grain over paper; honest, not slick.
-   - 07 Man Ray Three Heads: two friends in one composition.
+   Palette family lifted from Tejas's own site (tejas.nyc/projects) so the
+   two properties read as siblings. Reference photos of chess set + painting
+   at tmp/reviews/moodboard/final/{01-rodchenko,02-hartwig,08-villalba-...}.
 
-   Type: IBM Plex Mono is the DISPLAY voice (wordmark, headings, big numbers)
-   — mono fits notation/clocks/workshop registers and dodges the Inter-tight
-   slop tell of AI grotesques. IBM Plex Sans for body. Both SIL OFL.
+   Compositional map (chess app ↔ tejas.nyc/projects):
+     mid-teal ground        = site background
+     cream                  = jewel accent + board light squares
+     deep-teal ink          = text on ground + board dark squares + turn strip
+     vermillion             = REDUCED — retained ONLY for hard error toasts
+                              (a genuine failure signal a cream tag can't
+                              replace); everywhere else it's dead.
+
+   The variable NAMES kept from round 2 so downstream CSS didn't need a
+   sweep — the SEMANTICS bind to new hues. --ground is new: site bg,
+   distinct from --paper which is a cream surface (board light, inputs,
+   toasts).
    ========================================================================= */
 
 :root {
   color-scheme: light;
 
-  /* Palette — flat, warm, one accent */
-  --paper:      #F0E6D2;   /* warm bone, from the Hartwig board */
-  --paper-2:    #E7DBBE;   /* one shade deeper — inputs, hairlines-on-paper */
-  --paper-3:    #DCCEA8;   /* softer wash, thumbnails, disabled */
-  --ink:        #12100C;   /* deep black-brown, never #000 */
-  --ink-2:      #3B342A;   /* body-secondary */
-  --stone:      #6B6455;   /* muted warm grey — small print */
-  --walnut:     #4A3826;   /* board dark squares, hairline rules */
-  --walnut-2:   #3A2B1E;   /* darker walnut for piece-white outline stroke */
-  --vermillion: #C43416;   /* THE accent, one moment per screen */
+  /* Site ground — mid-teal, matches tejas.nyc/projects background. */
+  --ground:     #3E8C82;   /* body / shell / app bg */
+  --ground-2:   #4E9E92;   /* one shade lighter — subtle hover / hairline on teal */
+  --ground-3:   #57A89B;   /* lightest teal — soft accents */
+
+  /* Cream surfaces — board light, inputs, toasts, buttons at rest. */
+  --paper:      #E9DFA0;   /* Villalba's cream chip, matches site accents */
+  --paper-2:    #D8CE8F;   /* one shade deeper — input focus / hover */
+  --paper-3:    #C5BB7F;   /* softer, disabled swatch */
+
+  /* Ink — deepest teal, from the incision + site content column. */
+  --ink:        #081a18;   /* primary text on ground/paper; near-black-teal */
+  --ink-2:      #0F201E;   /* deep panel bg (column, incoming band, turn strip) */
+  --ink-3:      #1b2a26;   /* softest deep — secondary borders */
+  --stone:      #4b6660;   /* muted teal-grey for small print on cream */
+  --stone-on-ground: rgba(8, 26, 24, 0.55);  /* small print on the teal ground */
+
+  /* Board — light = cream, dark = deep teal. */
+  --walnut:     #0F201E;   /* dark squares (name retained; hue swapped) */
+  --walnut-2:   #081a18;   /* piece-white outline stroke */
+
+  /* Vermillion — REDUCED. Retained only for the error toast tint. */
+  --vermillion: #C43416;
   --vermillion-2:#A02710;
-  /* Presence dots — functional signals, palette-exempt per team-lead.
-     Muted so they don't compete with the vermillion. */
-  --presence-online:      #5B8A5C;   /* muted moss */
-  --presence-reconnect:   #B77C29;   /* warm ochre */
-  --presence-offline-ring:#8B8478;   /* stone hairline */
-  --hair:       rgba(74, 56, 38, 0.16);
-  --hair-strong:rgba(74, 56, 38, 0.32);
-  --focus:      rgba(196, 52, 22, 0.35);
+
+  /* Presence dots — functional signals on ground/strip.
+     Cream = online (jewel chip), warm ochre pulse = reconnecting,
+     hollow stone ring = offline. */
+  --presence-online:      #E9DFA0;
+  --presence-reconnect:   #B77C29;
+  --presence-offline-ring:#4b6660;
+
+  --hair:        rgba(233, 223, 160, 0.20);      /* cream-based hairline on ground */
+  --hair-strong: rgba(233, 223, 160, 0.36);
+  --hair-on-cream: rgba(8, 26, 24, 0.20);         /* ink-based hairline on cream */
+  --focus:       rgba(233, 223, 160, 0.55);
 
   /* Type stacks */
   --mono: "IBM Plex Mono", ui-monospace, "JetBrains Mono", "Menlo", monospace;
   --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 
-  /* Motion — spare; the world is calm */
+  /* Motion — spare; the world is calm. */
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   font-family: var(--sans);
   color: var(--ink);
-  background: var(--paper);
+  background: var(--ground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  font-feature-settings: "ss01", "ss02"; /* Plex stylistic sets (single-story a, tighter g) */
+  font-feature-settings: "ss01", "ss02";
 }
 
 * { box-sizing: border-box; }
 
 html {
   min-width: 320px;
-  background: var(--paper);
+  background: var(--ground);
 }
 
 body {
@@ -73,26 +89,12 @@ body {
   font-size: 15.5px;
   line-height: 1.5;
   overflow-x: clip;
-  background: var(--paper);
+  background: var(--ground);
   position: relative;
 }
 
-/* Paper grain — fixed, pointer-none, does NOT scroll → no repaint cost.
-   Inline SVG turbulence; ~4% opacity so it reads as fiber, not noise. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.045;
-  mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml;utf8,\
-<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'>\
-<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='4' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.07  0 0 0 0 0.06  0 0 0 0 0.05  0 0 0 1 0'/></filter>\
-<rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-  background-size: 240px 240px;
-}
+/* Grain overlay DROPPED — Villalba's surface is flat oil on canvas,
+   not cardstock. Keeping the world visually calm and glossy. */
 
 button, input, select, textarea {
   font: inherit;
@@ -151,13 +153,14 @@ a { color: inherit; }
   .account .ghost { padding: 6px 10px; font-size: 12px; }
 }
 .wordmark::before {
-  /* small vermillion square before the wordmark — the Rodchenko chair
-     rendered as one 8px mark. The whole visual identity in one square. */
+  /* Small cream chip before the wordmark — the Villalba chip translated
+     to the identity mark, replacing the previous vermillion square.
+     One 9px cream tag against the teal ground. */
   content: "";
   display: inline-block;
   width: 9px;
   height: 9px;
-  background: var(--vermillion);
+  background: var(--paper);
   margin-right: 10px;
   vertical-align: 0.05em;
   transform: translateY(-1px);
@@ -170,7 +173,171 @@ a { color: inherit; }
   font-family: var(--mono);
   font-size: 13px;
 }
-.handle { color: var(--ink-2); }
+.handle { color: var(--ink-2); font-family: var(--mono); font-size: 13px; }
+
+/* Universal ⋯ menu (top-right, every screen). */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.menu-dot {
+  font-family: var(--mono);
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 120ms var(--ease);
+}
+.menu-dot:hover { color: var(--ink-2); }
+.menu-dot[aria-expanded="true"] { color: var(--paper); }
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: rgba(8, 26, 24, 0.35);
+}
+.menu-sheet {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  z-index: 26;
+  min-width: 220px;
+  background: var(--ink-2);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  padding: 8px 0;
+  box-shadow: 0 8px 24px rgba(8, 26, 24, 0.32);
+}
+.menu-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.menu-item {
+  width: 100%;
+  text-align: left;
+  padding: 12px 18px;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--paper);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: background-color 120ms var(--ease);
+}
+.menu-item:hover { background: rgba(233, 223, 160, 0.08); }
+.menu-state {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.menu-state-label { color: rgba(233, 223, 160, 0.7); }
+.menu-state-value { color: var(--paper); }
+.menu-item-warn { color: var(--vermillion); }
+.menu-item-warn:hover { background: rgba(196, 52, 22, 0.1); }
+.menu-item-danger {
+  background: var(--vermillion);
+  color: var(--paper);
+  font-weight: 600;
+}
+.menu-item-danger:hover { background: var(--vermillion-2); }
+.menu-item[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+/* Fixed-viewport game screen — no scroll at 390×844.
+   Layout budget (mobile): topbar 48 + top strip 60 + capture 36 + board
+   ~340 + capture 36 + bottom strip 60 + bottom bar 40 + padding ≈ 664
+   (fits 844 with slack). */
+.game-fixed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: calc(100dvh - 96px);  /* shell padding accounts for topbar */
+}
+.game-fixed .board-column {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.game-fixed .board-holder {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  max-width: 100%;
+}
+.game-fixed .board-holder .board {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  aspect-ratio: 1/1;
+}
+
+/* Bottom bar — turn status + move count only. Home + Resign in ⋯ menu. */
+.game-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 4px 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.turn-status { color: var(--ink); }
+.turn-status .terminal { color: var(--vermillion); }
+.move-count { color: var(--stone); }
+
+/* Inspirations page — simple, in-world, on the ground. */
+.inspirations {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px 0 48px;
+  color: var(--ink);
+}
+.insp-title {
+  font-family: var(--sans);
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 24px 0 12px;
+  color: var(--ink);
+}
+.insp-body { font-size: 16px; margin: 0 0 24px; color: var(--ink); max-width: 60ch; }
+.insp-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  font-size: 15px;
+  color: var(--ink);
+  max-width: 60ch;
+}
+.insp-list li { line-height: 1.55; }
+.insp-list strong { font-weight: 600; }
+.insp-link { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.insp-link:hover { color: var(--ink-2); }
+.insp-footnote {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--stone);
+  margin: 0;
+}
 
 /* Transient toast — fixed to viewport bottom, safe-area aware. Team-lead's
    spec: paper surface, hairline border, mono text, in-world; vermillion
@@ -282,7 +449,10 @@ a { color: inherit; }
   text-underline-offset: 3px;
   padding: 0 2px;
 }
-.link:hover { color: var(--vermillion); }
+.link:hover { color: var(--ink-2); }
+/* .link.warn stays vermillion — destructive action (Resign) still gets
+   the strong signal. Cream on cream would be invisible; deep-ink would
+   read as "any other link". Red is honest. */
 .link.warn { color: var(--vermillion); }
 .link.warn:hover { color: var(--vermillion-2); }
 .link:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -319,13 +489,16 @@ a { color: inherit; }
   width: 100%;
   height: 100%;
 }
-/* Static landing board — FULLY non-interactive. On iOS Safari, taps on a
-   div without a click handler still fire the tap-highlight overlay AND
-   activate :hover state until the next tap elsewhere, which made dark
-   squares appear to lighten and pieces to fade. Kill it all: no pointer
-   events (taps pass through), no tap-highlight color, no user select,
-   default cursor. */
-.auth-scene .board,
+/* Landing sandbox board — INTERACTIVE (real legal moves via chess.js,
+   auto-resets after 20s idle). Suppress iOS Safari's default tap
+   highlight so taps look intentional rather than "broken". */
+.auth-scene .board {
+  -webkit-tap-highlight-color: transparent;
+}
+.auth-scene .board .square {
+  -webkit-tap-highlight-color: transparent;
+}
+/* Any true static board (used elsewhere in future) — kept fully inert. */
 .board.board-static {
   pointer-events: none;
   -webkit-tap-highlight-color: transparent;
@@ -333,16 +506,8 @@ a { color: inherit; }
   user-select: none;
   cursor: default;
 }
-.auth-scene .board .square,
-.board.board-static .square {
-  pointer-events: none;
-  -webkit-tap-highlight-color: transparent;
-  cursor: default;
-}
-.auth-scene .board .square:hover,
-.board.board-static .square:hover {
-  background: none;
-}
+.board.board-static .square { pointer-events: none; cursor: default; }
+.board.board-static .square:hover { background: none; }
 
 .auth-scene-fallback {
   width: 100%;
@@ -585,12 +750,14 @@ a { color: inherit; }
 }
 .install-dismiss:hover { color: var(--ink); }
 
-/* Incoming — one structural vermillion moment per screen: a full band. */
+/* Incoming — one structural attention moment per screen: a deep-ink band
+   (mirrors the tejas.nyc content column). Cream text + a cream chip
+   "Accept" button, echoing the site's khaki-cream signal. */
 .incoming {
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: var(--vermillion);
+  background: var(--ink-2);
   color: var(--paper);
 }
 .incoming-row {
@@ -599,21 +766,21 @@ a { color: inherit; }
   justify-content: space-between;
   gap: 16px;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(240, 230, 210, 0.16);
+  border-bottom: 1px solid rgba(233, 223, 160, 0.16);
   font-size: 14px;
 }
 .incoming-row:last-child { border-bottom: 0; }
 .incoming-row strong { font-weight: 600; }
 .incoming-row .primary {
   background: var(--paper);
-  color: var(--vermillion);
+  color: var(--ink);
   font-weight: 600;
 }
-.incoming-row .primary:hover { background: #fff; }
+.incoming-row .primary:hover { background: #F3EBB6; }
 
-/* Invite panel — mirrors incoming, single band */
+/* Invite panel — mirrors incoming, single deep band */
 .invite {
-  background: var(--vermillion);
+  background: var(--ink-2);
   color: var(--paper);
   padding: 14px 18px;
   display: flex;
@@ -624,7 +791,7 @@ a { color: inherit; }
 .invite p { margin: 0; font-size: 14px; }
 .invite .primary {
   background: var(--paper);
-  color: var(--vermillion);
+  color: var(--ink);
   font-weight: 600;
 }
 
@@ -777,18 +944,19 @@ a { color: inherit; }
   color: var(--ink);
   transition: color 120ms var(--ease);
 }
-.game-row:hover { color: var(--vermillion); }
+.game-row:hover { color: var(--ink-2); background: var(--ground-2); }
 .game-row:last-child { border-bottom: 0; }
 .row-mono { font-family: var(--mono); font-size: 13px; color: var(--ink-2); }
 .row-status { font-family: var(--sans); font-size: 14px; color: var(--ink); }
 .row-arrow { font-family: var(--mono); color: var(--stone); }
 .game-row.accent .row-status::after {
+  /* In-play indicator — cream chip (Villalba tag). */
   content: "";
   display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--vermillion);
+  background: var(--paper);
   margin-left: 10px;
   transform: translateY(-2px);
 }
@@ -826,9 +994,12 @@ a { color: inherit; }
 .clock-strip.bottom { border-top-color: var(--hair); border-bottom-color: transparent; }
 
 .clock-strip.active-turn {
-  background: var(--vermillion);
+  /* Whose-turn strip goes DEEP-INK — Villalba's incision made large,
+     cream text on the ink band, echoing the reference site's content
+     column. Replaces the round-2 vermillion strip. */
+  background: var(--ink-2);
   color: var(--paper);
-  border-color: var(--vermillion);
+  border-color: var(--ink-2);
 }
 .clock-strip.active-turn .handle-line { color: var(--paper); }
 /* Presence dot on active (vermillion) strip: brighten the offline ring so
@@ -882,24 +1053,22 @@ a { color: inherit; }
 .clock-strip.active-turn .clock { color: var(--paper); }
 
 .captured-strip {
-  /* Space is permanently reserved — the strip renders even when empty so
-     the board never reflows mid-game. Tejas reported the whole screen
-     jumping when the first capture appeared. */
+  /* BIG + BOLD per Tejas — matches current-production glyph weight.
+     Fixed height reserved (empty or full) so the board never reflows. */
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 6px;
-  min-height: 26px;
-  padding: 0 8px;
-  font-size: 20px;
+  min-height: 36px;
+  padding: 2px 8px 0;
+  font-size: 28px;
   line-height: 1;
 }
 .captured-strip:empty::before {
-  /* Preserves min-height across engines that collapse empty flex containers. */
   content: "";
   display: inline-block;
   width: 0;
-  height: 22px;
+  height: 32px;
 }
 .captured { display: inline-block; }
 
@@ -1002,30 +1171,40 @@ a { color: inherit; }
 .board:not(.board-static) .square:hover.light { background: #EADFC5; }
 .board:not(.board-static) .square:hover.dark  { background: #3E2F1E; }
 
+/* Board indicators — swapped from vermillion to context-aware ink/cream
+   so they read on both cream light squares AND deep-teal dark squares
+   without needing a red the palette otherwise banished. */
 .square.selected::after {
   content: "";
   position: absolute;
   inset: 2px;
-  border: 1.5px solid var(--vermillion);
+  border: 1.5px solid var(--ink);
   pointer-events: none;
 }
+.square.dark.selected::after { border-color: var(--paper); }
 
 .square.last-from::after,
 .square.last-to::after {
   content: "";
   position: absolute;
   inset: 0;
-  border: 1.5px solid var(--vermillion);
+  border: 1.5px solid var(--ink);
   pointer-events: none;
-  opacity: 0.55;
+  opacity: 0.5;
 }
+.square.dark.last-from::after,
+.square.dark.last-to::after { border-color: var(--paper); }
 .square.selected.last-from::after,
 .square.selected.last-to::after { opacity: 1; }
 
+/* In-check — subtle warm ochre wash (palette-family adjacent, reads as
+   "attention" without red). Retained on both square colors. */
 .square.in-check {
-  background: color-mix(in oklab, var(--vermillion) 22%, transparent);
+  background: color-mix(in oklab, var(--presence-reconnect) 24%, var(--paper));
 }
-.square.in-check.dark { background: color-mix(in oklab, var(--vermillion) 32%, var(--walnut)); }
+.square.in-check.dark {
+  background: color-mix(in oklab, var(--presence-reconnect) 34%, var(--walnut));
+}
 
 .coord {
   position: absolute;
@@ -1069,25 +1248,28 @@ a { color: inherit; }
   color: var(--ink);
 }
 
-/* Legal move dot: a coin drop at square center */
+/* Legal move dot — contextual: deep-ink chip on cream squares, cream
+   chip on deep-teal dark squares. Same coin-drop scale. */
 .legal-dot {
   position: absolute;
   width: 22%;
   height: 22%;
   border-radius: 50%;
-  background: var(--vermillion);
+  background: var(--ink);
   opacity: 0.85;
   pointer-events: none;
 }
-/* Capture: vermillion ring around the target square */
+.square.dark .legal-dot { background: var(--paper); }
+/* Capture ring — same contextual pattern. */
 .legal-capture {
   position: absolute;
   inset: 6%;
   border-radius: 6%;
-  border: 3px solid var(--vermillion);
+  border: 3px solid var(--ink);
   pointer-events: none;
   opacity: 0.85;
 }
+.square.dark .legal-capture { border-color: var(--paper); }
 
 /* --- Promotion picker --------------------------------------------------- */
 
