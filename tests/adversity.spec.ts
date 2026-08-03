@@ -9,6 +9,7 @@
 // and asserts the game recovers without user intervention.
 
 import { expect, test, type Browser, type CDPSession, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
 
 test.describe.configure({ mode: "serial" });
 
@@ -539,6 +540,72 @@ test("landing puzzle solve walks to a new caption and position without chrome re
   }));
   expect(finalScroll.scrollHeight).toBeLessThanOrEqual(finalScroll.clientHeight + 1);
   expect(finalScroll.scrollHeight).toBeLessThanOrEqual(finalScroll.innerHeight + 1);
+});
+
+test("landing shelf survives 22 consecutive solves (all 11 puzzles twice) with zero page errors", async ({ browser }) => {
+  // Regression for the ~round-3 NotFoundError from the imperative walk
+  // vs React reconciliation ownership violation. If a piece node is
+  // detached outside React's knowledge, its next reconcile pass throws
+  // `removeChild: The node to be removed is not a child of this node`,
+  // React unmounts the shelf, and the landing dies until reload. The
+  // fix (in main.tsx LandingPuzzleShelf) puts the pieces layer under
+  // exclusive imperative ownership so this can't recur. Bar: 22 solves
+  // = 11 puzzles twice, ZERO pageerrors captured.
+  // 22 walks × ~4s each = ~90s of legitimate work, so per-test timeout
+  // is raised above the file default.
+  test.setTimeout(180_000);
+  const raw = readFileSync("src/data/positions.json", "utf8");
+  const positions = JSON.parse(raw) as Array<{ id: string; solution: { from: string; to: string; promotion?: string } }>;
+  const byId = new Map(positions.map((p) => [p.id, p]));
+
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage();
+  const errors: Array<{ round: number; kind: string; message: string }> = [];
+  let currentRound = 0;
+  page.on("pageerror", (event) => errors.push({ round: currentRound, kind: "pageerror", message: String(event).slice(0, 400) }));
+  page.on("console", (msg) => {
+    if (msg.type() !== "error") return;
+    const text = msg.text();
+    // Benign: unauthenticated /api/me returns 400 on landing.
+    if (/api\/me.*400|Failed to load resource.*status of 400/i.test(text)) return;
+    // Benign: Cloudflare Web Analytics beacon is blocked by CORS on
+    // localhost (cross-origin without a matching Access-Control header).
+    // Same class of noise as the /api/me 400 — not a regression.
+    if (/cloudflareinsights|cdn-cgi\/rum|Failed to load resource: net::ERR_FAILED/i.test(text)) return;
+    errors.push({ round: currentRound, kind: "console", message: text.slice(0, 400) });
+  });
+  page.on("crash", () => errors.push({ round: currentRound, kind: "crash", message: "page process crashed" }));
+
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".puzzle-shelf[data-puzzle-id]", { timeout: 15000 });
+
+    for (currentRound = 1; currentRound <= 22; currentRound++) {
+      const id = await page.locator(".puzzle-shelf").getAttribute("data-puzzle-id");
+      if (!id) throw new Error(`round ${currentRound}: shelf has no data-puzzle-id (shelf unmounted?)`);
+      const puzzle = byId.get(id);
+      if (!puzzle) throw new Error(`round ${currentRound}: unknown puzzle id ${id}`);
+      await page.locator(`.landing-square[data-square="${puzzle.solution.from}"]`).click({ timeout: 8000 });
+      await page.waitForTimeout(300);
+      await page.locator(`.landing-square[data-square="${puzzle.solution.to}"]`).click({ timeout: 8000 });
+      // Wait for the walk to complete and the shelf to advance.
+      await page.waitForFunction(
+        (prev) => {
+          const el = document.querySelector(".puzzle-shelf");
+          return el && el.getAttribute("data-puzzle-id") !== prev;
+        },
+        id,
+        { timeout: 25000 },
+      );
+      await page.waitForTimeout(400);   // let the settle beat land
+    }
+
+    expect(errors, `page errors during 22-solve loop:\n${errors.map((e) => `  round ${e.round} [${e.kind}] ${e.message}`).join("\n")}`).toEqual([]);
+    // Shelf must still be alive at the end.
+    await expect(page.locator(".puzzle-shelf")).toBeVisible();
+  } finally {
+    await ctx.close();
+  }
 });
 
 // Silence unused-import warning if a future refactor drops CDPSession above.

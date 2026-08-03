@@ -44,10 +44,55 @@ type ShelfMetrics = {
 const LANDING_COPY = "No infinite pool of opponents. A game happens when two friends sit down.";
 const shelf = shelfPositions as ShelfPosition[];
 
+// Belt-and-suspenders around the shelf. The ownership refactor above is
+// the real fix for the ~round-3 NotFoundError; this boundary catches any
+// future ownership violation (or unrelated shelf error) and hard-resets
+// via a fresh key so the crash degrades to a stutter, never a dead page.
+class LandingShelfErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { resetKey: number }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { resetKey: 0 };
+  }
+  static getDerivedStateFromError() { return {}; }
+  componentDidCatch(error: unknown) {
+    // Bump the key so the child unmounts + remounts fresh. Log for
+    // observability; do NOT surface to the user — the reset IS the UX.
+    // eslint-disable-next-line no-console
+    console.error("LandingPuzzleShelf error — resetting shelf:", error);
+    this.setState((prev) => ({ resetKey: prev.resetKey + 1 }));
+  }
+  render() {
+    return <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>;
+  }
+}
+
 function LandingPuzzleShelf() {
+  // OWNERSHIP MODEL (fix for pre-`live-crash` NotFoundError):
+  //
+  // The animation code (walkLandingPieces, applyLandingMove, wobble) is
+  // imperative — it creates, moves, and removes piece DOM nodes directly.
+  // Previously React ALSO owned those nodes (rendered them via a keyed
+  // `pieces.map(...)` under `piecesLayerRef`), so React tried to unmount
+  // detached nodes → `removeChild` NotFoundError → the whole shelf
+  // unmounted on ~round 3.
+  //
+  // Fix: the pieces layer is now an OPAQUE ref'd container React never
+  // enumerates. React renders the outer wrapper only; every piece under
+  // it is created, mutated, and destroyed exclusively by the imperative
+  // code below (piecesLayerRef.current.appendChild / removeChild / style
+  // writes / pieceEls map). React reconciliation touches nothing under
+  // that ref. Single writer per DOM node — the crash's root cause is
+  // eliminated by ownership discipline, not patched at the symptom.
+  //
+  // React state that remains (index, selected, animating, metrics) drives
+  // things React DOES own — the caption, the squares grid, the shelf's
+  // data-puzzle-id, the animating flag on the outer div. Those never
+  // require touching the pieces layer's children through React.
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<Square | null>(null);
-  const [pieces, setPieces] = useState<ShelfPiece[]>([]);
   const [animating, setAnimating] = useState(false);
   const [metrics, setMetrics] = useState<ShelfMetrics | null>(null);
   const stageRef = React.useRef<HTMLDivElement | null>(null);
@@ -91,14 +136,32 @@ function LandingPuzzleShelf() {
     };
   }, []);
 
+  // Imperative mount/reset of the pieces layer. Runs when metrics land
+  // (first measure) and when the puzzle index changes NOT via the walk
+  // (index=0 first mount, or a manual reset from the error boundary).
+  // Wipes any prior pieces from the layer and creates fresh DOM nodes
+  // for the current position. React NEVER runs after this — the layer's
+  // children are ours alone.
   useEffect(() => {
     if (!metrics) return;
+    const layer = piecesLayerRef.current;
+    if (!layer) return;
+    // If a walk is in-flight, don't yank the DOM out from under it.
+    if (animatingRef.current) return;
+    // Wipe stale nodes (also drops the pieceEls map so refs point at
+    // real DOM only).
+    while (layer.firstChild) layer.removeChild(layer.firstChild);
+    pieceEls.current.clear();
     const next = piecesFromFen(position.fen, metrics);
     piecesRef.current = next;
     gameRef.current = new Chess(position.fen);
-    setPieces(next);
+    for (const piece of next) {
+      const el = createLandingPieceEl(piece, metrics);
+      layer.appendChild(el);
+      pieceEls.current.set(piece.id, el);
+    }
     setSelected(null);
-  }, [metrics]);
+  }, [metrics, index]);
 
   useEffect(() => {
     if (!metrics || animatingRef.current) return;
@@ -119,6 +182,19 @@ function LandingPuzzleShelf() {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
   }, []);
+
+  // Imperative selected-class effect. React can't map `selected` → the
+  // piece's `.selected` class because it doesn't render pieces. Do it
+  // ourselves via the pieceEls map: drop the class from every piece
+  // that carries it, add it to the one on the currently-selected sq.
+  useEffect(() => {
+    for (const el of pieceEls.current.values()) el.classList.remove("selected");
+    if (!selected) return;
+    const piece = piecesRef.current.find((p) => p.sq === selected);
+    if (!piece) return;
+    const el = pieceEls.current.get(piece.id);
+    if (el) el.classList.add("selected");
+  }, [selected]);
 
   const legalTargets = useMemo(() => {
     if (!selected || animating) return new Map<string, "move" | "capture">();
@@ -242,10 +318,14 @@ function LandingPuzzleShelf() {
     if (!mover) return;
     const captured = piecesRef.current.find((piece) => piece.sq === to && piece !== mover);
     if (captured) {
+      // Safe now that the pieces layer is opaque to React (see the
+      // ownership comment at the top of LandingPuzzleShelf). Nobody
+      // else claims this node, so removing it here can't collide with
+      // React reconciliation.
       const capturedEl = pieceEls.current.get(captured.id);
       capturedEl?.remove();
+      pieceEls.current.delete(captured.id);
       piecesRef.current = piecesRef.current.filter((piece) => piece !== captured);
-      setPieces([...piecesRef.current]);
     }
     mover.sq = to;
     const { x, y } = squareToXY(to, m);
@@ -253,6 +333,7 @@ function LandingPuzzleShelf() {
     mover.y = y;
     const el = pieceEls.current.get(mover.id);
     if (el) {
+      el.dataset.square = to;
       el.style.transition = "transform 220ms cubic-bezier(0.16, 1, 0.3, 1)";
       el.style.transform = landingPieceTransform(x, y, 0, 1);
       window.setTimeout(() => { el.style.transition = ""; }, 260);
@@ -413,7 +494,18 @@ function LandingPuzzleShelf() {
       });
 
       piecesRef.current = [...nextLive, ...nextTray];
-      setPieces([...piecesRef.current]);
+      // Spawn DOM nodes for any newly-added pieces (fresh position had
+      // more of a color/type than the previous pool). React no longer
+      // renders these — the pieces layer is imperative.
+      const layer = piecesLayerRef.current;
+      if (layer) {
+        for (const piece of piecesRef.current) {
+          if (pieceEls.current.has(piece.id)) continue;
+          const el = createLandingPieceEl(piece, m);
+          layer.appendChild(el);
+          pieceEls.current.set(piece.id, el);
+        }
+      }
 
       window.setTimeout(() => {
         for (const piece of piecesRef.current) {
@@ -484,7 +576,6 @@ function LandingPuzzleShelf() {
             }
             for (const piece of nextTray) piece.fadeIn = false;
             piecesRef.current = [...nextLive, ...nextTray];
-            setPieces([...piecesRef.current]);
             resolve();
           }
         }
@@ -525,27 +616,13 @@ function LandingPuzzleShelf() {
             )}
           </div>
         </div>
-        <div className="landing-pieces" ref={piecesLayerRef} aria-hidden="true">
-          {pieces.map((piece) => (
-            <span
-              className={`landing-piece landing-piece-${piece.color} ${piece.live && !animating ? "live" : ""} ${selected === piece.sq ? "selected" : ""}`}
-              data-piece-id={piece.id}
-              data-square={piece.sq || "tray"}
-              data-piece={`${piece.color}${piece.type}`}
-              key={piece.id}
-              ref={(node) => {
-                if (node) {
-                  pieceEls.current.set(piece.id, node);
-                  if (metrics) sizeAndPlacePiece(node, piece, metrics);
-                } else {
-                  pieceEls.current.delete(piece.id);
-                }
-              }}
-            >
-              {filledGlyphs[piece.type]}
-            </span>
-          ))}
-        </div>
+        {/* Pieces layer — OPAQUE to React. Empty in the render tree; every
+            child inside is created and destroyed imperatively by the
+            animation code (see useEffect on [metrics, index] and
+            walkLandingPieces). React must never enumerate these nodes,
+            or removeChild reconciliation clashes with the imperative
+            .remove() and NotFoundError kills the shelf on ~round 3. */}
+        <div className="landing-pieces" ref={piecesLayerRef} aria-hidden="true" />
       </div>
       <p className="puzzle-caption">{position.sideToMove === "w" ? "WHITE" : "BLACK"} TO MOVE · {position.credit}</p>
     </div>
@@ -626,6 +703,24 @@ function sizeAndPlacePiece(el: HTMLElement, piece: ShelfPiece, metrics: ShelfMet
   el.style.fontSize = `${Math.round(metrics.sqSize * 0.82)}px`;
   el.style.opacity = piece.fadeIn ? "0" : "1";
   el.style.transform = landingPieceTransform(piece.x, piece.y, piece.rot, 1);
+  // Sync dataset.square so selectors like [data-square="g2"] track the
+  // piece's current logical square. React used to keep this in sync via
+  // re-render; now we do it explicitly wherever we touch the DOM.
+  el.dataset.square = piece.sq || "tray";
+}
+
+// Imperative piece element factory — pieces are React-invisible so we
+// build the DOM ourselves. Mirrors the classes and data attributes the
+// previous JSX rendered (kept for CSS + repro-selector compatibility).
+function createLandingPieceEl(piece: ShelfPiece, metrics: ShelfMetrics): HTMLSpanElement {
+  const el = document.createElement("span");
+  el.className = `landing-piece landing-piece-${piece.color}${piece.live ? " live" : ""}`;
+  el.dataset.pieceId = piece.id;
+  el.dataset.square = piece.sq || "tray";
+  el.dataset.piece = `${piece.color}${piece.type}`;
+  el.textContent = filledGlyphs[piece.type];
+  sizeAndPlacePiece(el, piece, metrics);
+  return el;
 }
 
 function landingPieceTransform(x: number, y: number, angleDeg: number, scale: number) {
@@ -1344,7 +1439,7 @@ function AuthScreen({
     <Shell message={message} messageKind={messageKind} setMessage={setMessage} hideMenu>
       <section className="auth">
         <div className="auth-scene">
-          <LandingPuzzleShelf />
+          <LandingShelfErrorBoundary><LandingPuzzleShelf /></LandingShelfErrorBoundary>
         </div>
         <form
           className="auth-form"
