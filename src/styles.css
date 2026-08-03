@@ -782,8 +782,6 @@ a { color: inherit; }
 }
 .square.light { background: var(--paper); }
 .square.dark  { background: var(--walnut); }
-.square.dark .piece-w { color: var(--paper); }
-.square.dark .piece-b { color: var(--ink); }
 
 .board-static .square { cursor: default; }
 .board:not(.board-static) .square { cursor: pointer; }
@@ -829,14 +827,33 @@ a { color: inherit; }
 .coord-file { bottom: 2px; right: 5px; text-transform: lowercase; }
 
 .piece {
-  font-family: "IBM Plex Sans", "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", sans-serif;
+  /* Symbol fonts first — some system UI stacks bind chess codepoints to
+     tofu boxes in the primary UI face. Segoe UI Symbol (Win), Apple Color
+     Emoji fallbacks (macOS/iOS), Noto Sans Symbols2 (Android) all carry
+     the FILLED chess glyphs. */
+  font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols2", "IBM Plex Sans", sans-serif;
   font-size: clamp(24px, 8.4vw, 68px); /* ≈ 74% of a square across viewports */
   line-height: 1;
   user-select: none;
   transform: translateY(-1px); /* optical baseline nudge — pawns don't float */
 }
-.piece-w { color: var(--paper); text-shadow: 0 0 0 var(--walnut-2); -webkit-text-stroke: 1px var(--walnut-2); }
-.piece-b { color: var(--ink); }
+/* Filled glyphs for BOTH sides — differentiate by fill color. White is
+   bone with a walnut contrast stroke so it reads at 390px on paper AND
+   on walnut squares. This is what physical Bauhaus sets do: pale wood
+   whites, dark wood blacks, no wireframes. */
+.piece-w {
+  color: var(--paper);
+  text-shadow:
+    -1px -1px 0 var(--walnut-2),
+     1px -1px 0 var(--walnut-2),
+    -1px  1px 0 var(--walnut-2),
+     1px  1px 0 var(--walnut-2);
+}
+.piece-b {
+  /* Ink on paper is high contrast; ink on walnut is still ~7:1 (AAA).
+     No stroke needed — a paper stroke on ink would look like a glow. */
+  color: var(--ink);
+}
 
 /* Legal move dot: a coin drop at square center */
 .legal-dot {

@@ -77,8 +77,15 @@ const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
 const pieceNames: Record<PieceSymbol, string> = {
   p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king",
 };
-const whiteGlyphs: Record<PieceSymbol, string> = { k: "♔", q: "♕", r: "♖", b: "♗", n: "♘", p: "♙" };
-const blackGlyphs: Record<PieceSymbol, string> = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+// FILLED Unicode glyphs used for BOTH colors — the outline "white" glyphs
+// (♔♕♖♗♘♙) have transparent interiors, so on walnut squares the walnut
+// bleeds through and white pieces read as mud with a whisper-thin edge.
+// This is what physical sets do: Hartwig's whites are pale wood, not
+// wireframes. Colour differentiates the sides; the glyph is the same shape.
+const filledGlyphs: Record<PieceSymbol, string> = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+// Legacy names kept in case anything else in the module reaches for them.
+const whiteGlyphs = filledGlyphs;
+const blackGlyphs = filledGlyphs;
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -1322,7 +1329,8 @@ function TimeSelect({ value, onChange }: { value: TimeControl; onChange: (value:
 }
 
 function PieceGlyph({ color, type }: { color: Color; type: PieceSymbol }) {
-  const glyph = color === "w" ? whiteGlyphs[type] : blackGlyphs[type];
+  // Always the filled shape — CSS tints piece-w bone and piece-b ink.
+  const glyph = filledGlyphs[type];
   const title = `${color === "w" ? "white" : "black"} ${pieceNames[type]}`;
   return (
     <span className={`piece piece-${color}`} role="img" aria-label={title}>
