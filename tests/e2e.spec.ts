@@ -66,6 +66,49 @@ test("notification prompt disappears after permission is granted and stays gone 
   await context.close();
 });
 
+// Regression guard for the "board grows unboundedly on scroll" bug that
+// hit iOS Safari (chess.tejas.nyc, 2026-08-03). Root cause was implicit
+// auto-track grids in the .shell > .stage > .game > .board-column chain
+// feeding back through .board-holder's aspect-ratio: each layout pass
+// recomputed a slightly larger width. This test measures the board at a
+// mobile viewport, scrolls, and asserts the width is stable and ≤ viewport.
+// Chromium doesn't reproduce the iOS-specific loop, but this catches any
+// future breakage of the "definite width" invariant.
+test("board holds a stable size at mobile viewport under scroll", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await page.goto("/");
+  await page.waitForSelector(".board-holder");
+
+  async function measure() {
+    return page.evaluate(() => {
+      const holder = document.querySelector(".board-holder");
+      const doc = document.documentElement;
+      return {
+        boardWidth: holder ? holder.getBoundingClientRect().width : 0,
+        docScrollWidth: doc.scrollWidth,
+        docClientWidth: doc.clientWidth,
+      };
+    });
+  }
+
+  const initial = await measure();
+  expect(initial.boardWidth).toBeGreaterThan(0);
+  expect(initial.boardWidth).toBeLessThanOrEqual(390);
+  expect(initial.docScrollWidth).toBeLessThanOrEqual(initial.docClientWidth + 1);
+
+  for (let i = 0; i < 8; i++) {
+    await page.evaluate((y) => window.scrollTo(0, y), i * 60);
+    await page.waitForTimeout(60);
+  }
+  const after = await measure();
+
+  expect(Math.abs(after.boardWidth - initial.boardWidth)).toBeLessThan(1);
+  expect(after.docScrollWidth).toBeLessThanOrEqual(after.docClientWidth + 1);
+
+  await context.close();
+});
+
 test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   mkdirSync(screenDir, { recursive: true });
   const suffix = Date.now().toString(36).slice(-6);

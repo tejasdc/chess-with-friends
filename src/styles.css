@@ -48,6 +48,9 @@ body {
   color: var(--ink);
   font-size: 16px;
   line-height: 1.5;
+  /* Backstop: nothing in the tree may cause horizontal overflow.
+     Combined with definite widths below, this makes iOS Safari safe. */
+  overflow-x: clip;
 }
 
 button, input, select, textarea {
@@ -139,7 +142,12 @@ ul, ol { list-style: none; }
   font-size: 14px;
 }
 
-.stage { display: grid; gap: 0; }
+/* Single-column grid tracks are made EXPLICIT (minmax(0, 1fr)) so the
+   track width never depends on content intrinsic size. This is the
+   invariant that stops iOS Safari from re-resolving a circular
+   auto-track <-> aspect-ratio-child dependency (which made the game
+   board grow unboundedly on scroll). */
+.stage { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; }
 
 /* ---------- buttons ---------- */
 
@@ -294,17 +302,23 @@ select {
 
 .auth {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 32px;
   padding: 8px 0 32px;
+  min-width: 0;
 }
 
 .auth-board {
-  width: 100%;
-  max-width: 480px;
+  width: min(100%, calc(100vw - 40px), 480px);
   margin: 0 auto;
+  min-width: 0;
 }
 
 .auth-board .board-holder {
+  /* Auth-board holder inherits its size from the definite parent above,
+     not from a grid track. */
+  width: 100%;
+  max-width: none;
   aspect-ratio: 1;
   padding: 6px;
   background: var(--board-frame);
@@ -363,7 +377,9 @@ select {
 
 .dashboard {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 40px;
+  min-width: 0;
 }
 
 .section-heading {
@@ -601,12 +617,16 @@ select {
 
 .game {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
+  min-width: 0;
 }
 
 .board-column {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+  min-width: 0;
 }
 
 .clock-strip {
@@ -655,11 +675,10 @@ select {
 }
 
 .board-holder {
-  /* The width chain must end at something DEFINITE (vw), never only at
-     content-sized grid tracks: iOS Safari re-resolves the circular
-     track<->holder dependency on every viewport change and the board
-     compounds in size. The vw ceiling breaks the loop in any engine. */
-  width: min(100%, calc(100vw - 40px), 640px);
+  /* Width has THREE independent caps — the aspect-ratio child then
+     derives its square height from the resulting width. All three are
+     definite; none feeds back through an auto grid track. */
+  width: min(100%, calc(100vw - 40px), 720px);
   margin-inline: auto;
   aspect-ratio: 1;
   padding: 6px;
@@ -669,12 +688,14 @@ select {
 }
 
 .board {
+  /* The holder is already a square; the board fills it. No second
+     aspect-ratio here — a redundant one gave iOS Safari a second
+     resolution path to compound on. */
   width: 100%;
   height: 100%;
-  aspect-ratio: 1;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  grid-template-rows: repeat(8, 1fr);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
   border-radius: 2px;
   overflow: hidden;
   position: relative;
@@ -748,7 +769,9 @@ select {
 
 .game-side {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  min-width: 0;
 }
 
 .game-status {
@@ -808,7 +831,11 @@ select {
     align-items: start;
     gap: 32px;
   }
-  .board-column { max-width: 720px; }
+  /* Explicit min-width: 0 on grid items so a child with intrinsic
+     min-content wider than the track (like the board's 8-column grid
+     with pieces) can never push the track wider than 1fr. */
+  .board-column { max-width: 720px; min-width: 0; }
+  .game-side { min-width: 0; }
 }
 
 @media (max-width: 520px) {
