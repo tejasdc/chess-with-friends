@@ -16,6 +16,8 @@ const INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 type TimeControl = "10|0" | "5|0";
 type GameStatus = "active" | "checkmate" | "resigned" | "timeout" | "draw";
 type PushStatus = "checking" | "ready" | "enabled" | "blocked" | "unsupported";
+type ToastKind = "info" | "error";
+type SetMessage = (value: string, kind?: ToastKind) => void;
 
 interface Friend { id: string; handle: string; online: boolean }
 interface FriendRequest { id: string; fromHandle?: string; toHandle?: string }
@@ -104,7 +106,23 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 function App() {
   const [home, setHome] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
+  const [message, setMessageState] = useState("");
+  const [messageKind, setMessageKind] = useState<ToastKind>("info");
+  // Widened setter — callers pass "error" as the second arg from catch
+  // blocks to tint the toast vermillion. Default is "info" (paper toast,
+  // hairline border) so existing setMessage("...") calls stay valid.
+  const setMessage = React.useCallback<SetMessage>((value, kind = "info") => {
+    setMessageState(value);
+    setMessageKind(kind);
+  }, []);
+  // Auto-dismiss transient toasts after 4s. Re-fires whenever `message`
+  // changes (single source of truth for the timer). Errors and info both
+  // dismiss on the same cadence — team-lead's spec.
+  useEffect(() => {
+    if (!message) return;
+    const t = window.setTimeout(() => setMessageState(""), 4000);
+    return () => window.clearTimeout(t);
+  }, [message]);
   const path = usePathname();
   const gameMatch = path.match(/^\/game\/([^/]+)/);
   const inviteMatch = path.match(/^\/invite\/([^/]+)/);
@@ -132,11 +150,11 @@ function App() {
   }, []);
 
   if (loading) return <Shell onSignedOut={() => setHome(null)}><LoadingLine /></Shell>;
-  if (!home) return <AuthScreen onSignedIn={refresh} message={message} setMessage={setMessage} />;
-  if (gameMatch) return <GameScreen gameId={gameMatch[1]} home={home} onHome={() => navigate("/", refresh)} setMessage={setMessage} />;
+  if (!home) return <AuthScreen onSignedIn={refresh} message={message} messageKind={messageKind} setMessage={setMessage} />;
+  if (gameMatch) return <GameScreen gameId={gameMatch[1]} home={home} message={message} messageKind={messageKind} setMessage={setMessage} onHome={() => navigate("/", refresh)} />;
 
   return (
-    <Shell home={home} message={message} setMessage={setMessage} onSignedOut={() => setHome(null)}>
+    <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} onSignedOut={() => setHome(null)}>
       <Dashboard home={home} inviteToken={inviteMatch?.[1]} refresh={refresh} setMessage={setMessage} />
     </Shell>
   );
@@ -146,13 +164,15 @@ function Shell({
   children,
   home,
   message,
+  messageKind,
   setMessage,
   onSignedOut,
 }: {
   children?: React.ReactNode;
   home?: HomeData | null;
   message?: string;
-  setMessage?: (value: string) => void;
+  messageKind?: ToastKind;
+  setMessage?: SetMessage;
   onSignedOut?: () => void;
 }) {
   return (
@@ -166,11 +186,15 @@ function Shell({
           </div>
         ) : null}
       </header>
+      {/* Toast — fixed to viewport bottom, safe-area aware, auto-dismisses
+          after 4s (timer in App). Renders OUTSIDE the topbar block so it
+          floats above scrolled content. Kept inside Shell so it inherits
+          the same shell-level z-context. */}
       {message ? (
-        <div className="notice" role="status">
+        <div className={`toast ${messageKind === "error" ? "toast-error" : "toast-info"}`} role="status" aria-live="polite">
           <span>{message}</span>
           {setMessage ? (
-            <button className="ghost tiny" aria-label="Dismiss" onClick={() => setMessage("")}>×</button>
+            <button className="toast-dismiss" aria-label="Dismiss" onClick={() => setMessage("")}>×</button>
           ) : null}
         </div>
       ) : null}
@@ -339,11 +363,13 @@ function usePathname() {
 function AuthScreen({
   onSignedIn,
   message,
+  messageKind,
   setMessage,
 }: {
   onSignedIn: () => void;
   message: string;
-  setMessage: (value: string) => void;
+  messageKind: ToastKind;
+  setMessage: SetMessage;
 }) {
   const [handle, setHandle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -414,14 +440,14 @@ function AuthScreen({
       }
       await onSignedIn();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Sign in failed.");
+      setMessage(error instanceof Error ? error.message : "Sign in failed.", "error");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Shell message={message} setMessage={setMessage}>
+    <Shell message={message} messageKind={messageKind} setMessage={setMessage}>
       <section className="auth">
         <div className="auth-scene" aria-hidden="true">
           <Board
@@ -474,7 +500,7 @@ function Dashboard({
   home: HomeData;
   inviteToken?: string;
   refresh: () => void;
-  setMessage: (value: string) => void;
+  setMessage: SetMessage;
 }) {
   return (
     <div className="dashboard">
@@ -493,7 +519,7 @@ function Dashboard({
 
 const INSTALL_DISMISSED_KEY = "chess.install-dismissed";
 
-function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: (value: string) => void }) {
+function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: SetMessage }) {
   const [pushStatus, setPushStatus] = useState<PushStatus>("checking");
   const [installed, setInstalled] = useState<boolean>(() => detectInstalled());
   // Persist dismissal in localStorage so it sticks across reloads for this
@@ -548,7 +574,7 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: (valu
       setMessage("Notifications enabled for friend requests, challenges, and scheduled games.");
     } catch (error) {
       await checkPushStatus().catch(() => undefined);
-      setMessage(error instanceof Error ? error.message : "Notification setup failed.");
+      setMessage(error instanceof Error ? error.message : "Notification setup failed.", "error");
     }
   }
 
@@ -612,7 +638,7 @@ function InvitePanel({
 }: {
   token: string;
   refresh: () => void;
-  setMessage: (value: string) => void;
+  setMessage: SetMessage;
 }) {
   async function send() {
     try {
@@ -620,7 +646,7 @@ function InvitePanel({
       setMessage("Friend request sent from invite link.");
       navigate("/", refresh);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Invite failed.");
+      setMessage(error instanceof Error ? error.message : "Invite failed.", "error");
     }
   }
   return (
@@ -722,7 +748,7 @@ function PlaySection({
 }: {
   home: HomeData;
   refresh: () => void;
-  setMessage: (value: string) => void;
+  setMessage: SetMessage;
 }) {
   const [friendId, setFriendId] = useState(home.friends[0]?.id || "");
   const [timeControl, setTimeControl] = useState<TimeControl>("10|0");
@@ -739,7 +765,7 @@ function PlaySection({
       setMessage("Challenge sent.");
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Challenge failed.");
+      setMessage(error instanceof Error ? error.message : "Challenge failed.", "error");
     }
   }
 
@@ -750,7 +776,7 @@ function PlaySection({
       setMessage("Game time proposed.");
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Schedule failed.");
+      setMessage(error instanceof Error ? error.message : "Schedule failed.", "error");
     }
   }
 
@@ -842,7 +868,7 @@ function FriendsSection({
 }: {
   home: HomeData;
   refresh: () => void;
-  setMessage: (value: string) => void;
+  setMessage: SetMessage;
 }) {
   const [handle, setHandle] = useState("");
   const [showInvite, setShowInvite] = useState(false);
@@ -855,7 +881,7 @@ function FriendsSection({
       setMessage("Friend request sent.");
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Friend request failed.");
+      setMessage(error instanceof Error ? error.message : "Friend request failed.", "error");
     }
   }
 
@@ -923,13 +949,17 @@ function FriendsSection({
 function GameScreen({
   gameId,
   home,
+  message,
+  messageKind,
   onHome,
   setMessage,
 }: {
   gameId: string;
   home: HomeData;
+  message: string;
+  messageKind: ToastKind;
   onHome: () => void;
-  setMessage: (value: string) => void;
+  setMessage: SetMessage;
 }) {
   const [game, setGame] = useState<GameState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -998,7 +1028,7 @@ function GameScreen({
       setSelected(null);
       setPendingPromotion(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Move failed.");
+      setMessage(error instanceof Error ? error.message : "Move failed.", "error");
       setSelected(null);
       setPendingPromotion(null);
     }
@@ -1048,7 +1078,7 @@ function GameScreen({
 
   if (loadError) {
     return (
-      <Shell home={home}>
+      <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}>
         <section className="game-error">
           <h2 className="section-title">Can't open this game</h2>
           <p className="muted">{loadError}</p>
@@ -1060,7 +1090,7 @@ function GameScreen({
       </Shell>
     );
   }
-  if (!game) return <Shell home={home}><LoadingLine /></Shell>;
+  if (!game) return <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}><LoadingLine /></Shell>;
 
   const opponentHandle = myColor === "w" ? game.blackHandle : game.whiteHandle;
   const myHandle = myColor === "w" ? game.whiteHandle : game.blackHandle;
@@ -1071,7 +1101,7 @@ function GameScreen({
   const lastMove = game.moves.length ? { from: game.moves[game.moves.length - 1].from, to: game.moves[game.moves.length - 1].to } : null;
 
   return (
-    <Shell home={home}>
+    <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}>
       <section className="game">
         <div className="board-column">
           {/* active-turn class paints the strip vermillion — the whole strip

@@ -172,22 +172,58 @@ a { color: inherit; }
 }
 .handle { color: var(--ink-2); }
 
-.notice {
-  padding: 12px 14px;
-  border: 1px solid var(--walnut);
-  color: var(--ink);
+/* Transient toast — fixed to viewport bottom, safe-area aware. Team-lead's
+   spec: paper surface, hairline border, mono text, in-world; vermillion
+   tint ONLY for errors (info stays paper). One at a time — the latest
+   replaces. Auto-dismisses after ~4s (timer in App); manual × still
+   available. Kept outside document flow so it stays visible regardless
+   of scroll position. */
+.toast {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 40;
+  margin: 0 auto;
+  max-width: 480px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 14px;
-  background: transparent;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--walnut);
+  box-shadow: 0 6px 20px rgba(74, 56, 38, 0.18);
+  /* Subtle rise-in when replaced — feels like something arrived, not
+     something appeared. Prefers-reduced-motion respected below. */
+  animation: toast-in 240ms var(--ease);
 }
-.notice .ghost.tiny {
+.toast-error {
+  color: var(--vermillion);
+  border-color: var(--vermillion);
+}
+.toast-dismiss {
   font-family: var(--mono);
   font-size: 18px;
   line-height: 1;
-  color: var(--ink);
+  color: var(--stone);
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.toast-error .toast-dismiss { color: var(--vermillion); }
+.toast-dismiss:hover { color: var(--ink); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
 }
 
 .stage {
