@@ -729,6 +729,18 @@ a { color: inherit; }
   margin: 0;
 }
 .install-strip .ghost { align-self: flex-start; }
+/* Notification chrome — the enable button + its reason line sit on a
+   shared block so the "so you know…" line reads as caption to the CTA,
+   not a floating footer. Same block hosts the reinstall recovery copy
+   for the blocked state (dead-end fix). */
+.notif-block { display: flex; flex-direction: column; gap: 6px; }
+.notif-block .ghost { align-self: flex-start; }
+.notif-reason {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--stone);
+  margin: 0;
+}
 /* Dismiss (×) — persists via localStorage so it sticks for this browser.
    Positioned at the top-right of the block, tap target ≥ 32px for iOS. */
 .install-dismiss {

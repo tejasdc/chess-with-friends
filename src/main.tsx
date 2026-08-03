@@ -891,12 +891,22 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: SetMe
         </div>
       ) : null}
       {showEnablePush ? (
-        <button className="ghost" onClick={enablePush}>Enable notifications</button>
+        <div className="notif-block">
+          <button className="ghost" onClick={enablePush}>Enable notifications</button>
+          <p className="install-body notif-reason">so you know when a friend invites you</p>
+        </div>
       ) : null}
       {showBlocked && !showInstall ? (
-        <p className="install-body">Notifications are blocked in this browser.</p>
+        <div className="notif-block">
+          <p className="install-title">Notifications are off</p>
+          {/* Tejas's simplified recovery: reinstall resets iOS permission
+              state entirely, and the passkey makes re-login trivial. One
+              instruction, the easy one — no Settings-path spelunking. */}
+          <p className="install-body">
+            Delete the app from your Home Screen and add it back — you'll be asked again.
+          </p>
+        </div>
       ) : null}
-      {showEnabled ? null : null}
     </div>
   );
 }
