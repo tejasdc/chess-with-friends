@@ -29,8 +29,9 @@ async function addAuth(page) {
 async function register(page, handle) {
   await page.goto(base);
   await page.getByPlaceholder("your_handle").fill(handle);
+  // One-press auth: wait for the preflight to land, then click.
+  await page.waitForTimeout(500);
   await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Create passkey" }).click();
   await page.getByText(`@${handle}`).waitFor();
 }
 
@@ -39,15 +40,26 @@ async function shot(page, name) {
   console.log("shot", name);
 }
 
-const browser = await chromium.launch();
+// Enable software WebGL in headless so the 3D scene actually renders.
+const browser = await chromium.launch({
+  args: [
+    "--use-gl=swiftshader",
+    "--enable-webgl",
+    "--ignore-gpu-blocklist",
+  ],
+});
 try {
   // --- MOBILE 390 auth screen (unauthed) ---
   {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const page = await ctx.newPage();
     await page.goto(base);
+    // Wait for the 3D scene canvas to actually mount + render one frame.
+    await page.waitForSelector(".auth-scene canvas", { timeout: 15000 }).catch(() => undefined);
+    await page.waitForTimeout(900);
     await shot(page, "mobile-auth-empty");
     await page.getByPlaceholder("your_handle").fill("someone_new");
+    await page.waitForTimeout(300);
     await shot(page, "mobile-auth-typed");
     await ctx.close();
   }
@@ -57,6 +69,8 @@ try {
     const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 } });
     const page = await ctx.newPage();
     await page.goto(base);
+    await page.waitForSelector(".auth-scene canvas", { timeout: 15000 }).catch(() => undefined);
+    await page.waitForTimeout(900);
     await shot(page, "desktop-auth-empty");
     await ctx.close();
   }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Chess, type Color, type PieceSymbol, type Square } from "chess.js";
@@ -74,6 +74,10 @@ const pieceNames: Record<PieceSymbol, string> = {
 };
 const whiteGlyphs: Record<PieceSymbol, string> = { k: "♔", q: "♕", r: "♖", b: "♗", n: "♘", p: "♙" };
 const blackGlyphs: Record<PieceSymbol, string> = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+
+// Lazy-load the 3D wallet scene so unauthenticated first-paint stays
+// lean; three.js only lands on the wire when the auth screen mounts.
+const WalletScene = lazy(() => import("./WalletScene"));
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -264,10 +268,10 @@ function AuthScreen({
   return (
     <Shell message={message} setMessage={setMessage}>
       <section className="auth">
-        <div className="auth-board" aria-hidden="true">
-          <div className="board-holder static">
-            <Board fen={AUTH_POSITION} orientation="w" selected={null} onSquare={() => undefined} interactive={false} />
-          </div>
+        <div className="auth-scene" aria-hidden="true">
+          <Suspense fallback={<div className="auth-scene-fallback">Opening the wallet…</div>}>
+            <WalletScene />
+          </Suspense>
         </div>
         <form
           className="auth-form"
@@ -297,13 +301,6 @@ function AuthScreen({
     </Shell>
   );
 }
-
-// Queen's Gambit Declined, Orthodox Defense, after 7...c6 — a real balanced
-// middlegame: both bishops developed, kingside castling on both flanks,
-// tension in the centre, pieces spread across the board. Chosen because it
-// composes visually — no ragged pawn shapes, both piece colours in the field,
-// characteristic d5/c6/e6 pawn triangle reading as a made object.
-const AUTH_POSITION = "r1bq1rk1/pp1nbppp/2p1pn2/3p2B1/2PP4/2N1PN2/PP3PPP/2RQKB1R w K - 3 8";
 
 function Dashboard({
   home,

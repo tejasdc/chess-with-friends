@@ -74,18 +74,22 @@ test("notification prompt disappears after permission is granted and stays gone 
 // mobile viewport, scrolls, and asserts the width is stable and ≤ viewport.
 // Chromium doesn't reproduce the iOS-specific loop, but this catches any
 // future breakage of the "definite width" invariant.
-test("board holds a stable size at mobile viewport under scroll", async ({ browser }) => {
+test("auth board holds a stable size at mobile viewport under scroll", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
   await page.goto("/");
-  await page.waitForSelector(".board-holder");
+  // The auth screen mounts a 3D wallet inside .auth-scene — a definite-width,
+  // aspect-ratio child of the same grid ancestor chain that the game screen
+  // uses. If the invariant breaks, this element grows unboundedly on scroll
+  // (the original iOS Safari bug).
+  await page.waitForSelector(".auth-scene");
 
   async function measure() {
     return page.evaluate(() => {
-      const holder = document.querySelector(".board-holder");
+      const el = document.querySelector(".auth-scene");
       const doc = document.documentElement;
       return {
-        boardWidth: holder ? holder.getBoundingClientRect().width : 0,
+        elementWidth: el ? el.getBoundingClientRect().width : 0,
         docScrollWidth: doc.scrollWidth,
         docClientWidth: doc.clientWidth,
       };
@@ -93,8 +97,8 @@ test("board holds a stable size at mobile viewport under scroll", async ({ brows
   }
 
   const initial = await measure();
-  expect(initial.boardWidth).toBeGreaterThan(0);
-  expect(initial.boardWidth).toBeLessThanOrEqual(390);
+  expect(initial.elementWidth).toBeGreaterThan(0);
+  expect(initial.elementWidth).toBeLessThanOrEqual(390);
   expect(initial.docScrollWidth).toBeLessThanOrEqual(initial.docClientWidth + 1);
 
   for (let i = 0; i < 8; i++) {
@@ -103,7 +107,7 @@ test("board holds a stable size at mobile viewport under scroll", async ({ brows
   }
   const after = await measure();
 
-  expect(Math.abs(after.boardWidth - initial.boardWidth)).toBeLessThan(1);
+  expect(Math.abs(after.elementWidth - initial.elementWidth)).toBeLessThan(1);
   expect(after.docScrollWidth).toBeLessThanOrEqual(after.docClientWidth + 1);
 
   await context.close();

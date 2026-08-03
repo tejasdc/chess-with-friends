@@ -1,34 +1,64 @@
-/* ---------- design tokens ---------- */
+/* ---------- Duchamp Pocket Chess Set — design tokens ----------
+   Reference: Marcel Duchamp, "Pocket Chess Set", 1943 (Philadelphia
+   Museum of Art, Yale, Art Institute of Chicago). Leather bifold
+   wallet; hand-painted board on tan-honey leather with deep-coffee
+   dark squares; cream celluloid piece tokens with printed ink
+   silhouettes; brass pins through a hole in each piece to hold them
+   in place. This design encodes: warm honey interior ground, deep
+   leather chrome around it, celluloid tiles for interactive surfaces,
+   brass pin-head marks on primary anchors, hand-painted board.
+   No narration copy anywhere. */
 
 :root {
   color-scheme: light;
-  --paper: #f4f0e6;
-  --paper-2: #ede7d8;
-  --ink: #17140f;
-  --ink-2: #5a5147;
-  --ink-3: #8f8677;
-  --hair: #d6cebc;
-  --hair-strong: #b8ad96;
-  --accent: #3f5d4a;
-  --accent-2: #2f4a39;
-  --accent-ink: #f5efdf;
-  --warn: #b04a2f;
-  --warn-deep: #802f1b;
-  --board-light: #ead9b6;
-  --board-dark: #7a6248;
-  --board-frame: #2b241d;
-  --selected: rgba(63, 93, 74, 0.55);
-  --focus: rgba(63, 93, 74, 0.55);
-  --shadow: 0 1px 2px rgba(23, 20, 15, 0.04), 0 8px 24px rgba(23, 20, 15, 0.06);
-  --ease: cubic-bezier(0.32, 0.72, 0, 1);
 
-  --serif: "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, ui-serif, serif;
-  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Leather (the wallet — chrome, structural surfaces) */
+  --leather-deep:  #1e150c;
+  --leather:       #2c1e12;
+  --leather-warm:  #4a3220;
+  --leather-hi:    #7a5b3a;
+
+  /* Interior (the opened wallet — the app's main ground) */
+  --honey:         #d8b477;     /* light square base */
+  --honey-warm:    #e2c489;     /* light square painted lighter */
+  --coffee:        #3e2a17;     /* dark square base */
+  --coffee-warm:   #4b3520;     /* dark square painted warmer */
+
+  /* Celluloid (interactive tiles — cards, panels, form surfaces) */
+  --celluloid:     #f2e9cc;
+  --celluloid-hi:  #faf3dc;
+  --celluloid-lo:  #e3d7b3;
+
+  /* Ink (piece silhouettes, text on celluloid) */
+  --ink:           #1a120a;
+  --ink-2:         #4d3b26;
+  --ink-3:         #7a634a;
+
+  /* Brass (pin heads, active state, primary CTAs) */
+  --brass:         #b58a3c;
+  --brass-hi:      #cca75c;
+  --brass-shadow:  rgba(30, 21, 12, 0.45);
+
+  /* Accent — Duchamp-era vermillion, used sparingly for danger/attention */
+  --vermillion:    #a63a23;
+  --vermillion-lo: #7f2916;
+
+  /* Utility */
+  --hair:          rgba(30, 21, 12, 0.14);
+  --hair-strong:   rgba(30, 21, 12, 0.28);
+  --shadow-1:      0 1px 2px rgba(30, 21, 12, 0.10);
+  --shadow-2:      0 8px 24px rgba(30, 21, 12, 0.18);
+  --shadow-3:      0 24px 60px rgba(30, 21, 12, 0.22);
+  --ease:          cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* Type stacks */
+  --serif: "Iowan Old Style", "Palatino Linotype", "New York", Palatino, Georgia, ui-serif, serif;
+  --sans:  -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   font-family: var(--sans);
   color: var(--ink);
-  background: var(--paper);
+  background: var(--leather-deep);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -38,19 +68,22 @@
 
 html {
   min-width: 320px;
-  background: var(--paper);
+  background: var(--leather-deep);
 }
 
 body {
   margin: 0;
   min-height: 100dvh;
-  background: var(--paper);
   color: var(--ink);
   font-size: 16px;
   line-height: 1.5;
-  /* Backstop: nothing in the tree may cause horizontal overflow.
-     Combined with definite widths below, this makes iOS Safari safe. */
   overflow-x: clip;
+
+  /* The world outside the wallet is the deep leather cover. */
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(122, 91, 58, 0.14), transparent 55%),
+    radial-gradient(ellipse at 80% 90%, rgba(122, 91, 58, 0.10), transparent 60%),
+    var(--leather-deep);
 }
 
 button, input, select, textarea {
@@ -65,14 +98,28 @@ h1, h2, h3, p, ul, ol {
 
 ul, ol { list-style: none; }
 
-/* ---------- shell ---------- */
+/* ---------- shell (the wallet interior) ---------- */
 
 .shell {
   max-width: 720px;
   margin: 0 auto;
   padding: 20px 20px 96px;
   min-height: 100dvh;
-  overflow-x: clip;
+  color: var(--ink);
+
+  /* The opened wallet — warm honey-tan leather interior with a
+     subtle grain via layered gradients. */
+  background:
+    radial-gradient(ellipse at 20% 10%, rgba(255, 245, 210, 0.18), transparent 60%),
+    radial-gradient(ellipse at 90% 90%, rgba(30, 21, 12, 0.10), transparent 55%),
+    linear-gradient(180deg, var(--celluloid) 0%, var(--celluloid-lo) 100%);
+  box-shadow:
+    0 0 0 1px var(--leather-warm) inset,
+    var(--shadow-3);
+}
+
+@media (min-width: 720px) {
+  .shell { max-width: 760px; padding: 32px 32px 96px; }
 }
 
 .topbar {
@@ -82,7 +129,22 @@ ul, ol { list-style: none; }
   gap: 16px;
   padding: 4px 0 20px;
   margin-bottom: 20px;
-  border-bottom: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair-strong);
+  position: relative;
+}
+
+/* Brass pin head on the topbar's left — a functional decoration
+   echoing the wallet's construction. */
+.topbar::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--brass-hi), var(--brass) 60%, var(--vermillion-lo) 120%);
+  box-shadow: 0 1px 1px var(--brass-shadow), inset 0 -1px 1px rgba(30, 21, 12, 0.3);
 }
 
 .wordmark {
@@ -91,8 +153,10 @@ ul, ol { list-style: none; }
   padding: 0;
   color: var(--ink);
   font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
   font-size: 18px;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
@@ -111,8 +175,8 @@ ul, ol { list-style: none; }
 
 .handle {
   color: var(--ink-2);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  font-size: 12px;
   max-width: 14ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -125,7 +189,7 @@ ul, ol { list-style: none; }
 }
 
 @media (min-width: 520px) {
-  .handle { font-size: 14px; max-width: 22ch; }
+  .handle { font-size: 13px; max-width: 22ch; }
 }
 
 .notice {
@@ -135,18 +199,13 @@ ul, ol { list-style: none; }
   gap: 12px;
   margin: -8px 0 20px;
   padding: 10px 14px;
-  border: 1px solid var(--hair-strong);
-  border-radius: 6px;
-  background: var(--paper-2);
+  background: var(--celluloid-hi);
+  border-left: 3px solid var(--brass);
   color: var(--ink);
   font-size: 14px;
+  box-shadow: var(--shadow-1);
 }
 
-/* Single-column grid tracks are made EXPLICIT (minmax(0, 1fr)) so the
-   track width never depends on content intrinsic size. This is the
-   invariant that stops iOS Safari from re-resolving a circular
-   auto-track <-> aspect-ratio-child dependency (which made the game
-   board grow unboundedly on scroll). */
 .stage { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; }
 
 /* ---------- buttons ---------- */
@@ -154,72 +213,99 @@ ul, ol { list-style: none; }
 button {
   cursor: pointer;
   font-family: inherit;
-  border-radius: 6px;
-  transition: background 180ms var(--ease), border-color 180ms var(--ease), color 180ms var(--ease), transform 120ms var(--ease);
+  border-radius: 4px;
+  transition: background 180ms var(--ease), border-color 180ms var(--ease),
+              color 180ms var(--ease), transform 120ms var(--ease),
+              box-shadow 180ms var(--ease);
 }
 
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--focus);
+  outline: 2px solid var(--brass);
   outline-offset: 2px;
 }
 
 button:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
 }
 
+/* Primary — a celluloid piece pinned to the ground: cream fill,
+   brass pin head on the leading edge, dark ink label. */
 .primary {
+  position: relative;
   min-height: 44px;
-  padding: 0 18px;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: var(--accent-ink);
-  font-weight: 500;
+  padding: 0 20px 0 30px;
+  border: 1px solid var(--leather-warm);
+  background: linear-gradient(180deg, var(--celluloid-hi), var(--celluloid));
+  color: var(--ink);
+  font-weight: 600;
   font-size: 15px;
-  letter-spacing: 0;
+  letter-spacing: 0.01em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(30, 21, 12, 0.12),
+    0 6px 14px rgba(30, 21, 12, 0.08);
+}
+
+.primary::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--brass-hi), var(--brass) 60%, var(--vermillion-lo) 120%);
+  box-shadow: 0 1px 1px var(--brass-shadow), inset 0 -1px 1px rgba(30, 21, 12, 0.3);
 }
 
 .primary:hover:not(:disabled) {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: linear-gradient(180deg, #fff8e0, var(--celluloid-hi));
+  border-color: var(--leather);
 }
 
 .primary:active:not(:disabled) {
   transform: translateY(1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 1px rgba(30, 21, 12, 0.15);
 }
 
 .primary:disabled {
   background: transparent;
   color: var(--ink-3);
   border-color: var(--hair-strong);
-  opacity: 1;
+  box-shadow: none;
+}
+
+.primary:disabled::before {
+  background: var(--ink-3);
+  box-shadow: none;
 }
 
 .primary.compact {
-  min-height: 36px;
-  padding: 0 14px;
-  font-size: 14px;
+  min-height: 34px;
+  padding: 0 14px 0 26px;
+  font-size: 13px;
 }
 
 .ghost {
-  min-height: 36px;
+  min-height: 34px;
   padding: 0 12px;
   border: 1px solid var(--hair-strong);
   background: transparent;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .ghost:hover:not(:disabled) {
-  background: var(--paper-2);
-  border-color: var(--ink-2);
+  background: rgba(255, 245, 210, 0.35);
+  border-color: var(--leather-warm);
 }
 
-.ghost.warn { color: var(--warn); }
-.ghost.warn:hover:not(:disabled) { border-color: var(--warn); background: rgba(176, 74, 47, 0.06); }
+.ghost.warn { color: var(--vermillion); }
+.ghost.warn:hover:not(:disabled) { border-color: var(--vermillion); background: rgba(166, 58, 35, 0.06); }
 
 .ghost.tiny {
   min-height: 24px;
@@ -233,25 +319,25 @@ button:disabled {
 .danger {
   min-height: 36px;
   padding: 0 14px;
-  border: 1px solid var(--warn);
-  background: var(--warn);
-  color: #fdf7ea;
+  border: 1px solid var(--vermillion);
+  background: var(--vermillion);
+  color: var(--celluloid-hi);
   font-size: 14px;
   font-weight: 500;
 }
-.danger:hover:not(:disabled) { background: var(--warn-deep); border-color: var(--warn-deep); }
+.danger:hover:not(:disabled) { background: var(--vermillion-lo); border-color: var(--vermillion-lo); }
 
 .link {
   background: none;
   border: 0;
   padding: 0 0 0 8px;
-  color: var(--accent);
+  color: var(--leather-warm);
   text-decoration: underline;
   text-underline-offset: 3px;
   font-size: inherit;
   cursor: pointer;
 }
-.link:hover { color: var(--accent-2); }
+.link:hover { color: var(--leather); }
 
 /* ---------- inputs ---------- */
 
@@ -259,27 +345,30 @@ input, select {
   min-height: 44px;
   width: 100%;
   padding: 0 12px;
-  border: 1px solid var(--hair-strong);
-  border-radius: 6px;
-  background: #fff;
+  border: 1px solid var(--leather-warm);
+  border-radius: 3px;
+  background: var(--celluloid-hi);
   color: var(--ink);
   font-size: 15px;
   transition: border-color 180ms var(--ease), box-shadow 180ms var(--ease);
+  box-shadow: inset 0 1px 2px rgba(30, 21, 12, 0.08);
 }
 
-input:hover, select:hover { border-color: var(--ink-2); }
+input::placeholder { color: var(--ink-3); }
+
+input:hover, select:hover { border-color: var(--leather); }
 
 input:focus, select:focus {
-  border-color: var(--accent);
+  border-color: var(--brass);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(63, 93, 74, 0.18);
+  box-shadow: inset 0 1px 2px rgba(30, 21, 12, 0.08), 0 0 0 3px rgba(181, 138, 60, 0.22);
 }
 
 select {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 34px;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%235a5147' d='M2.5 4.5l3.5 3.5 3.5-3.5z'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%234a3220' d='M2.5 4.5l3.5 3.5 3.5-3.5z'/></svg>");
   background-repeat: no-repeat;
   background-position: right 10px center;
   background-size: 12px 12px;
@@ -291,11 +380,12 @@ select {
 }
 
 .field-label {
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
   font-weight: 500;
   color: var(--ink-2);
-  letter-spacing: 0.02em;
-  text-transform: none;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 /* ---------- auth ---------- */
@@ -308,33 +398,40 @@ select {
   min-width: 0;
 }
 
-.auth-board {
-  width: min(100%, calc(100vw - 40px), 480px);
+.auth-scene {
+  /* Anchor for the 3D scene. Definite width, aspect-ratio for a
+     landscape wallet feel. Ancestors are all definite grid tracks so
+     no runaway. */
+  width: min(100%, calc(100vw - 40px), 560px);
   margin: 0 auto;
+  aspect-ratio: 3 / 2;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--leather-deep);
+  box-shadow: var(--shadow-3);
+  position: relative;
   min-width: 0;
 }
 
-.auth-board .board-holder {
-  /* Auth-board holder inherits its size from the definite parent above,
-     not from a grid track. */
-  width: 100%;
-  max-width: none;
-  aspect-ratio: 1;
-  padding: 6px;
-  background: var(--board-frame);
-  border-radius: 4px;
-  box-shadow: var(--shadow);
+.auth-scene canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  cursor: grab;
 }
 
-.display {
+.auth-scene canvas:active { cursor: grabbing; }
+
+.auth-scene-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
   font-family: var(--serif);
-  font-weight: 400;
-  font-size: clamp(34px, 6vw, 48px);
-  line-height: 1.05;
-  letter-spacing: -0.015em;
-  color: var(--ink);
-  max-width: 18ch;
-  text-wrap: balance;
+  font-size: 14px;
+  padding: 24px;
+  text-align: center;
 }
 
 .auth-form {
@@ -347,6 +444,20 @@ select {
 
 .auth-form .primary { justify-self: start; min-width: 160px; }
 
+.hint {
+  font-size: 14px;
+  color: var(--ink-2);
+  margin: 4px 0 -4px;
+}
+
+.footnote {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.03em;
+  margin-top: 4px;
+}
+
 @media (min-width: 820px) {
   .shell:has(.auth) { max-width: 1040px; }
 
@@ -357,20 +468,8 @@ select {
     padding: 24px 0 64px;
   }
 
-  .auth-board { margin: 0; max-width: none; }
+  .auth-scene { margin: 0; max-width: none; }
   .auth-form { margin: 0; }
-}
-
-.hint {
-  font-size: 14px;
-  color: var(--ink-2);
-  margin: 4px 0 -4px;
-}
-
-.footnote {
-  font-size: 13px;
-  color: var(--ink-3);
-  margin-top: 4px;
 }
 
 /* ---------- dashboard ---------- */
@@ -392,50 +491,82 @@ select {
 
 .section-title {
   font-family: var(--serif);
-  font-weight: 400;
+  font-style: italic;
+  font-weight: 500;
   font-size: 22px;
   color: var(--ink);
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .muted { color: var(--ink-3); font-size: 14px; }
 .center { text-align: center; padding: 40px 0; }
 
-/* install strip */
-
+/* Install strip — a celluloid tile pinned to the ground. */
 .install-strip {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 16px;
-  border: 1px solid var(--hair-strong);
-  border-radius: 6px;
-  background: var(--paper-2);
+  padding: 14px 18px 14px 32px;
+  background: var(--celluloid-hi);
+  border-radius: 4px;
+  border: 1px solid var(--hair);
   font-size: 14px;
-  color: var(--ink-2);
+  color: var(--ink);
+  position: relative;
+  box-shadow: var(--shadow-1);
 }
 
-/* invite */
+.install-strip::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--brass-hi), var(--brass) 60%, var(--vermillion-lo) 120%);
+  box-shadow: 0 1px 1px var(--brass-shadow);
+}
 
+.install-block { display: grid; gap: 2px; min-width: 0; }
+.install-title { font-weight: 600; }
+.install-body { color: var(--ink-2); font-size: 13px; }
+
+/* Invite panel — a celluloid tile with a stronger brass anchor. */
 .invite {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: rgba(63, 93, 74, 0.05);
+  padding: 16px 18px 16px 32px;
+  background: linear-gradient(180deg, var(--celluloid-hi), var(--celluloid));
+  border-radius: 4px;
+  border: 1px solid var(--brass);
+  position: relative;
+  box-shadow: var(--shadow-1);
+}
+
+.invite::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, var(--brass-hi), var(--brass) 60%, var(--vermillion-lo) 120%);
+  box-shadow: 0 1px 2px var(--brass-shadow);
 }
 
 .invite p { color: var(--ink); font-size: 15px; }
 
-/* incoming */
-
+/* Incoming — inline rows with a brass mark. */
 .incoming {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   padding: 0;
 }
 
@@ -444,18 +575,31 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
-  border-left: 2px solid var(--accent);
-  background: rgba(63, 93, 74, 0.05);
-  border-radius: 0 6px 6px 0;
+  padding: 10px 14px 10px 26px;
+  background: var(--celluloid-hi);
+  border-radius: 3px;
   font-size: 14px;
   color: var(--ink);
+  position: relative;
+  box-shadow: var(--shadow-1);
+}
+
+.incoming-row::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brass);
+  box-shadow: 0 1px 1px var(--brass-shadow);
 }
 
 .incoming-row strong { font-weight: 600; }
 
-/* games */
-
+/* Games — rows on the ground, no boxes; hairline separators. */
 .games .game-rows {
   display: grid;
   gap: 1px;
@@ -470,29 +614,29 @@ select {
   align-items: center;
   gap: 16px;
   padding: 14px 4px;
-  background: var(--paper);
+  background: transparent;
   border: 0;
   text-align: left;
   cursor: pointer;
   transition: background 180ms var(--ease);
+  color: var(--ink);
 }
 
-.game-row:hover { background: var(--paper-2); }
+.game-row:hover { background: rgba(255, 245, 210, 0.35); }
 
-.game-row.accent { color: var(--ink); }
 .game-row.accent .row-status::before {
   content: "";
   display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--brass);
   margin-right: 8px;
   vertical-align: middle;
   animation: pulse 2s var(--ease) infinite;
 }
 
-.row-mono { font-family: var(--mono); font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.row-mono { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
 .row-status { font-size: 15px; color: var(--ink); }
 .row-arrow { color: var(--ink-3); font-size: 18px; padding-right: 8px; }
 
@@ -501,11 +645,10 @@ select {
   50% { opacity: 0.4; }
 }
 
-/* play */
-
+/* Play — tabs as underlined headers, form inline. */
 .tabs {
   display: inline-flex;
-  gap: 24px;
+  gap: 20px;
   align-items: baseline;
 }
 
@@ -516,8 +659,11 @@ select {
   border: 0;
   border-bottom: 1px solid transparent;
   color: var(--ink-3);
-  font-size: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
   font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   transition: color 180ms var(--ease), border-color 180ms var(--ease);
   border-radius: 0;
   cursor: pointer;
@@ -527,7 +673,7 @@ select {
 
 .tab.active {
   color: var(--ink);
-  border-bottom-color: var(--ink);
+  border-bottom-color: var(--brass);
 }
 
 .play-form {
@@ -537,9 +683,6 @@ select {
   align-items: end;
 }
 
-.play-form .field { grid-column: span 1; }
-
-.play-action { align-self: end; }
 .play-action .primary { min-width: 110px; }
 
 .pending {
@@ -547,13 +690,13 @@ select {
   display: grid;
   gap: 6px;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: 12px;
+  font-family: var(--mono);
 }
 
 .pending li { display: flex; align-items: center; gap: 6px; }
 
-/* friends */
-
+/* Friends — same rowed pattern; celluloid tiles. */
 .add-friend {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -562,13 +705,13 @@ select {
   margin-bottom: 16px;
 }
 
-.add-friend .primary { min-width: 84px; }
+.add-friend .primary { min-width: 90px; }
 
 .invite-fallback {
   padding: 8px 12px;
   border: 1px solid var(--hair);
-  border-radius: 6px;
-  background: var(--paper-2);
+  border-radius: 3px;
+  background: var(--celluloid-hi);
   color: var(--ink-2);
   font-family: var(--mono);
   font-size: 12px;
@@ -589,8 +732,9 @@ select {
   align-items: center;
   justify-content: space-between;
   padding: 12px 4px;
-  background: var(--paper);
+  background: transparent;
   font-size: 15px;
+  color: var(--ink);
 }
 
 .friend-handle { color: var(--ink); }
@@ -600,7 +744,10 @@ select {
   align-items: center;
   gap: 6px;
   color: var(--ink-3);
-  font-size: 13px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .presence .dot {
@@ -610,8 +757,8 @@ select {
   background: var(--ink-3);
 }
 
-.presence.online { color: var(--accent-2); }
-.presence.online .dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(63, 93, 74, 0.15); }
+.presence.online { color: var(--leather-warm); }
+.presence.online .dot { background: var(--brass); box-shadow: 0 0 0 3px rgba(181, 138, 60, 0.18); }
 
 /* ---------- game screen ---------- */
 
@@ -637,12 +784,7 @@ select {
   padding: 8px 4px;
 }
 
-.who {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
+.who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 
 .handle-line {
   font-size: 15px;
@@ -653,18 +795,23 @@ select {
 }
 
 .you {
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
   color: var(--ink-3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .connection {
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
-.connection.connected { color: var(--accent-2); }
-.connection.reconnecting { color: #a06712; }
-.connection.gone { color: var(--ink-3); }
+.connection.connected   { color: var(--leather-warm); }
+.connection.reconnecting { color: var(--brass); }
+.connection.gone        { color: var(--ink-3); }
 
 .clock {
   font-family: var(--mono);
@@ -674,23 +821,22 @@ select {
   letter-spacing: -0.02em;
 }
 
+/* The board — sits in a deep leather frame, like the wallet's board
+   pocket. */
 .board-holder {
-  /* Width has THREE independent caps — the aspect-ratio child then
-     derives its square height from the resulting width. All three are
-     definite; none feeds back through an auto grid track. */
   width: min(100%, calc(100vw - 40px), 720px);
   margin-inline: auto;
   aspect-ratio: 1;
-  padding: 6px;
-  background: var(--board-frame);
+  padding: 10px;
+  background:
+    linear-gradient(135deg, var(--leather) 0%, var(--leather-deep) 100%);
   border-radius: 4px;
-  box-shadow: var(--shadow);
+  box-shadow:
+    inset 0 0 0 1px rgba(181, 138, 60, 0.18),
+    var(--shadow-2);
 }
 
 .board {
-  /* The holder is already a square; the board fills it. No second
-     aspect-ratio here — a redundant one gave iOS Safari a second
-     resolution path to compound on. */
   width: 100%;
   height: 100%;
   display: grid;
@@ -699,6 +845,7 @@ select {
   border-radius: 2px;
   overflow: hidden;
   position: relative;
+  box-shadow: inset 0 0 0 1px rgba(30, 21, 12, 0.4);
 }
 
 .square {
@@ -709,10 +856,25 @@ select {
   position: relative;
   cursor: pointer;
   transition: filter 120ms var(--ease);
+  /* Hand-painted square feel — a subtle brush overlay via a repeating
+     radial gradient with irregular opacity. */
+  background-image:
+    radial-gradient(ellipse at 20% 30%, rgba(255, 255, 255, 0.06), transparent 60%),
+    radial-gradient(ellipse at 80% 70%, rgba(0, 0, 0, 0.05), transparent 60%);
 }
 
-.square.light { background: var(--board-light); }
-.square.dark  { background: var(--board-dark); }
+.square.light {
+  background-color: var(--honey);
+  background-image:
+    radial-gradient(ellipse at 20% 30%, rgba(255, 255, 255, 0.14), transparent 55%),
+    radial-gradient(ellipse at 80% 80%, rgba(74, 50, 32, 0.10), transparent 60%);
+}
+.square.dark {
+  background-color: var(--coffee);
+  background-image:
+    radial-gradient(ellipse at 30% 20%, rgba(181, 138, 60, 0.10), transparent 55%),
+    radial-gradient(ellipse at 80% 80%, rgba(0, 0, 0, 0.20), transparent 60%);
+}
 
 .square:hover { filter: brightness(1.06); }
 
@@ -723,7 +885,7 @@ select {
   content: "";
   position: absolute;
   inset: 0;
-  background: var(--selected);
+  background: rgba(181, 138, 60, 0.42);
   pointer-events: none;
 }
 
@@ -732,16 +894,19 @@ select {
   font-family: var(--mono);
   font-size: 9px;
   font-weight: 600;
-  color: rgba(23, 20, 15, 0.55);
+  color: rgba(30, 21, 12, 0.55);
   pointer-events: none;
   line-height: 1;
 }
 
-.square.dark .coord { color: rgba(245, 239, 223, 0.75); }
+.square.dark .coord { color: rgba(242, 233, 204, 0.7); }
 
 .coord-rank { top: 3px; left: 4px; }
 .coord-file { bottom: 3px; right: 5px; }
 
+/* Pieces — celluloid silhouettes on the leather-and-paint board.
+   Each piece is a Unicode Staunton glyph rendered in ink for black
+   and near-white celluloid for white. */
 .piece {
   font-family: "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols 2", sans-serif;
   font-size: clamp(28px, 8.6vw, 56px);
@@ -752,20 +917,19 @@ select {
   z-index: 1;
 }
 
-/* white pieces are outline glyphs; give them a very soft fill via drop-shadow */
 .piece-w {
-  color: #f7f0dc;
+  color: var(--celluloid-hi);
   text-shadow:
-    0 0 1px #1a1613,
-    0 0 1px #1a1613,
-    0 1px 0 rgba(0, 0, 0, 0.18);
+    0 0 1px var(--ink),
+    0 0 1px var(--ink),
+    0 1px 0 rgba(0, 0, 0, 0.2);
 }
 .piece-b {
-  color: #1a1613;
-  text-shadow: 0 1px 0 rgba(245, 239, 223, 0.25);
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(242, 233, 204, 0.28);
 }
 
-/* game side rail */
+/* Game side rail */
 
 .game-side {
   display: grid;
@@ -783,6 +947,7 @@ select {
 
 .game-status .terminal {
   font-family: var(--serif);
+  font-style: italic;
   font-size: 18px;
 }
 
@@ -808,7 +973,7 @@ select {
   gap: 6px;
   align-items: baseline;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ink);
 }
 
@@ -817,10 +982,7 @@ select {
 /* ---------- responsive ---------- */
 
 @media (min-width: 720px) {
-  .shell { max-width: 760px; padding: 32px 32px 96px; }
-
   .clock { font-size: 34px; }
-
   .piece { font-size: clamp(36px, 6vw, 60px); }
 }
 
@@ -831,21 +993,14 @@ select {
     align-items: start;
     gap: 32px;
   }
-  /* Explicit min-width: 0 on grid items so a child with intrinsic
-     min-content wider than the track (like the board's 8-column grid
-     with pieces) can never push the track wider than 1fr. */
   .board-column { max-width: 720px; min-width: 0; }
   .game-side { min-width: 0; }
 }
 
 @media (max-width: 520px) {
-  .display { font-size: 32px; }
   .section-title { font-size: 20px; }
 
-  .play-form {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
+  .play-form { grid-template-columns: 1fr; gap: 10px; }
   .play-action { justify-self: stretch; }
   .play-action .primary { width: 100%; }
 
