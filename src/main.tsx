@@ -115,12 +115,12 @@ function App() {
     return () => window.clearInterval(timer);
   }, []);
 
-  if (loading) return <Shell><LoadingLine /></Shell>;
+  if (loading) return <Shell onSignedOut={() => setHome(null)}><LoadingLine /></Shell>;
   if (!home) return <AuthScreen onSignedIn={refresh} message={message} setMessage={setMessage} />;
   if (gameMatch) return <GameScreen gameId={gameMatch[1]} home={home} onHome={() => navigate("/", refresh)} setMessage={setMessage} />;
 
   return (
-    <Shell home={home} message={message} setMessage={setMessage}>
+    <Shell home={home} message={message} setMessage={setMessage} onSignedOut={() => setHome(null)}>
       <Dashboard home={home} inviteToken={inviteMatch?.[1]} refresh={refresh} setMessage={setMessage} />
     </Shell>
   );
@@ -131,11 +131,13 @@ function Shell({
   home,
   message,
   setMessage,
+  onSignedOut,
 }: {
   children?: React.ReactNode;
   home?: HomeData | null;
   message?: string;
   setMessage?: (value: string) => void;
+  onSignedOut?: () => void;
 }) {
   return (
     <main className="shell">
@@ -144,7 +146,7 @@ function Shell({
         {home ? (
           <div className="account">
             <span className="handle">@{home.user.handle}</span>
-            <button className="ghost" onClick={() => void signOut()}>Sign out</button>
+            <button className="ghost" onClick={() => void signOut(onSignedOut || (() => undefined))}>Sign out</button>
           </div>
         ) : null}
       </header>
@@ -186,54 +188,78 @@ function AuthScreen({
 }) {
   const [handle, setHandle] = useState("");
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"continue" | "register">("continue");
+  // Preflight probe result: does this handle already have an account? Determined
+  // silently on input-debounce so Continue can run the right flow inside a
+  // single click's user activation (WebAuthn will not chain two credential
+  // prompts across separate activations reliably on all engines).
+  const [flow, setFlow] = useState<"login" | "register" | "unknown">("unknown");
 
-  function reset() {
-    setMode("continue");
-  }
-
-  async function tryLogin() {
-    setBusy(true);
-    try {
-      const optionsJSON = await api<PublicKeyCredentialRequestOptionsJSON>("/api/auth/login/options", {
-        method: "POST",
-        body: JSON.stringify({ handle }),
-      });
-      const response = await startAuthentication({ optionsJSON });
-      await api("/api/auth/login/verify", { method: "POST", body: JSON.stringify({ handle, response }) });
-      await onSignedIn();
-    } catch (error) {
-      const text = error instanceof Error ? error.message : "";
-      if (/no account/i.test(text)) {
-        setMode("register");
-        setMessage("");
-      } else {
-        setMessage(text || "Sign in failed.");
+  useEffect(() => {
+    const trimmed = handle.trim();
+    if (!trimmed) {
+      setFlow("unknown");
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        await api("/api/auth/login/options", { method: "POST", body: JSON.stringify({ handle: trimmed }) });
+        if (!cancelled) setFlow("login");
+      } catch (error) {
+        if (cancelled) return;
+        const text = error instanceof Error ? error.message : "";
+        setFlow(/no account/i.test(text) ? "register" : "login");
       }
-    } finally {
-      setBusy(false);
-    }
-  }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [handle]);
 
-  async function register() {
+  async function submit() {
+    if (!handle || busy) return;
     setBusy(true);
     try {
-      const optionsJSON = await api<PublicKeyCredentialCreationOptionsJSON>("/api/auth/register/options", {
-        method: "POST",
-        body: JSON.stringify({ handle }),
-      });
-      const response = await startRegistration({ optionsJSON });
-      await api("/api/auth/register/verify", { method: "POST", body: JSON.stringify({ handle, response }) });
+      // If the probe hasn't landed yet, do it inline — still a single user
+      // gesture from the browser's perspective for the credential call that
+      // follows, and cheaper than forcing a second click.
+      let decided = flow;
+      if (decided === "unknown") {
+        try {
+          await api<PublicKeyCredentialRequestOptionsJSON>("/api/auth/login/options", {
+            method: "POST",
+            body: JSON.stringify({ handle }),
+          });
+          decided = "login";
+        } catch (error) {
+          const text = error instanceof Error ? error.message : "";
+          decided = /no account/i.test(text) ? "register" : "login";
+        }
+      }
+
+      if (decided === "register") {
+        const optionsJSON = await api<PublicKeyCredentialCreationOptionsJSON>("/api/auth/register/options", {
+          method: "POST",
+          body: JSON.stringify({ handle }),
+        });
+        const response = await startRegistration({ optionsJSON });
+        await api("/api/auth/register/verify", { method: "POST", body: JSON.stringify({ handle, response }) });
+      } else {
+        const optionsJSON = await api<PublicKeyCredentialRequestOptionsJSON>("/api/auth/login/options", {
+          method: "POST",
+          body: JSON.stringify({ handle }),
+        });
+        const response = await startAuthentication({ optionsJSON });
+        await api("/api/auth/login/verify", { method: "POST", body: JSON.stringify({ handle, response }) });
+      }
       await onSignedIn();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Registration failed.");
+      setMessage(error instanceof Error ? error.message : "Sign in failed.");
     } finally {
       setBusy(false);
     }
   }
-
-  const primary = mode === "register" ? register : tryLogin;
-  const label = mode === "register" ? "Create passkey" : "Continue";
 
   return (
     <Shell message={message} setMessage={setMessage}>
@@ -247,17 +273,14 @@ function AuthScreen({
           className="auth-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!busy && handle) void primary();
+            void submit();
           }}
         >
           <label className="field">
             <span className="field-label">Handle</span>
             <input
               value={handle}
-              onChange={(event) => {
-                setHandle(event.target.value);
-                if (mode === "register") reset();
-              }}
+              onChange={(event) => setHandle(event.target.value)}
               placeholder="your_handle"
               autoComplete="username webauthn"
               autoCapitalize="none"
@@ -265,11 +288,8 @@ function AuthScreen({
               spellCheck={false}
             />
           </label>
-          {mode === "register" ? (
-            <p className="hint">No account for <strong>@{handle}</strong> yet. Create one now.</p>
-          ) : null}
           <button className="primary" type="submit" disabled={busy || !handle}>
-            {busy ? "Working…" : label}
+            {busy ? "Working…" : "Continue"}
           </button>
           <p className="footnote">Passkeys only — no password, no email.</p>
         </form>
@@ -310,6 +330,7 @@ function Dashboard({
 
 function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: (value: string) => void }) {
   const [pushStatus, setPushStatus] = useState<PushStatus>("checking");
+  const [installed, setInstalled] = useState<boolean>(() => detectInstalled());
 
   async function checkPushStatus() {
     if (!home.pushPublicKey || !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
@@ -331,6 +352,10 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: (valu
 
   useEffect(() => {
     void checkPushStatus().catch(() => setPushStatus("ready"));
+    const media = window.matchMedia("(display-mode: standalone)");
+    const update = () => setInstalled(detectInstalled());
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
   }, [home.pushPublicKey]);
 
   async function enablePush() {
@@ -356,20 +381,43 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: (valu
     }
   }
 
-  if (pushStatus === "enabled" || pushStatus === "unsupported" || pushStatus === "checking") return null;
+  // Install guidance and notification enablement are independent. Show
+  // install guidance whenever the app isn't launched from the Home Screen
+  // (this matters ESPECIALLY in private browsing where push is unsupported
+  // — that's the one case where the user most needs install instructions).
+  const showInstall = !installed;
+  const showEnablePush = pushStatus === "ready";
+  const showBlocked = pushStatus === "blocked";
+  const showEnabled = pushStatus === "enabled";
+
+  if (!showInstall && !showEnablePush && !showBlocked) return null;
 
   return (
     <div className="install-strip">
-      <p>
-        {pushStatus === "blocked"
-          ? "Notifications are blocked in this browser."
-          : "Add to Home Screen on iPhone, then enable notifications."}
-      </p>
-      {pushStatus === "ready" ? (
+      {showInstall ? (
+        <div className="install-block">
+          <p className="install-title">Install to your Home Screen</p>
+          <p className="install-body">
+            iPhone: open Share, choose Add to Home Screen. Android/Chrome: menu → Install app.
+          </p>
+        </div>
+      ) : null}
+      {showEnablePush ? (
         <button className="ghost" onClick={enablePush}>Enable notifications</button>
       ) : null}
+      {showBlocked && !showInstall ? (
+        <p className="install-body">Notifications are blocked in this browser.</p>
+      ) : null}
+      {showEnabled ? null : null}
     </div>
   );
+}
+
+function detectInstalled(): boolean {
+  if (typeof window === "undefined") return false;
+  const standalone = window.matchMedia?.("(display-mode: standalone)").matches;
+  const iosStandalone = (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+  return Boolean(standalone || iosStandalone);
 }
 
 function InvitePanel({
@@ -950,9 +998,13 @@ function urlBase64ToUint8Array(value: string) {
   return Uint8Array.from([...raw].map((char) => char.charCodeAt(0)));
 }
 
-async function signOut() {
+async function signOut(onSignedOut: () => void) {
   await api("/api/auth/logout", { method: "POST", body: "{}" });
-  navigate("/");
+  // Clear in-memory identity FIRST so the AuthScreen renders immediately —
+  // the previous version pushState-only'd and left the dashboard mounted
+  // with stale home data. Then push the URL so future refresh() sees "/".
+  onSignedOut();
+  window.history.pushState({}, "", "/");
 }
 
 function navigate(path: string, after?: () => void) {

@@ -109,6 +109,44 @@ test("board holds a stable size at mobile viewport under scroll", async ({ brows
   await context.close();
 });
 
+// Regression guard for the sign-out bug: signOut() used to pushState-only,
+// leaving stale home state so the dashboard kept rendering after logout.
+// The fix does a hard navigation. Test that after clicking Sign out, we land
+// back on the auth screen (Handle input visible).
+test("sign out returns to the auth screen", async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await addAuthenticator(page);
+  await page.goto("/");
+  const handle = `signout_${Date.now().toString(36).slice(-6)}`;
+  await register(page, handle);
+  await expect(page.getByText(`@${handle}`)).toBeVisible();
+
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByPlaceholder("your_handle")).toBeVisible();
+  await expect(page.getByText(`@${handle}`)).toBeHidden();
+
+  await context.close();
+});
+
+// Regression guard for the install-panel-disappears-in-private-browsing bug:
+// install guidance must show independently of push support.
+test("install guidance shows even when push is unsupported", async ({ browser }) => {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    // Simulate a private-browsing / push-unsupported environment: strip PushManager.
+    Object.defineProperty(window, "PushManager", { configurable: true, value: undefined });
+  });
+  const page = await context.newPage();
+  await addAuthenticator(page);
+  await page.goto("/");
+  const handle = `noPush_${Date.now().toString(36).slice(-6)}`;
+  await register(page, handle);
+  await expect(page.getByText("Install to your Home Screen")).toBeVisible();
+
+  await context.close();
+});
+
 test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   mkdirSync(screenDir, { recursive: true });
   const suffix = Date.now().toString(36).slice(-6);
@@ -244,8 +282,11 @@ async function addAuthenticator(page: Page) {
 
 async function register(page: Page, handle: string) {
   await page.getByPlaceholder("your_handle").fill(handle);
+  // One-press auth: Continue chooses login or passkey creation itself,
+  // based on a debounced preflight of the handle. Wait a moment so the
+  // preflight has a chance to land before we click.
+  await page.waitForTimeout(500);
   await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Create passkey" }).click();
   await expect(page.getByText(`@${handle}`)).toBeVisible();
 }
 
