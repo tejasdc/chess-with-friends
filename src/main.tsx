@@ -638,9 +638,11 @@ function GameScreen({ gameId, home, onHome, setMessage }: { gameId: string; home
               Resign
             </button>
           )}
-          <ol className="moves">
-            {game.moves.map((move, index) => <li key={`${move.at}-${index}`}>{move.san}</li>)}
-          </ol>
+          {game.moves.length ? (
+            <ol className="moves">
+              {game.moves.map((move, index) => <li key={`${move.at}-${index}`}>{move.san}</li>)}
+            </ol>
+          ) : null}
         </aside>
       </section>
     </Shell>

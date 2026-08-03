@@ -8,6 +8,7 @@
 - Added focused e2e evidence for the notification prompt disappearing after permission/subscription and staying gone after reload. `npx playwright test -g "notification prompt"` passed.
 - First full visual pass implemented in `src/main.tsx` and `src/styles.css`: neutral brand copy, gaja mark, Mewar-inspired manuscript panels, styled controls, stronger board frame, and redesigned clocks/game side. `npm run typecheck` passed.
 - Iterated desktop dashboard from a vertical panel stack into an asymmetric grid. `npm run typecheck` and `npm run build` passed; visually inspected `tmp/reviews/inspect-home-desktop.png` and `tmp/reviews/inspect-home-mobile.png`.
+- Full local verification passed once: `npm run test:push && npm run typecheck && npm run build && npm run test:e2e`. Visually inspected notification prompt screenshots, desktop board, and mobile board; removed the empty move-list container from fresh games afterward and `npm run typecheck` passed.
 - Read `docs/requirements.md` and extracted the required v1 contract.
 - Committed scaffold: Vite/React entry, Cloudflare Worker config, PWA manifest, service worker, dependencies.
 - Committed backend: singleton `AppDO` for accounts, friends, invites, schedules, push queue/policy, and `GameDO` for live chess state, WebSocket presence, legal moves, clocks, resign/checkmate/timeout.
