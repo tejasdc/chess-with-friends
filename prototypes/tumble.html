@@ -1,28 +1,28 @@
 <!doctype html>
 <!--
-  Tumble prototype v3 — the delight budget of the landing shelf.
+  Chess-with-friends landing prototype v4 — the WALK transition.
 
-  Rules Tejas made hard (unchanged from v2, tightened in v3):
+  Tejas played v3 and cut the chaos. Verdict: the walk-back reads
+  well; the tumble scatter was too much ("he just goes crazy"). So
+  v4 is walk-only:
 
     1) TAP-TAP MECHANICS. Tap a piece, tap a destination. Zero drag,
-       zero wobble while a position is live. chess.js legality (falls
-       back to permissive if the CDN can't reach us).
+       zero wobble while a position is live. chess.js legality
+       (inlined, so file:// works fully offline).
 
-    2) TUMBLE with weight — a shove hits the board, pieces slide out
-       and rotate, collide with each other, bounce off the teak wall,
-       come to rest as a visible spilled picture. Nothing exits the
-       screen. Some pieces come to rest LYING ON THEIR SIDE (rotation
-       held at ±90°) so the picture reads as chess pieces spilled, not
-       chess pieces scattered.
+    2) WALK TRANSITION. On solve, on Skip, or after ~25s idle: no
+       topple, no physics, no chaos rest state. Each piece just walks
+       — at a deliberate pace — from its current square directly to
+       its next-position square. Per-piece gait (curved bezier path
+       with a small perpendicular arc, footstep bob and tilt that
+       taper at both ends, arrival settle beat), staggered starts by
+       target rank plus per-piece jitter.
 
-    3) WALK-BACK — each piece stands up from its fallen angle, then
-       WALKS across the board to its next-position square. Not a CSS
-       tween. Each piece has a per-frame gait: gentle vertical bob at
-       walking cadence, a curved (slightly arced) path, a rotation
-       tilt that swings with the bob, a micro-pause + small overshoot
-       + recover at the arrival square. Pieces the next position
-       doesn't need walk OFF THE BOARD to a captured tray beside it,
-       and rest there visibly (never off-screen).
+    3) STRAGGLERS + INCOMERS. Pieces the next position doesn't need
+       walk OFF the board to a captured tray beside it (whites below,
+       navies above), and rest there visibly. Any tray pieces the
+       next position DOES need walk back onto the board from the
+       tray. Nothing ever fades or leaves the screen.
 
   Five real, cited positions with credit lines. Cycles on completed
   move, on Skip, or after ~25s idle. Self-contained; open via file://.
@@ -34,7 +34,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>tumble — chess with friends landing prototype (v3)</title>
+<title>walk — chess with friends landing prototype (v4)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
@@ -260,7 +260,7 @@ window.Chess = Chess;
 </head>
 <body>
   <div class="frame">
-    <div class="wordmark">chess with friends · tumble prototype v3</div>
+    <div class="wordmark">chess with friends · walk transition v4</div>
     <div class="stage" id="stage">
       <div class="board-frame">
         <div class="board" id="board"></div>
@@ -617,244 +617,24 @@ skipBtn.addEventListener('click', () => {
 });
 
 // -------------------------------------------------------------------------
-// PHYSICS TUMBLE — top-down "spilled marbles" model.
+// WALK TRANSITION — every piece walks from its CURRENT square to its
+// next-position square (or to a slot in the captured tray if the next
+// position doesn't need it). No preceding tumble; no chaos. Just the
+// walk.
 //
-// Refinements over v2:
-//   • Impulse magnitude scales with distance from the shove origin
-//     (near = harder), so corner pieces get real energy — v2 gave
-//     h1/a8 too little because it used a constant magnitude.
-//   • Very brief ease-in on the impulse (80ms ramp) so the burst reads
-//     as "the board just got shoved" rather than "the pieces
-//     spontaneously exploded".
-//   • At rest, pieces whose angle wound up between 55° and 90° snap
-//     to ±90° — they LIE ON THEIR SIDE, held. Reads as weight.
-//   • Physics bounds = the full stage (with a small pad). Pieces can
-//     travel off the board onto the celadon ground and rest there.
-// -------------------------------------------------------------------------
-function tumble() {
-  return new Promise((resolve) => {
-    // Radial impulse from BOARD CENTER — every piece flies outward in
-    // its own direction, so pieces spread across all eight ranks
-    // instead of piling on one wall. Magnitude scales with distance
-    // from center so corner pieces (which were starved by v2's
-    // constant magnitude) get enough energy to travel.
-    const cx = boardX + boardW / 2;
-    const cy = boardY + boardH / 2;
-
-    const state = livePieces.map(p => {
-      const pcx = p.x + sqSize / 2;
-      const pcy = p.y + sqSize / 2;
-      const dx = pcx - cx, dy = pcy - cy;
-      const dist = Math.max(sqSize * 0.5, Math.hypot(dx, dy));
-      const rnx = dx / dist, rny = dy / dist;
-      // Farther from center = more impulse (corner rooks fly harder).
-      // Impulse composition. All starting-position pieces begin on
-      // the outer ranks (1,2,7,8), so a radial-outward push slams
-      // every piece into its nearest wall and leaves the middle
-      // empty. Instead we give each piece a mostly-RANDOM direction
-      // (uniform angle) plus a small radial-INWARD bias so the
-      // empty middle gets populated. Board-edge walls (see PAD)
-      // catch pieces that would otherwise leave; wall restitution
-      // sends them back into play with some remaining energy.
-      const farness = Math.min(1, dist / (boardW * 0.5));
-      // With less-aggressive damping (time constant ~200ms), the
-      // impulse budget is much smaller: v0 * 200 = travel. We want
-      // 1.5–3 squares of travel, so v0 ≈ 0.5–1.1 px/ms.
-      // Inward bias: pushes outer pieces toward the empty middle.
-      const inwardMag = sqSize * 0.008 * (0.5 + 0.6 * farness);
-      // Random direction (uniform angle), varied magnitude.
-      const randAngle = Math.random() * Math.PI * 2;
-      const randMag = sqSize * (0.010 + Math.random() * 0.008);
-      const jx = Math.cos(randAngle) * randMag;
-      const jy = Math.sin(randAngle) * randMag;
-      // Radial component is NEGATIVE (inward): rnx points away from
-      // center, so we subtract to move toward center.
-      const mag = -inwardMag;
-      return {
-        p,
-        x: pcx, y: pcy,
-        // Target velocity (ramped in via ease-in over first 80ms).
-        // Positive rnx*mag = radial OUTWARD; jitter breaks the
-        // perfect radial symmetry.
-        tvx: rnx * mag + jx,
-        tvy: rny * mag + jy,
-        vx: 0, vy: 0,
-        rot: p.rot,
-        vr: (Math.random() - 0.5) * 0.020,  // rad/ms
-        // Slightly smaller collision radius than the visual piece so
-        // pieces in adjacent squares don't collide at rest and so
-        // launching-adjacent pieces don't immediately jam each other.
-        r: sqSize * 0.30,
-        mass: 1 + (p.type === 'k' || p.type === 'q' ? 0.5 : 0),
-      };
-    });
-
-    // Physics constants (units: px, ms). Less aggressive damping
-    // (time constant ~200ms) so pieces that hit the teak wall have
-    // energy left to travel back into the board interior — otherwise
-    // everything settles at the walls and the middle stays empty.
-    const LINEAR_DAMPING   = 0.9950;
-    const ANGULAR_DAMPING  = 0.9910;
-    const WALL_RESTITUTION = 0.62;
-    const IMPULSE_RAMP_MS = 80;
-    const DURATION = 1650;
-    const REST_HOLD = 550;
-
-    // Physics bounds = the BOARD interior (the teak frame is the
-    // physical wall). Pieces bounce off the frame and stay on the
-    // playing surface in visible chaos. Straggler pieces walk out to
-    // the captured tray during walk-back; nobody flies off the board
-    // during tumble. This mirrors v2's stage-fills-board layout, which
-    // spread pieces evenly across the board without corner-pileups.
-    const PAD = sqSize * 0.08;
-    const minX = boardX + PAD, maxX = boardX + boardW - PAD;
-    const minY = boardY + PAD, maxY = boardY + boardH - PAD;
-
-    const start = performance.now();
-    let last = start;
-
-    function step(now) {
-      const dt = Math.min(32, now - last);
-      last = now;
-      const t = now - start;
-
-      // Ease-in ramp: 0 → 1 over IMPULSE_RAMP_MS (cubic ease-out feel).
-      const rampT = Math.min(1, t / IMPULSE_RAMP_MS);
-      const ramp = 1 - Math.pow(1 - rampT, 3);
-      for (const s of state) {
-        s.vx = s.tvx * ramp;
-        s.vy = s.tvy * ramp;
-      }
-      // Once the ramp completes, we stop overwriting velocity — from
-      // this point forward, damping and collisions take over.
-      // (After ramp, the assignments above are still needed on the last
-      // ramping frame but harmless.)
-
-      const frameDamp = Math.pow(LINEAR_DAMPING, dt);
-      const frameAngDamp = Math.pow(ANGULAR_DAMPING, dt);
-
-      // Substep collisions/motion for stability under high initial vel.
-      const SUBSTEPS = 3;
-      const sdt = dt / SUBSTEPS;
-
-      for (let step = 0; step < SUBSTEPS; step++) {
-        for (const s of state) {
-          if (t > IMPULSE_RAMP_MS) {
-            s.vx *= Math.pow(LINEAR_DAMPING, sdt);
-            s.vy *= Math.pow(LINEAR_DAMPING, sdt);
-          }
-          s.vr *= Math.pow(ANGULAR_DAMPING, sdt);
-          s.x  += s.vx * sdt;
-          s.y  += s.vy * sdt;
-          s.rot += s.vr * sdt;
-
-          // Cap total rotation at ±π so we don't spin arbitrarily.
-          if (s.rot >  Math.PI) s.rot -= Math.PI * 2;
-          if (s.rot < -Math.PI) s.rot += Math.PI * 2;
-
-          if (s.x - s.r < minX) { s.x = minX + s.r; s.vx = -s.vx * WALL_RESTITUTION; }
-          if (s.x + s.r > maxX) { s.x = maxX - s.r; s.vx = -s.vx * WALL_RESTITUTION; }
-          if (s.y - s.r < minY) { s.y = minY + s.r; s.vy = -s.vy * WALL_RESTITUTION; }
-          if (s.y + s.r > maxY) { s.y = maxY - s.r; s.vy = -s.vy * WALL_RESTITUTION; }
-
-          // Hard rest snap: below threshold, kill motion so nothing
-          // jitters at the sub-pixel scale.
-          if (Math.abs(s.vx) < baseRest() && Math.abs(s.vy) < baseRest()) {
-            s.vx = 0; s.vy = 0;
-          }
-        }
-
-        // Pairwise circle collisions (32 bodies → ~500 pair checks).
-        for (let i = 0; i < state.length; i++) {
-          for (let j = i + 1; j < state.length; j++) {
-            const a = state[i], b = state[j];
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const dist = Math.hypot(dx, dy);
-            const minDist = a.r + b.r;
-            if (dist < minDist && dist > 0.001) {
-              const overlap = (minDist - dist);
-              const nx = dx / dist, ny = dy / dist;
-              const totalM = a.mass + b.mass;
-              a.x -= nx * overlap * (b.mass / totalM);
-              a.y -= ny * overlap * (b.mass / totalM);
-              b.x += nx * overlap * (a.mass / totalM);
-              b.y += ny * overlap * (a.mass / totalM);
-              const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
-              const vn = rvx * nx + rvy * ny;
-              if (vn < 0) {
-                const restitution = 0.32;
-                const jimp = -(1 + restitution) * vn / (1/a.mass + 1/b.mass);
-                a.vx -= jimp * nx / a.mass;
-                a.vy -= jimp * ny / a.mass;
-                b.vx += jimp * nx / b.mass;
-                b.vy += jimp * ny / b.mass;
-                // Impact-induced spin.
-                const impact = Math.abs(vn);
-                const spin = impact * 0.0012;
-                a.vr -= spin * (Math.random() - 0.5) * 2;
-                b.vr += spin * (Math.random() - 0.5) * 2;
-              }
-            }
-          }
-        }
-      }
-
-      // Render.
-      for (const s of state) {
-        const tx = s.x - sqSize / 2;
-        const ty = s.y - sqSize / 2;
-        const deg = s.rot * 180 / Math.PI;
-        s.p.el.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(${deg.toFixed(2)}deg)`;
-        s.p.x = tx; s.p.y = ty; s.p.rot = s.rot;
-      }
-
-      if (t < DURATION) requestAnimationFrame(step);
-      else {
-        // At rest: snap pieces whose rotation ended in the "fallen"
-        // zone to exactly ±90°. Reads as "lying on its side, held".
-        for (const s of state) {
-          const abs = Math.abs(s.rot);
-          if (abs > (55 * Math.PI / 180)) {
-            const signed = Math.sign(s.rot) * (Math.PI / 2);
-            s.rot = signed;
-            const tx = s.x - sqSize / 2;
-            const ty = s.y - sqSize / 2;
-            const deg = s.rot * 180 / Math.PI;
-            // Brief settle to the locked angle (200ms) so the snap
-            // itself has a beat instead of jumping.
-            s.p.el.style.transition = 'transform 200ms cubic-bezier(0.34, 1.5, 0.64, 1)';
-            s.p.el.style.transform = `translate(${tx}px, ${ty}px) rotate(${deg.toFixed(2)}deg)`;
-            s.p.rot = s.rot;
-          }
-        }
-        // After a hold beat (letting the picture read), resolve.
-        setTimeout(() => {
-          // Clear any settle-snap transitions so the walk-back can
-          // drive transforms every frame without interference.
-          for (const s of state) s.p.el.style.transition = '';
-          resolve();
-        }, REST_HOLD);
-      }
-    }
-    function baseRest() { return sqSize * 0.00035; }
-    requestAnimationFrame(step);
-  });
-}
-
-// -------------------------------------------------------------------------
-// WALK-BACK — every piece walks to its next-position square (or to a
-// slot in the captured tray, if the next position doesn't need it).
+// v4 removed v3's tumble entirely per Tejas's judgment ("goes crazy").
+// The stand-up phase is still here as a no-op envelope (angle=0 → 0)
+// because piece rotation is 0 for live pieces; if any piece ever has
+// a nonzero rot (from a future variant), it would still resolve
+// cleanly.
 //
-// v3 replaces the CSS-tween of v2 with a rAF-driven per-piece animation
-// that gives every piece a walk:
-//
-//   Phase 1 (0 → STAND_MS):   rotate from fallen angle back to 0 with
-//                             an ease-out. The piece "stands up".
-//   Phase 2 (STAND_MS → END): travel from fallen center to destination
-//                             center along a slightly curved bezier
-//                             (per-piece perpendicular offset), with:
-//                             • vertical bob at footstep cadence
-//                               (2.5 steps per second-of-travel),
+//   Phase 1 (0 → STAND_MS):   rotate from current angle → 0 with an
+//                             ease-out. No-op for pieces standing on
+//                             their squares (rot=0 → 0).
+//   Phase 2 (STAND_MS → END): travel from current center to
+//                             destination center along a slightly
+//                             curved bezier, with:
+//                             • vertical bob at footstep cadence,
 //                               tapered at both ends of the trip
 //                             • rotation tilt swinging with the bob,
 //                               tapered at both ends
@@ -869,7 +649,7 @@ function tumble() {
 // coordinate is boardY - sqSize * 0.6, cream in one row, navy in
 // another). They stay visible on the ground — never off-screen.
 // -------------------------------------------------------------------------
-function walkBack() {
+function walkTransition() {
   return new Promise((resolve) => {
     const pos = POSITIONS[posIndex];
     creditEl.textContent = pos.credit;
@@ -935,8 +715,12 @@ function walkBack() {
       const startCX = piece.x + sqSize / 2;
       const startCY = piece.y + sqSize / 2;
       const dist = Math.hypot(endCX - startCX, endCY - startCY);
-      const speed = boardW * 1.15;   // px per second, walking pace
-      const duration = Math.max(700, Math.min(1400, (dist / speed) * 1000));
+      // Piece is already on its target square — skip the animation
+      // (bob-in-place looks like a bug, not a beat). This is common in
+      // v4 walk-only transitions: most pieces don't change squares.
+      if (dist < sqSize * 0.06) return null;
+      const speed = boardW * 0.90;   // px per second, deliberate pace
+      const duration = Math.max(900, Math.min(1700, (dist / speed) * 1000));
       // Stagger by rank so the far rank moves first; add larger per-
       // piece jitter (0–180ms) so the crowd doesn't march in lockstep.
       const rankDelay = (8 - (rankHint ?? 4)) * 70;
@@ -957,7 +741,7 @@ function walkBack() {
       const cx = (startCX + endCX) / 2 + (px / perpLen) * curveAmt;
       const cy = (startCY + endCY) / 2 + (py / perpLen) * curveAmt;
 
-      walks.push({
+      const w = {
         piece,
         startCX, startCY, startAngle: piece.rot,
         endCX, endCY, endAngle: 0,
@@ -965,34 +749,41 @@ function walkBack() {
         startAt, duration,
         isTray,
         fadeIn: false,
-      });
+      };
+      walks.push(w);
+      return w;
     }
 
+    // Register the new live and tray sets FIRST — independent of
+    // whether each piece actually needed a walk. Some pieces are
+    // already on their target squares (very common in v4: most pieces
+    // don't change squares between adjacent chess positions) so their
+    // walk is skipped, but they still belong to livePieces.
+    const nextLive = [];
+    const nextTray = [];
     for (const t of targets) {
       const p = t.assigned;
-      pushWalk(p, t.end.x, t.end.y, false, Number(t.sq[1]));
-      // Update logical square immediately so subsequent live state is
-      // correct once the walk settles.
+      const w = pushWalk(p, t.end.x, t.end.y, false, Number(t.sq[1]));
       p.sq = t.sq;
-      if (t._fadeIn) walks[walks.length - 1].fadeIn = true;
+      if (w && t._fadeIn) w.fadeIn = true;
+      nextLive.push(p);
     }
     whiteQueue.forEach((p, i) => {
       const endCX = boardX + sqSize * 0.5 + i * trayGap;
       const endCY = trayYWhite;
       pushWalk(p, endCX, endCY, true, 8);
       p.sq = null;
+      nextTray.push(p);
     });
     blackQueue.forEach((p, i) => {
       const endCX = boardX + sqSize * 0.5 + i * trayGap;
       const endCY = trayYBlack;
       pushWalk(p, endCX, endCY, true, 8);
       p.sq = null;
+      nextTray.push(p);
     });
-
-    // Update livePieces / trayPieces registers ahead of the animation
-    // so the state is consistent immediately after walk-back completes.
-    livePieces = walks.filter(w => !w.isTray).map(w => w.piece);
-    trayPieces = walks.filter(w => w.isTray).map(w => w.piece);
+    livePieces = nextLive;
+    trayPieces = nextTray;
 
     // Ensure no lingering CSS transitions interfere with rAF driving.
     for (const w of walks) w.piece.el.style.transition = 'none';
@@ -1019,8 +810,12 @@ function walkBack() {
       };
     }
 
-    // Global end frame — a bit after the latest piece finishes.
-    const globalEnd = walks.reduce((acc, w) => Math.max(acc, w.startAt + w.duration + STAND_MS + SETTLE_MS), now) + 120;
+    // Global end frame — a bit after the latest piece finishes. If
+    // no piece needs to walk (rare — identical positions), still play
+    // a short beat so the transition never feels dropped.
+    const globalEnd = walks.length
+      ? walks.reduce((acc, w) => Math.max(acc, w.startAt + w.duration + STAND_MS + SETTLE_MS), now) + 120
+      : now + 380;
 
     function frame(tNow) {
       for (const w of walks) {
@@ -1124,7 +919,7 @@ function pickEdgeSpawn(dest) {
 }
 
 // -------------------------------------------------------------------------
-// Orchestrator: live → tumble → walk-back → live.
+// Orchestrator: live → walk → live. That's it. No tumble.
 // -------------------------------------------------------------------------
 async function transitionToNext() {
   if (animating) return;
@@ -1132,9 +927,9 @@ async function transitionToNext() {
   skipBtn.disabled = true;
   clearSelection();
 
-  // Any tray pieces from the previous cycle fold into the tumble too —
-  // they're on the stage, they should tumble along with everything
-  // else. Merge them into livePieces so they participate.
+  // Tray pieces from the previous cycle are eligible to walk back onto
+  // the board if the next position calls for them. Merge them into
+  // livePieces so the walk-transition pool sees them.
   if (trayPieces.length) {
     for (const p of trayPieces) livePieces.push(p);
     trayPieces = [];
@@ -1143,10 +938,9 @@ async function transitionToNext() {
   // Live pieces can't be tapped mid-transition.
   for (const p of livePieces) p.el.classList.remove('live');
 
-  await tumble();
   posIndex = (posIndex + 1) % POSITIONS.length;
   game = newGame(POSITIONS[posIndex].fen);
-  await walkBack();
+  await walkTransition();
 
   animating = false;
   skipBtn.disabled = false;
