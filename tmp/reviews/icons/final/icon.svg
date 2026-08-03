@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <rect width="1024" height="1024" fill="rgb(238,227,196)"/>
+  <rect x="347.23" y="263.62" width="193.29" height="496.76" fill="rgb(140,90,46)"/>
+  <rect x="540.53" y="263.62" width="128.86" height="496.76" fill="rgb(46,42,61)"/>
+  <polygon points="540.53,275.92 352.15,753.00 664.47,753.00" fill="rgb(238,227,196)"/>
+  <rect x="352.15" y="754.38" width="32.22" height="6.00" fill="rgb(140,90,46)"/>
+  <rect x="30.00" y="263.62" width="12.30" height="496.76" fill="rgb(140,90,46)"/>
+  <rect x="322.64" y="452.98" width="12.30" height="83.61" fill="rgb(140,90,46)"/>
+  <rect x="30.00" y="452.98" width="304.94" height="12.30" fill="rgb(140,90,46)"/>
+  <rect x="129.60" y="465.28" width="12.30" height="71.32" fill="rgb(140,90,46)"/>
+  <rect x="223.05" y="465.28" width="12.30" height="71.32" fill="rgb(140,90,46)"/>
+  <rect x="30.00" y="536.59" width="317.23" height="22.13" fill="rgb(140,90,46)"/>
+  <rect x="30.00" y="622.66" width="317.23" height="22.13" fill="rgb(140,90,46)"/>
+  <rect x="322.64" y="622.66" width="12.30" height="137.71" fill="rgb(140,90,46)"/>
+  <rect x="981.70" y="263.62" width="12.30" height="496.76" fill="rgb(46,42,61)"/>
+  <rect x="689.06" y="509.54" width="12.30" height="27.05" fill="rgb(46,42,61)"/>
+  <rect x="745.62" y="452.98" width="248.38" height="12.30" fill="rgb(46,42,61)"/>
+  <path d="M 695.21 509.54 A 50.41 50.41 0 0 1 745.62 459.13" fill="none" stroke="rgb(46,42,61)" stroke-width="12.30" stroke-linecap="butt"/>
+  <rect x="818.17" y="465.28" width="12.30" height="71.32" fill="rgb(46,42,61)"/>
+  <rect x="896.86" y="465.28" width="12.30" height="71.32" fill="rgb(46,42,61)"/>
+  <rect x="669.39" y="536.59" width="324.61" height="22.13" fill="rgb(46,42,61)"/>
+  <rect x="669.39" y="622.66" width="324.61" height="22.13" fill="rgb(46,42,61)"/>
+  <rect x="689.06" y="622.66" width="12.30" height="137.71" fill="rgb(46,42,61)"/>
+</svg>
