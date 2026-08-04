@@ -1,0 +1,302 @@
+[
+  {
+    "puzzleId": "m4e8L",
+    "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B3b1/2NP4/PPP2PPP/R1BQK2R b KQkq - 0 7",
+    "moves": [
+      "g4d1",
+      "c4f7"
+    ],
+    "rating": 1150,
+    "ratingDeviation": 83,
+    "popularity": 95,
+    "nbPlays": 36703,
+    "themes": "attackingF2F7 mate mateIn1 oneMove opening",
+    "gameUrl": "https://lichess.org/8qZ7AtoD/black#14",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "wXcAE",
+    "fen": "r3k2r/1b1p1pp1/p2qp3/1pp2P2/3nP1p1/P1NP2P1/BPP1N3/R2Q1RK1 w kq - 1 16",
+    "moves": [
+      "e2d4",
+      "d6g3"
+    ],
+    "rating": 1216,
+    "ratingDeviation": 75,
+    "popularity": 95,
+    "nbPlays": 35647,
+    "themes": "kingsideAttack mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/jAMCEFFO#31",
+    "openingTags": "Sicilian_Defense Sicilian_Defense_Closed"
+  },
+  {
+    "puzzleId": "veeZB",
+    "fen": "8/6pk/7p/1p2B3/2pPKP1Q/2P5/PP4qP/8 w - - 9 39",
+    "moves": [
+      "e4f5",
+      "g2g6"
+    ],
+    "rating": 1295,
+    "ratingDeviation": 76,
+    "popularity": 96,
+    "nbPlays": 35237,
+    "themes": "endgame mate mateIn1 oneMove",
+    "gameUrl": "https://lichess.org/wr3qs0rr#77",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "3FjeC",
+    "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2n5/PP3BPP/R2KR3 w - - 0 25",
+    "moves": [
+      "b2c3",
+      "a5a4"
+    ],
+    "rating": 1184,
+    "ratingDeviation": 76,
+    "popularity": 95,
+    "nbPlays": 33440,
+    "themes": "master mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/VQxz2hVu#49",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "wNLuL",
+    "fen": "8/4pp2/3p1kp1/2qP2b1/rpP1P3/7Q/4BPK1/7R b - - 7 39",
+    "moves": [
+      "c5d4",
+      "h3h8"
+    ],
+    "rating": 1433,
+    "ratingDeviation": 77,
+    "popularity": 95,
+    "nbPlays": 32818,
+    "themes": "endgame mate mateIn1 oneMove",
+    "gameUrl": "https://lichess.org/D15el7E2/black#78",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "rFKz2",
+    "fen": "8/P4pk1/3p2p1/2p1b3/8/5q1p/R2R1P2/5QK1 w - - 1 50",
+    "moves": [
+      "a7a8q",
+      "h3h2"
+    ],
+    "rating": 1399,
+    "ratingDeviation": 75,
+    "popularity": 97,
+    "nbPlays": 32734,
+    "themes": "advancedPawn endgame master mate mateIn1 oneMove",
+    "gameUrl": "https://lichess.org/BPTkpUX4#99",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "QRVYZ",
+    "fen": "5b1r/NR2np1p/2Rkp1p1/3r4/5P2/4B3/P3KP1P/8 b - - 0 22",
+    "moves": [
+      "e7c6",
+      "a7c8"
+    ],
+    "rating": 1494,
+    "ratingDeviation": 80,
+    "popularity": 95,
+    "nbPlays": 32527,
+    "themes": "cornerMate master mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/JwxvDBmK/black#44",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "XVAvN",
+    "fen": "8/pQb3Np/5pk1/2p5/3p1q2/1P5P/P4PP1/6K1 w - - 5 36",
+    "moves": [
+      "g7e6",
+      "f4c1"
+    ],
+    "rating": 1394,
+    "ratingDeviation": 78,
+    "popularity": 94,
+    "nbPlays": 32146,
+    "themes": "endgame master mate mateIn1 oneMove",
+    "gameUrl": "https://lichess.org/gVKT14vV#71",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "dv08J",
+    "fen": "1R6/5ppk/6b1/1P4q1/PQ5p/4nP1P/3r1BP1/5RK1 w - - 5 37",
+    "moves": [
+      "f2e3",
+      "g5g2"
+    ],
+    "rating": 1182,
+    "ratingDeviation": 106,
+    "popularity": 93,
+    "nbPlays": 31306,
+    "themes": "master mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/Cs4nrkpt#73",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "ynqQC",
+    "fen": "r2q1r1k/pp5p/2np2PQ/2pb4/4P1p1/2PP4/PP4BP/R4RK1 b - - 0 18",
+    "moves": [
+      "d5g8",
+      "g6g7"
+    ],
+    "rating": 1384,
+    "ratingDeviation": 75,
+    "popularity": 95,
+    "nbPlays": 31170,
+    "themes": "advancedPawn mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/b4qXMD3x/black#36",
+    "openingTags": "Sicilian_Defense Sicilian_Defense_Closed"
+  },
+  {
+    "puzzleId": "aoOAg",
+    "fen": "3r1Q2/1pnqk1P1/p2pr1p1/6P1/8/4B3/PPP4P/5RK1 b - - 5 28",
+    "moves": [
+      "d8f8",
+      "g7f8q"
+    ],
+    "rating": 1323,
+    "ratingDeviation": 75,
+    "popularity": 96,
+    "nbPlays": 31012,
+    "themes": "advancedPawn endgame master mate mateIn1 oneMove promotion",
+    "gameUrl": "https://lichess.org/qPHaVKzm/black#56",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "XlS3M",
+    "fen": "2kr1b1r/ppp3p1/6qp/4p3/2PnN1b1/3P1N2/PP3P2/R1BQRK2 w - - 4 17",
+    "moves": [
+      "f3e5",
+      "g4h3"
+    ],
+    "rating": 1437,
+    "ratingDeviation": 76,
+    "popularity": 97,
+    "nbPlays": 30397,
+    "themes": "mate mateIn1 oneMove opening",
+    "gameUrl": "https://lichess.org/9Bj3e4ne#33",
+    "openingTags": "Four_Knights_Game Four_Knights_Game_Italian_Variation"
+  },
+  {
+    "puzzleId": "suVtA",
+    "fen": "2kr1b1r/pppb2p1/2np1p2/3NqP1p/4P1nN/3B4/PPP3PP/R1B1QRK1 w - - 1 14",
+    "moves": [
+      "h4g6",
+      "e5h2"
+    ],
+    "rating": 976,
+    "ratingDeviation": 86,
+    "popularity": 93,
+    "nbPlays": 30337,
+    "themes": "kingsideAttack mate mateIn1 oneMove opening",
+    "gameUrl": "https://lichess.org/pBUK9eJW#27",
+    "openingTags": "Center_Game Center_Game_Normal_Variation"
+  },
+  {
+    "puzzleId": "9KjBu",
+    "fen": "1rbnkb1r/pp2pppp/5n2/1N2N3/2B5/8/PP3PPP/R1B1K2R b KQk - 0 10",
+    "moves": [
+      "a7a6",
+      "b5c7"
+    ],
+    "rating": 1253,
+    "ratingDeviation": 77,
+    "popularity": 97,
+    "nbPlays": 29480,
+    "themes": "mate mateIn1 oneMove opening",
+    "gameUrl": "https://lichess.org/lqpjG0FV/black#20",
+    "openingTags": "Sicilian_Defense Sicilian_Defense_Smith-Morra_Gambit"
+  },
+  {
+    "puzzleId": "aCFms",
+    "fen": "2rQ3k/1p3p1p/4bp2/p3p3/q6P/P4P2/NPr5/1K1R2R1 b - - 3 26",
+    "moves": [
+      "a4e8",
+      "d8f6"
+    ],
+    "rating": 1259,
+    "ratingDeviation": 77,
+    "popularity": 95,
+    "nbPlays": 29302,
+    "themes": "kingsideAttack mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/hzMrpuwf/black#52",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "Y69M6",
+    "fen": "4rk2/5r1p/p4B2/q2p4/4p2P/P4bQB/1PP5/2K3R1 b - - 2 29",
+    "moves": [
+      "f7f6",
+      "g3g7"
+    ],
+    "rating": 1236,
+    "ratingDeviation": 78,
+    "popularity": 93,
+    "nbPlays": 29124,
+    "themes": "master mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/ojNrrrvm/black#58",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "cVJhU",
+    "fen": "2kr1q1r/pbpp2pp/1pn2P2/2bN2B1/2B5/6Q1/PPP2PPP/R4RK1 b - - 0 14",
+    "moves": [
+      "g7f6",
+      "g3c7"
+    ],
+    "rating": 1129,
+    "ratingDeviation": 78,
+    "popularity": 97,
+    "nbPlays": 28662,
+    "themes": "mate mateIn1 middlegame oneMove queensideAttack",
+    "gameUrl": "https://lichess.org/gKoIwrK2/black#28",
+    "openingTags": "Scotch_Game Scotch_Game_Lolli_Variation"
+  },
+  {
+    "puzzleId": "Td2XT",
+    "fen": "r5k1/1p6/4b2p/2p1b3/p1P1ppqP/1P4P1/P1Q2P1K/3R1NR1 w - - 0 35",
+    "moves": [
+      "c2e4",
+      "g4h3"
+    ],
+    "rating": 1454,
+    "ratingDeviation": 81,
+    "popularity": 93,
+    "nbPlays": 28508,
+    "themes": "mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/f9fgQYmc#69",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "OlMV0",
+    "fen": "6Q1/p5R1/2p3qp/3p2k1/P1pP2P1/2P2PK1/2r5/8 b - - 9 41",
+    "moves": [
+      "g6g7",
+      "g8g7"
+    ],
+    "rating": 1330,
+    "ratingDeviation": 82,
+    "popularity": 90,
+    "nbPlays": 28276,
+    "themes": "endgame hangingPiece master masterVsMaster mate mateIn1 oneMove",
+    "gameUrl": "https://lichess.org/CJwgXPV8/black#82",
+    "openingTags": ""
+  },
+  {
+    "puzzleId": "yXWOk",
+    "fen": "2k3r1/pR5Q/1p1qp3/2p1p3/2P1P3/2NP1n1P/PP4r1/5R1K w - - 2 25",
+    "moves": [
+      "c3e2",
+      "g2h2"
+    ],
+    "rating": 1225,
+    "ratingDeviation": 76,
+    "popularity": 96,
+    "nbPlays": 27933,
+    "themes": "arabianMate mate mateIn1 middlegame oneMove",
+    "gameUrl": "https://lichess.org/8MGOoA2y#49",
+    "openingTags": ""
+  }
+]

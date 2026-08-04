@@ -15,7 +15,7 @@ type ShelfPosition = {
   credit: string;
   fen: string;
   sideToMove: Color;
-  solution: { from: Square; to: Square };
+  solution: { from: Square; to: Square; promotion?: "q" | "r" | "b" | "n" };
 };
 
 type ShelfPiece = {
@@ -288,7 +288,7 @@ function LandingPuzzleShelf() {
     }
 
     try {
-      const move = chess.move({ from: selectedSquare, to: square, promotion: "q" });
+      const move = chess.move({ from: selectedSquare, to: square, promotion: solution.promotion ?? "q" });
       if (!move) return clearSelection();
       applyLandingMove(selectedSquare, square, metrics);
       clearSelection();
@@ -1124,6 +1124,7 @@ function InspirationsPage() {
           <strong>Virgilio Villalba</strong> · Untitled, 1955. Muted celadon field, deep
           incision, one cream chip. The composition this register borrows from.
         </li>
+        <li>Puzzle positions from <a href="https://lichess.org/database">lichess.org/database</a>, CC0.</li>
       </ul>
       <MadeByTejas />
     </div>

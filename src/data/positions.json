@@ -11,14 +11,36 @@
     }
   },
   {
-    "id": "queen-close-mate",
-    "title": "Queen close, king pinned to edge",
-    "credit": "Basic pattern",
-    "fen": "8/8/5K1k/8/8/8/6Q1/8 w - - 0 1",
+    "id": "lichess-wNLuL",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/wNLuL",
+    "fen": "8/4pp2/3p1kp1/3P2b1/rpPqP3/7Q/4BPK1/7R w - - 8 40",
     "sideToMove": "w",
     "solution": {
-      "from": "g2",
-      "to": "g6"
+      "from": "h3",
+      "to": "h8"
+    }
+  },
+  {
+    "id": "lichess-suVtA",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/suVtA",
+    "fen": "2kr1b1r/pppb2p1/2np1pN1/3NqP1p/4P1n1/3B4/PPP3PP/R1B1QRK1 b - - 2 14",
+    "sideToMove": "b",
+    "solution": {
+      "from": "e5",
+      "to": "h2"
+    }
+  },
+  {
+    "id": "lichess-Td2XT",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/Td2XT",
+    "fen": "r5k1/1p6/4b2p/2p1b3/p1P1QpqP/1P4P1/P4P1K/3R1NR1 b - - 0 35",
+    "sideToMove": "b",
+    "solution": {
+      "from": "g4",
+      "to": "h3"
     }
   },
   {
@@ -33,13 +55,13 @@
     }
   },
   {
-    "id": "queen-g7-diagonal-support",
-    "title": "Queen on g7, bishop diagonal support",
-    "credit": "Traditional pattern",
-    "fen": "6k1/7p/8/6Q1/8/8/1B6/6K1 w - - 0 1",
+    "id": "lichess-OlMV0",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/OlMV0",
+    "fen": "6Q1/p5q1/2p4p/3p2k1/P1pP2P1/2P2PK1/2r5/8 w - - 0 42",
     "sideToMove": "w",
     "solution": {
-      "from": "g5",
+      "from": "g8",
       "to": "g7"
     }
   },
@@ -55,14 +77,113 @@
     }
   },
   {
-    "id": "queen-h7-supported",
-    "title": "Queen-plus-bishop on h7",
-    "credit": "Traditional pattern",
-    "fen": "7k/6pp/7Q/8/8/8/8/1B4K1 w - - 0 1",
+    "id": "lichess-dv08J",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/dv08J",
+    "fen": "1R6/5ppk/6b1/1P4q1/PQ5p/4BP1P/3r2P1/5RK1 b - - 0 37",
+    "sideToMove": "b",
+    "solution": {
+      "from": "g5",
+      "to": "g2"
+    }
+  },
+  {
+    "id": "lichess-m4e8L",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/m4e8L",
+    "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B5/2NP4/PPP2PPP/R1BbK2R w KQkq - 0 8",
     "sideToMove": "w",
     "solution": {
-      "from": "h6",
-      "to": "h7"
+      "from": "c4",
+      "to": "f7"
+    }
+  },
+  {
+    "id": "lichess-Y69M6",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/Y69M6",
+    "fen": "4rk2/7p/p4r2/q2p4/4p2P/P4bQB/1PP5/2K3R1 w - - 0 30",
+    "sideToMove": "w",
+    "solution": {
+      "from": "g3",
+      "to": "g7"
+    }
+  },
+  {
+    "id": "lichess-XlS3M",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/XlS3M",
+    "fen": "2kr1b1r/ppp3p1/6qp/4N3/2PnN1b1/3P4/PP3P2/R1BQRK2 b - - 0 17",
+    "sideToMove": "b",
+    "solution": {
+      "from": "g4",
+      "to": "h3"
+    }
+  },
+  {
+    "id": "lichess-aCFms",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/aCFms",
+    "fen": "2rQq2k/1p3p1p/4bp2/p3p3/7P/P4P2/NPr5/1K1R2R1 w - - 4 27",
+    "sideToMove": "w",
+    "solution": {
+      "from": "d8",
+      "to": "f6"
+    }
+  },
+  {
+    "id": "lichess-wXcAE",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/wXcAE",
+    "fen": "r3k2r/1b1p1pp1/p2qp3/1pp2P2/3NP1p1/P1NP2P1/BPP5/R2Q1RK1 b kq - 0 16",
+    "sideToMove": "b",
+    "solution": {
+      "from": "d6",
+      "to": "g3"
+    }
+  },
+  {
+    "id": "lichess-3FjeC",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/3FjeC",
+    "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2P5/P4BPP/R2KR3 b - - 0 25",
+    "sideToMove": "b",
+    "solution": {
+      "from": "a5",
+      "to": "a4"
+    }
+  },
+  {
+    "id": "lichess-yXWOk",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/yXWOk",
+    "fen": "2k3r1/pR5Q/1p1qp3/2p1p3/2P1P3/3P1n1P/PP2N1r1/5R1K b - - 3 25",
+    "sideToMove": "b",
+    "solution": {
+      "from": "g2",
+      "to": "h2"
+    }
+  },
+  {
+    "id": "lichess-9KjBu",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/9KjBu",
+    "fen": "1rbnkb1r/1p2pppp/p4n2/1N2N3/2B5/8/PP3PPP/R1B1K2R w KQk - 0 11",
+    "sideToMove": "w",
+    "solution": {
+      "from": "b5",
+      "to": "c7"
+    }
+  },
+  {
+    "id": "lichess-ynqQC",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/ynqQC",
+    "fen": "r2q1rbk/pp5p/2np2PQ/2p5/4P1p1/2PP4/PP4BP/R4RK1 w - - 1 19",
+    "sideToMove": "w",
+    "solution": {
+      "from": "g6",
+      "to": "g7"
     }
   },
   {
@@ -77,47 +198,70 @@
     }
   },
   {
-    "id": "back-rank-mate-white",
-    "title": "Back-rank mate",
-    "credit": "Traditional pattern",
-    "fen": "6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1",
-    "sideToMove": "w",
-    "solution": {
-      "from": "a1",
-      "to": "a8"
-    }
-  },
-  {
-    "id": "back-rank-mate-black",
-    "title": "Back-rank mate (Black to move)",
-    "credit": "Traditional pattern",
-    "fen": "r5k1/8/8/8/8/8/5PPP/6K1 b - - 0 1",
+    "id": "lichess-rFKz2",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/rFKz2",
+    "fen": "Q7/5pk1/3p2p1/2p1b3/8/5q1p/R2R1P2/5QK1 b - - 0 50",
     "sideToMove": "b",
     "solution": {
-      "from": "a8",
-      "to": "a1"
+      "from": "h3",
+      "to": "h2"
     }
   },
   {
-    "id": "smothered-mate",
-    "title": "Smothered mate (knight to f7)",
-    "credit": "Traditional pattern (Philidor's Legacy shape)",
-    "fen": "6rk/6pp/8/6N1/8/8/8/6K1 w - - 0 1",
+    "id": "lichess-cVJhU",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/cVJhU",
+    "fen": "2kr1q1r/pbpp3p/1pn2p2/2bN2B1/2B5/6Q1/PPP2PPP/R4RK1 w - - 0 15",
     "sideToMove": "w",
     "solution": {
-      "from": "g5",
-      "to": "f7"
+      "from": "g3",
+      "to": "c7"
     }
   },
   {
-    "id": "morphys-mate-shape",
-    "title": "Bishop + rook, back-rank check",
-    "credit": "Traditional pattern",
-    "fen": "6k1/5ppp/8/8/8/8/8/3R2K1 w - - 0 1",
+    "id": "lichess-veeZB",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/veeZB",
+    "fen": "8/6pk/7p/1p2BK2/2pP1P1Q/2P5/PP4qP/8 b - - 10 39",
+    "sideToMove": "b",
+    "solution": {
+      "from": "g2",
+      "to": "g6"
+    }
+  },
+  {
+    "id": "lichess-aoOAg",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/aoOAg",
+    "fen": "5r2/1pnqk1P1/p2pr1p1/6P1/8/4B3/PPP4P/5RK1 w - - 0 29",
     "sideToMove": "w",
     "solution": {
-      "from": "d1",
-      "to": "d8"
+      "from": "g7",
+      "to": "f8",
+      "promotion": "q"
+    }
+  },
+  {
+    "id": "lichess-XVAvN",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/XVAvN",
+    "fen": "8/pQb4p/4Npk1/2p5/3p1q2/1P5P/P4PP1/6K1 b - - 6 36",
+    "sideToMove": "b",
+    "solution": {
+      "from": "f4",
+      "to": "c1"
+    }
+  },
+  {
+    "id": "lichess-QRVYZ",
+    "title": "Mate in 1",
+    "credit": "From a real game · lichess.org/puzzle/QRVYZ",
+    "fen": "5b1r/NR3p1p/2nkp1p1/3r4/5P2/4B3/P3KP1P/8 w - - 0 23",
+    "sideToMove": "w",
+    "solution": {
+      "from": "a7",
+      "to": "c8"
     }
   }
 ]

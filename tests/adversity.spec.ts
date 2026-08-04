@@ -13,6 +13,38 @@ import { readFileSync } from "node:fs";
 
 test.describe.configure({ mode: "serial" });
 
+type LandingPuzzle = {
+  id: string;
+  fen: string;
+  solution: { from: string; to: string; promotion?: string };
+};
+
+function loadLandingPositions() {
+  return JSON.parse(readFileSync("src/data/positions.json", "utf8")) as LandingPuzzle[];
+}
+
+function firstFenPiece(fen: string) {
+  const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+  let fileIndex = 0;
+  let rank = 8;
+  for (const char of fen.split(" ")[0]) {
+    if (char === "/") {
+      rank -= 1;
+      fileIndex = 0;
+      continue;
+    }
+    if (/\d/.test(char)) {
+      fileIndex += Number(char);
+      continue;
+    }
+    return {
+      square: `${files[fileIndex]}${rank}`,
+      piece: `${char === char.toUpperCase() ? "w" : "b"}${char.toLowerCase()}`,
+    };
+  }
+  throw new Error(`FEN has no pieces: ${fen}`);
+}
+
 // ---------- helpers (kept in-file so this suite is self-contained) ----------
 
 async function addAuthenticator(page: Page) {
@@ -497,6 +529,11 @@ test("recurring schedule creates a game on each firing and can be ended by eithe
 });
 
 test("landing puzzle solve walks to a new caption and position without chrome regressions", async ({ page }) => {
+  const positions = loadLandingPositions();
+  const first = positions[0];
+  const next = positions[1];
+  const nextPiece = firstFenPiece(next.fen);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
@@ -516,9 +553,9 @@ test("landing puzzle solve walks to a new caption and position without chrome re
   expect(initialScroll.scrollHeight).toBeLessThanOrEqual(initialScroll.clientHeight + 1);
   expect(initialScroll.scrollHeight).toBeLessThanOrEqual(initialScroll.innerHeight + 1);
 
-  await page.locator('.landing-square[data-square="d8"]').click();
-  await expect(page.locator('.landing-square[data-square="h4"] .legal-dot, .landing-square[data-square="h4"] .legal-capture')).toBeVisible();
-  await page.locator('.landing-square[data-square="h4"]').click();
+  await page.locator(`.landing-square[data-square="${first.solution.from}"]`).click();
+  await expect(page.locator(`.landing-square[data-square="${first.solution.to}"] .legal-dot, .landing-square[data-square="${first.solution.to}"] .legal-capture`)).toBeVisible();
+  await page.locator(`.landing-square[data-square="${first.solution.to}"]`).click();
 
   await expect(shelf).toHaveAttribute("data-animating", "true", { timeout: 1200 });
   await expect(page.locator(".puzzle-caption")).not.toHaveText(firstCaption);
@@ -528,7 +565,7 @@ test("landing puzzle solve walks to a new caption and position without chrome re
   const nextCaption = await page.locator(".puzzle-caption").innerText();
   expect(nextPuzzle).not.toBe(firstPuzzle);
   expect(nextCaption).not.toBe(firstCaption);
-  await expect(page.locator('.landing-piece[data-square="g2"][data-piece="wq"]')).toBeVisible();
+  await expect(page.locator(`.landing-piece[data-square="${nextPiece.square}"][data-piece="${nextPiece.piece}"]`)).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.locator(".toast")).toHaveCount(0);
   await expect(page.locator(".menu-dot")).toHaveCount(0);
@@ -542,20 +579,19 @@ test("landing puzzle solve walks to a new caption and position without chrome re
   expect(finalScroll.scrollHeight).toBeLessThanOrEqual(finalScroll.innerHeight + 1);
 });
 
-test("landing shelf survives 22 consecutive solves (all 11 puzzles twice) with zero page errors", async ({ browser }) => {
+test(`landing shelf survives all ${loadLandingPositions().length} puzzles twice with zero page errors`, async ({ browser }) => {
   // Regression for the ~round-3 NotFoundError from the imperative walk
   // vs React reconciliation ownership violation. If a piece node is
   // detached outside React's knowledge, its next reconcile pass throws
   // `removeChild: The node to be removed is not a child of this node`,
   // React unmounts the shelf, and the landing dies until reload. The
   // fix (in main.tsx LandingPuzzleShelf) puts the pieces layer under
-  // exclusive imperative ownership so this can't recur. Bar: 22 solves
-  // = 11 puzzles twice, ZERO pageerrors captured.
-  // 22 walks × ~4s each = ~90s of legitimate work, so per-test timeout
-  // is raised above the file default.
-  test.setTimeout(180_000);
-  const raw = readFileSync("src/data/positions.json", "utf8");
-  const positions = JSON.parse(raw) as Array<{ id: string; solution: { from: string; to: string; promotion?: string } }>;
+  // exclusive imperative ownership so this can't recur. Bar: every
+  // shelf puzzle twice, ZERO pageerrors captured.
+  const positions = loadLandingPositions();
+  const rounds = positions.length * 2;
+  // Each walk can legitimately take around 4s; give the full loop slack.
+  test.setTimeout(Math.max(180_000, rounds * 6_000));
   const byId = new Map(positions.map((p) => [p.id, p]));
 
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -580,7 +616,7 @@ test("landing shelf survives 22 consecutive solves (all 11 puzzles twice) with z
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".puzzle-shelf[data-puzzle-id]", { timeout: 15000 });
 
-    for (currentRound = 1; currentRound <= 22; currentRound++) {
+    for (currentRound = 1; currentRound <= rounds; currentRound++) {
       const id = await page.locator(".puzzle-shelf").getAttribute("data-puzzle-id");
       if (!id) throw new Error(`round ${currentRound}: shelf has no data-puzzle-id (shelf unmounted?)`);
       const puzzle = byId.get(id);
@@ -600,7 +636,7 @@ test("landing shelf survives 22 consecutive solves (all 11 puzzles twice) with z
       await page.waitForTimeout(400);   // let the settle beat land
     }
 
-    expect(errors, `page errors during 22-solve loop:\n${errors.map((e) => `  round ${e.round} [${e.kind}] ${e.message}`).join("\n")}`).toEqual([]);
+    expect(errors, `page errors during ${rounds}-solve loop:\n${errors.map((e) => `  round ${e.round} [${e.kind}] ${e.message}`).join("\n")}`).toEqual([]);
     // Shelf must still be alive at the end.
     await expect(page.locator(".puzzle-shelf")).toBeVisible();
   } finally {
