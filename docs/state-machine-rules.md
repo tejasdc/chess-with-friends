@@ -177,6 +177,14 @@ line is blank, the feature is not ready.
 - **A `setTimeout` in a Durable Object.** Not durable across hibernation.
   Use `ctx.storage.setAlarm` or a stored `expiresAt` timestamp promoted
   lazily on read.
+- **Reading a write from the same request that made it.** Cloudflare's
+  `ctx.getWebSockets()` and similar host-provided iterators are not
+  guaranteed to reflect a `ctx.acceptWebSocket(server)` call made
+  earlier in the same request cycle. If you need to act on the write
+  immediately, use the handle you already have (`server.send(...)`)
+  rather than re-reading the set. Broadcast to peers via the iterator;
+  prime the just-accepted connection directly. This is the
+  read-your-writes hazard — see the canonical pattern below.
 - **A projection that isn't marked as one.** If a field exists in two
   places, the copy is a projection. Name it in a comment above the
   field, and make sure the reconciliation path (what happens when the
@@ -252,9 +260,26 @@ terminal status is right (see pattern #2). When nothing observes,
 delete. Do not reflex to "add another terminal status" — ask what
 would read it.
 
+### 4. Prime the just-written handle rather than re-reading the set
+
+The `GameDO` `socket` handler accepts a new WebSocket via
+`ctx.acceptWebSocket(server)`, then calls `server.send(...)` with the
+current game snapshot BEFORE calling `broadcast()` (which iterates
+`ctx.getWebSockets()`). The host's socket iterator is not guaranteed to
+reflect the just-accepted socket within the same request cycle — a
+read after the write can miss it. The connection you already hold in
+hand is the safe primer.
+
+The pattern: when you write to a host-managed collection and immediately
+need to act on that write, use the handle you already have; do not
+re-derive it from a read. The read is fine for the fan-out to everyone
+else. This is a specific case of the more general rule: prefer the
+write's return value over a subsequent read of the same collection,
+inside the same request boundary.
+
 ---
 
-These three patterns together are what a lifecycle looks like when
+These four patterns together are what a lifecycle looks like when
 it's designed as a machine instead of a sequence of feature patches.
 See `docs/state-machines.md` for the current inventory and the
 outstanding gaps.

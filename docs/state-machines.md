@@ -24,12 +24,18 @@ appended at the next unused number.
   (friend-request withdraw as hard delete), GAP-6 (schedule decline),
   GAP-7 (schedule zombie sweep to `expired` with 60s grace), GAP-15
   (sentRequests label clarified to `Friend request sent to @x`) closed.
+- **8d7023e** — TIER B closed. GAP-8 (persisted connection state,
+  reframed as *derived*), GAP-9 (alarm-driven grace, no `setTimeout`),
+  GAP-10 (retry `reportStatus` with backoff via `waitUntil`), GAP-11
+  (hibernatable WebSockets via `ctx.acceptWebSocket`), GAP-12 (drop
+  dead push endpoints on 410/404), GAP-13 (lazy TTL sweep of auth
+  challenges, 10 min cutoff), GAP-16 (time-warp harness via `POST
+  /_debug/tick`).
 
-TIER B remaining: GAP-8 through GAP-13 (Durable-Object hygiene — persisted
-`connectionState`, alarm-based reconnect grace, projection retry from
-`GameDO` to `AppDO`, hibernatable WebSockets, dead-endpoint GC on `410
-Gone`, auth-challenge TTL). GAP-16 (new — time-warp test harness for
-alarm-driven behaviors) is flagged below.
+Remaining: GAP-16-follow-up — a time-warp regression that ticks a
+recurring accepted schedule multiple times, proving `nextFireAt`
+advances by exactly one interval per tick without piling up games. The
+existing real-time test only covers a single firing.
 
 ## Why this doc exists
 
@@ -537,59 +543,94 @@ GameDO.
 All terminal states are true terminals — no revert path. That's correct.
 
 ### Notes
-- The `AppDO.games[id].status` field is a projection. GAP-11: if the POST
-  from GameDO to AppDO fails, they diverge. There is no retry.
-- `AppDO.games[id]` is read by `/api/me`; the Dashboard renders from it.
-  The `In play` section will show a game as `active` even after it ended
-  if the status POST was lost.
+- The `AppDO.games[id].status` field is a projection of the `GameDO`
+  authoritative status. Reconciliation is via `reportStatus` from the
+  `GameDO` to `POST /_internal/game-status` on the `AppDO`, wrapped in
+  `ctx.waitUntil()` with up to 5 attempts and exponential backoff
+  (250ms → 5s cap). Idempotent — the AppDO write sets the same status
+  twice happily. A transient failure no longer leaves the two sides
+  diverged (was GAP-10, closed 8d7023e).
 
 ---
 
 ## Machine 6 — Per-player connection state (inside `GameDO`)
 
-Two of these run per game — one per player. This is the closest the app
-has to a live "presence" concept, and it lives in the `GameDO`, not
-`AppDO`.
+Two of these run per game — one per player. Not stored as a field.
+Derived at every snapshot from two persisted primitives: the DO's
+hibernation-safe socket set (`ctx.getWebSockets()`) and a
+`graceExpiresAt[userId]` map in DO storage. This is what "single source
+of truth" looks like when the source is a computation over other
+sources.
 
 ### States (per player, per game)
 
-- `connected` — at least one open WebSocket for this user id.
-- `reconnecting` — all sockets closed; within 15s grace.
-- `gone` — no sockets, grace expired. Also the initial state at `init`.
+- `connected` — at least one accepted WebSocket for this user is in
+  `ctx.getWebSockets()` right now.
+- `reconnecting` — no socket for this user, and
+  `graceExpiresAt[userId] > now`.
+- `gone` — no socket AND (no `graceExpiresAt[userId]` OR it has passed).
+  Also the effective state at `init` (empty socket set, no grace entries).
 
 ### Events
 
-- `open-socket` — `GET /socket` on the DO; sets state to `connected` and
-  clears any pending grace timer.
-- `close-socket` / `error-socket` — if no other socket for this user
-  remains, set state to `reconnecting` and start a 15s `setTimeout` to
-  promote to `gone`.
-- `grace-expire` — the `setTimeout` fires; state becomes `gone`.
-- `init` — sets both players to `gone`.
+- `open-socket` — `GET /socket`; server calls `ctx.acceptWebSocket(server)`
+  and `server.serializeAttachment({userId, handle})`. Any `graceExpiresAt`
+  entry for this user is cleared. Next snapshot sees `connected`.
+- `close-socket` / `error-socket` — hibernation-safe class methods
+  `webSocketClose(ws)` / `webSocketError(ws)`. If the closing socket was
+  the last one for this user, write `graceExpiresAt[userId] = now +
+  15_000` and re-arm the alarm at the nearest expiry.
+- `alarm-sweep` — `alarm()` walks `graceExpiresAt`, deletes entries
+  where `expiry <= now`. Next snapshot sees `gone` for those users (no
+  socket, no grace entry).
+- `init` — no explicit seed; snapshot computes state from an empty
+  socket set + empty grace map → `gone`.
 
 ### Transitions
 
 ```mermaid
 stateDiagram-v2
-  [*] --> gone: init
+  [*] --> gone: (no socket, no grace)
   gone --> connected: open-socket
-  connected --> reconnecting: close-socket (no other socket)
+  connected --> reconnecting: close-socket (last socket for user)
   reconnecting --> connected: open-socket
-  reconnecting --> gone: grace-expire (15s)
-  connected --> gone: never (would need close AND grace to skip)
+  reconnecting --> gone: alarm-sweep (graceExpiresAt <= now)
 ```
 
 ### Writer
-`GameDO`, in memory. **Not persisted.**
+
+`GameDO`. The state has no dedicated field; it is derived by
+`computeConnectionState(game)` at `src/worker.ts:1492`, called from
+`snapshotFrom`. The primitives that back it — `ctx.getWebSockets()` and
+`ctx.storage.get("graceExpiresAt")` — are both durable across
+hibernation. The state cannot go stale because it isn't stored; every
+snapshot recomputes it.
 
 ### Representation
-`GameScreen` renders `opponentRawState` via `presenceLabel(...)`. See
-`src/main.tsx:3187,3244`. Not represented anywhere off the game screen.
+
+`GameScreen` renders `opponentRawState` via `presenceLabel(...)` (see
+`src/main.tsx:3187,3244`). Snapshots are broadcast over the WebSocket on
+every game mutation, and each connect primes the freshly-accepted
+socket directly (see "Notes" below). Not represented anywhere off the
+game screen.
 
 ### Closure
-All three states are exitable — but see GAP-13 and GAP-14: the state is not
-durable across DO hibernation, and the grace timer is a `setTimeout`, not
-an alarm, so hibernation eats it.
+All three states are exitable. The grace timer is now an alarm, not a
+`setTimeout`, so hibernation cannot swallow the promotion to `gone` —
+the alarm re-arms on every state-changing event via `setNextAlarm`.
+
+### Notes
+- The `socket()` handler primes the freshly-accepted socket with the
+  current game state via a direct `server.send(...)` BEFORE broadcasting
+  to peers. Reason: `ctx.getWebSockets()` is not guaranteed to include
+  the just-accepted socket within the same request cycle (observed in
+  `wrangler dev`; the socket-death adversity regression reproduced it).
+  This is a read-your-writes hazard and is documented as a canonical
+  pattern in `docs/state-machine-rules.md`.
+- `setNextAlarm(game)` is a single alarm computation shared with the
+  game-clock deadline: it takes the minimum of the current mover's
+  clock expiry and all `graceExpiresAt` values. One alarm serves both
+  concerns.
 
 ---
 
@@ -641,10 +682,14 @@ stateDiagram-v2
 `InstallPrompt` shows an install strip, an Enable button, or the blocked
 recovery copy (`src/main.tsx:2241-2280`). Absent when `enabled`.
 
-### Closure / soundness gap
-- The server does not remove a subscription on `410 Gone` from the push
-  gateway (`sendWebPush` logs but does not GC — see GAP-15). Server can
-  hold dead endpoints indefinitely, up to five.
+### Closure
+- `enabled` → `revoked` fires automatically. `enqueuePush` inspects
+  the response from `sendWebPush`; on `410 Gone` or `404`, the
+  endpoint is removed from both `db.pushSubscriptions[userId]` and
+  `db.pendingPushesByEndpoint[endpoint]` in the same transaction as
+  the log write (was GAP-12, closed 8d7023e). No manual reconciliation
+  needed on the client — the next `checkPushStatus()` on the browser
+  side will see the subscription missing and re-enter `ready`.
 
 ---
 
@@ -730,73 +775,52 @@ model; the `me()` filter drops it on next refresh.
 `nextFireAt` and pending `startAt + grace` so the sweep fires promptly
 (`src/worker.ts:1108`).
 
-### GAP-8 (P2): GameDO `connectionState` is not persisted
-**Where:** `src/worker.ts:979` (`private connectionState: Record<...> =
-{};`).
-**What:** In-memory map. Cloudflare hibernates idle DOs; on next request,
-the map is empty and both players are treated as `gone` (per the `init`
-seed, which only runs once).
-**User impact:** Rare in a live game where the socket keeps the DO warm,
-but the moment the last socket closes and the DO hibernates, the state is
-gone. On next open, the presence dot lies until sockets reattach.
-**Fix:** Either persist `connectionState` in storage on each transition,
-or drop the field entirely and derive at snapshot time from `this.clients`
-plus a `lastSeenAt` timestamp stored per player.
+### GAP-8 (P2, CLOSED — commit 8d7023e): GameDO connection state was not persisted
+**Now:** `connectionState` is no longer a stored field. It is derived at
+snapshot time by `computeConnectionState(game)` (`src/worker.ts:1492`)
+from two hibernation-safe sources: `ctx.getWebSockets()` (the durable
+socket set) and `ctx.storage.get("graceExpiresAt")` (a `Record<string,
+number>` persisted per user). Hibernation cannot lose state that isn't
+stored — every snapshot recomputes it fresh. This resolution is more
+principled than the "persist the flag" option the original gap
+proposed: the underlying primitives are already durable, so the derived
+state is durable too.
 
-### GAP-9 (P2): GameDO reconnect grace uses `setTimeout`
-**Where:** `src/worker.ts:1149-1156`.
-**What:** `setTimeout` in a DO does not survive hibernation. If the DO
-hibernates during the 15s grace, the promotion to `gone` never fires;
-`connectionState[userId]` stays `reconnecting` until the next event forces
-a snapshot.
-**Fix:** Store a `graceExpiresAt[userId]` timestamp on disconnect. At
-every snapshot, promote to `gone` if `graceExpiresAt <= now`. Optionally
-schedule an alarm at the nearest `graceExpiresAt` so a fresh snapshot
-happens on schedule.
+### GAP-9 (P2, CLOSED — commit 8d7023e): GameDO reconnect grace no longer uses `setTimeout`
+**Now:** On disconnect, `webSocketClose(ws)` writes
+`graceExpiresAt[userId] = now + 15_000` to storage and calls
+`setNextAlarm(game)`. The alarm sweeps expired entries and promotes to
+`gone` (as derived by GAP-8's snapshot). One alarm handles both game
+clocks and grace expiries by taking the minimum wake time. No
+`setTimeout` remains in the DO.
 
-### GAP-10 (P2): AppDO `games[id]` projection can drift from GameDO
-**Where:** `src/worker.ts:1220-1227` (`reportStatus`) and
-`src/worker.ts:957-966` (`updateGameStatus`).
-**What:** `GameDO.reportStatus` is fire-and-forget. If the AppDO fetch
-fails (transient error, deploy, etc.), the AppDO's `games[id].status`
-stays `active` after the underlying game has ended.
-**User impact:** Dashboard shows a finished game in the `In play` section
-until the user opens it (which triggers a fresh snapshot).
-**Fix:** Retry with backoff (idempotent write on the AppDO side already —
-setting the same status twice is fine). Or: `/api/me` could opportunistically
-fetch each active game's state from its `GameDO` and reconcile — but that
-scales badly per user. The retry is the cheaper fix.
+### GAP-10 (P2, CLOSED — commit 8d7023e): AppDO projection now retries
+**Now:** `reportStatus` is wrapped in `ctx.waitUntil()` with up to 5
+attempts and exponential backoff (250ms → 5s cap). The AppDO write is
+idempotent so retry is safe. A transient failure no longer strands the
+Dashboard's `In play` section on a stale `active`.
 
-### GAP-11 (P2): GameDO doesn't use hibernatable WebSockets
-**Where:** `src/worker.ts:1044-1046` uses raw `WebSocketPair` + `accept()`,
-not `state.acceptWebSocket(server)`.
-**What:** Non-hibernatable sockets keep the DO warm as long as they're
-open, which is fine while both players are connected but expensive when
-one side idles. More importantly, `this.clients` is a `Map` — it's
-in-memory. If the DO is evicted while sockets are open (shouldn't happen
-with non-hibernatable, but any restart), the map is empty. Combined with
-GAP-8, this compounds.
-**Fix:** Migrate to `state.acceptWebSocket()` + attachment tags for
-per-connection metadata (userId, handle). Cloudflare's docs cover this;
-it also cuts bill.
+### GAP-11 (P2, CLOSED — commit 8d7023e): GameDO on hibernatable WebSockets
+**Now:** `ctx.acceptWebSocket(server)` + `server.serializeAttachment({
+userId, handle })` in the `socket()` handler. Event handlers moved to
+class methods `webSocketMessage` / `webSocketClose` / `webSocketError`
+so they survive hibernation. Per-connection metadata read via
+`readAttachment(ws)` helper. The in-memory `Map<WebSocket, GameClient>`
+is gone; `ctx.getWebSockets()` is now the socket set of record.
 
-### GAP-12 (P3): Server holds dead push endpoints
-**Where:** `src/worker.ts:339-358` (`sendWebPush`).
-**What:** On `410 Gone` (subscription revoked in browser), the server logs
-`delivered: false` but keeps the endpoint. Next push tries it again.
-**Fix:** On `410 Gone` (or any 4xx explicitly meaning "endpoint is dead"),
-remove the endpoint from `db.pushSubscriptions[userId]` in the same
-transaction as the log write.
+### GAP-12 (P3, CLOSED — commit 8d7023e): Dead push endpoints cleaned on 410 / 404
+**Now:** `enqueuePush` inspects the `sendWebPush` response. On `410
+Gone` or `404`, the endpoint is removed from
+`db.pushSubscriptions[userId]` and `db.pendingPushesByEndpoint[endpoint]`
+in the same transaction as the log write. The Machine 7 `revoked`
+transition is automatic — no manual reconciliation.
 
-### GAP-13 (P3): Auth challenges never GC'd
-**Where:** `src/worker.ts:499, 560` — writes; no cleanup.
-**What:** `registrationChallenges[handle]` and
-`authenticationChallenges[user.id]` are overwritten on each new
-`/options`, so accumulation is bounded to (# distinct handles ever
-probed + # users). Not urgent, but the record has a `createdAt` and
-should have a TTL sweep.
-**Fix:** Alarm-driven sweep, or lazy delete in `verify` for anything past
-some age.
+### GAP-13 (P3, CLOSED — commit 8d7023e): Auth challenges now TTL-swept
+**Now:** `CHALLENGE_TTL_MS = 10 * 60 * 1000` (`src/worker.ts:256`) and a
+`sweepExpiredChallenges(db)` helper (`src/worker.ts:257`) called from
+`registrationVerify` and `loginVerify`. Records older than 10 minutes
+are dropped from both `registrationChallenges` and
+`authenticationChallenges`. Lazy sweep, no dedicated alarm.
 
 ### GAP-14 (P3, CLOSED — commit 7878939): WaitingRoom had no branch for declined / withdrawn
 **Now:** Poll handler at `src/main.tsx:3127` transitions to a terminal
@@ -810,44 +834,50 @@ at `src/main.tsx:2856` cites this gap and the distinction between
 `sentRequests` (friend requests) and `sentChallenges` (game
 invitations).
 
-### GAP-16 (P3, NEW): No time-warp harness for alarm-driven behaviors
-**Where:** `AppDO.alarm()` handles two lifecycles now — schedule fire
-(GAP-7 sweep + fire loop) and the recurring-schedule advance. Both are
-tested by code review only; there is no test that fast-forwards the
-DO's clock to prove the transitions actually run.
-**User impact:** A regression in the zombie sweep would silently leave
-pending schedules dead in both dashboards; a regression in
-`nextFireAt` advance would either double-fire or never fire again. No
-CI signal.
-**Fix:** Add a debug-local `POST /_debug/tick` on the AppDO that takes
-a `now` parameter and drives one alarm pass against it (guarded by
-the same `x-debug-local: true` header as `debugPushLog` at
-`src/worker.ts:975`). Then add adversity regressions that create a
-pending schedule with `startAt` in the past and tick, expecting
-`status === "expired"`; and that create a recurring accepted schedule,
-tick, expect a new game plus `nextFireAt` advanced by exactly one
-interval.
+### GAP-16 (P3, CLOSED — commit 8d7023e): Time-warp harness for alarm-driven behaviors
+**Now:** `POST /_debug/tick` on the AppDO (`debugTick`, added to the
+outer worker's local-only route list at `src/worker.ts:1621`). Body
+`{now: number}`. Shifts pending zombie-eligible schedules' `startAt`
+into the past and due accepted schedules' `nextFireAt` to now, then
+runs `alarm()`. Idempotent, isolated to schedules — game clocks
+untouched. Guarded by `x-debug-local: true` header, same gate as
+`debugPushLog`. Adversity regression `schedule zombie sweep expires
+pending past startAt via debug tick (state-smith GAP-7/16)` uses it.
+
+### GAP-17 (P4, NEW — GAP-16 follow-up): No time-warp coverage for recurring `nextFireAt` advancement
+**Where:** `AppDO.alarm()`'s recurring branch — the `while (next <=
+now) next = advanceFireTime(next, rec)` loop that skips past
+occurrences.
+**What:** The existing `recurring schedule creates a game on each
+firing` adversity test covers ONE firing via a real-time sleep
+(~10s). Nothing proves that a `nextFireAt` far in the past advances by
+exactly one interval per tick and produces exactly one catch-up game,
+which is the invariant the loop enforces.
+**User impact:** A regression that either double-fires or silently
+never advances would produce user-visible symptoms (missed weekly
+games or a stack of catch-up notifications), and CI would not catch
+it.
+**Fix:** With `/_debug/tick` already available (GAP-16), add an
+adversity regression that creates a recurring accepted schedule with
+`nextFireAt` a week in the past, ticks once, and asserts (a) exactly
+one new game was created, (b) `nextFireAt` advanced by exactly one
+interval, (c) the next `nextFireAt` is strictly in the future.
+Estimated effort: small — the harness already exists.
 
 ---
 
 ## What's next
 
-TIER A (GAP-1 through GAP-7 + GAP-14/15) is closed. Every lifecycle
-that was user-facing has its states reachable and its exits wired.
+TIER A (GAP-1 through GAP-7 + GAP-14/15) and TIER B (GAP-8 through
+GAP-13 + GAP-16) are closed. Every named machine now has: single
+writer, reachable states, exits from every non-terminal, projections
+on every surface where the entity is user-relevant, and durable
+storage that survives DO hibernation.
 
-TIER B is Durable-Object hygiene: GAP-8 (persist `connectionState`),
-GAP-9 (replace `setTimeout` reconnect grace with an alarm or lazy
-promotion), GAP-10 (retry `reportStatus` from `GameDO` to `AppDO`),
-GAP-11 (migrate to hibernatable WebSockets), GAP-12 (drop dead
-subscriptions on `410 Gone`), GAP-13 (TTL sweep on auth challenges).
-These matter under real load and after DO hibernation; they don't
-degrade normal play. GAP-8 and GAP-9 travel together — the fix is a
-single pattern (persist state + promote lazily at snapshot time),
-so they should ship as one round.
+Only GAP-17 (recurring-schedule multi-tick regression via the
+time-warp harness) remains, ranked P4 — the harness exists, the
+missing test is small, and the underlying code is already reviewed to
+be correct.
 
-GAP-16 (time-warp harness) is orthogonal — it closes the coverage gap
-for GAP-7's zombie sweep and for recurring-schedule advance. Worth doing
-before touching the alarm code again.
-
-The `stateful-shapes` skill in this workspace is the complementary read
-for anyone picking up TIER B.
+The `stateful-shapes` skill in this workspace is the complementary
+read for anyone adding a new machine from here.
