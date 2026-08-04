@@ -507,13 +507,18 @@ body[data-screen="landing"] .landing-copy {
   display: grid;
   place-items: center;
   /* Board cap raised to 820 so the board dominates on laptops. Real
-     board size ends up min(width, height, cap) via aspect-ratio + max-*. */
+     board size ends up min(cqw, cqh, cap) via the board's own sizing
+     rule below. */
   max-width: 820px;
   margin: 0 auto;
   width: 100%;
   /* Reserve space for the teak frame's box-shadow (5px desktop / 3px
      mobile) so it doesn't get clipped by the flex container. */
   padding: 6px;
+  /* Container-type: size so the board can query BOTH width and height
+     via cqw/cqh — required for the "square fits rectangle" trick
+     below to work at all. */
+  container-type: size;
 }
 @media (max-width: 480px) {
   .game-fixed .board-holder { padding: 4px; }
@@ -536,15 +541,17 @@ body[data-screen="landing"] .landing-copy {
   font-size: 11px;
 }
 .game-fixed .board-holder .board {
-  /* Both dimensions bounded — whichever the container narrows first
-     (height on desktop, width on mobile) becomes the board side. */
-  height: 100%;
-  width: 100%;
-  max-height: 100%;
-  max-width: 100%;
-  aspect-ratio: 1/1;
-  /* Object-fit-style behavior for a square in a rectangular box: let
-     the shorter axis win. */
+  /* Board must be STRICTLY SQUARE — no vertical stretching on tall
+     phones. Previous width:100% + height:100% + aspect-ratio:1/1
+     silently defeated aspect-ratio (spec: aspect-ratio only kicks in
+     when at least one dimension is auto); the board filled the
+     rectangular holder, squares stretched.
+     Fix: side = min(container width, container height) via cqw + cqh.
+     .board-holder above sets container-type: size so both cqw and
+     cqh resolve. aspect-ratio is retained as belt-and-suspenders. */
+  inline-size: min(100cqw, 100cqh);
+  block-size:  min(100cqw, 100cqh);
+  aspect-ratio: 1 / 1;
   align-self: center;
   justify-self: center;
 }
@@ -1770,25 +1777,27 @@ body[data-screen="landing"] .landing-copy {
   .square.selected::after { inset: 1.5px; border-width: 1.5px; }
 }
 
-/* LAST-MOVE — flat wash, no border. Color-mix each square with cream
-   at a modest ratio so both the light (buff) and dark (teal-dark)
-   variants read as "was here" without competing with the selection
-   frame. */
+/* LAST-MOVE — flat wash, no border. Prior mix was 82:18 (subtle by
+   design so it wouldn't compete with the selection frame). Tejas
+   reported it too subtle to see at arm's length, even for own moves.
+   Pushed to 62:38 on light and 58:42 on dark: the tint reads clearly
+   as "was here" without becoming a second border-strength indicator.
+   Selection is still the ONLY border on the board. */
 .square.last-from.light, .square.last-to.light {
-  background: color-mix(in oklab, var(--paper) 82%, var(--cream));
+  background: color-mix(in oklab, var(--paper) 62%, var(--cream));
 }
 .square.last-from.dark, .square.last-to.dark {
-  background: color-mix(in oklab, var(--walnut) 82%, var(--cream));
+  background: color-mix(in oklab, var(--walnut) 58%, var(--cream));
 }
 /* Hover on last-move squares stays inside the family — no jarring
    jump between wash and hover state. */
 .board:not(.board-static) .square.last-from.light:hover,
 .board:not(.board-static) .square.last-to.light:hover {
-  background: color-mix(in oklab, var(--paper-2) 82%, var(--cream));
+  background: color-mix(in oklab, var(--paper-2) 62%, var(--cream));
 }
 .board:not(.board-static) .square.last-from.dark:hover,
 .board:not(.board-static) .square.last-to.dark:hover {
-  background: color-mix(in oklab, color-mix(in oklab, var(--walnut) 85%, var(--ink)) 82%, var(--cream));
+  background: color-mix(in oklab, color-mix(in oklab, var(--walnut) 85%, var(--ink)) 58%, var(--cream));
 }
 
 /* In-check — subtle warm ochre wash (palette-family adjacent, reads as
