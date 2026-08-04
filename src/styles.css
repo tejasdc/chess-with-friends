@@ -1534,6 +1534,17 @@ body[data-screen="landing"] .landing-copy {
 }
 .pending li { display: flex; align-items: center; gap: 8px; }
 .pending .link { color: var(--ink); }
+.pending-withdraw {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--stone);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 2px 0;
+  cursor: pointer;
+  margin-left: auto;
+}
+.pending-withdraw:hover { color: var(--vermillion); }
 
 /* Friends */
 .add-friend-section {

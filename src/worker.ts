@@ -58,6 +58,14 @@ interface FriendRequest {
   id: string;
   fromId: string;
   toId: string;
+  // Terminal set per state-smith audit (docs/state-machines.md Machine 2):
+  //   pending   — sender awaits recipient action
+  //   accepted  — friendship created
+  //   declined  — recipient dismissed (GAP-4 exit)
+  // Withdraw is a hard delete of the row (GAP-5) — no "withdrawn" state
+  // because the request never happened as far as the recipient is
+  // concerned (mirrors the friend-request lifecycle: a request in flight
+  // that the sender cancels leaves no trace).
   status: "pending" | "accepted" | "declined";
   createdAt: number;
 }
@@ -107,7 +115,14 @@ interface Schedule {
   // "cancelled" is the series-level end (either party can trigger it).
   // "fired" only applies to one-off schedules that have already run;
   // recurring schedules stay "accepted" until cancelled.
-  status: "pending" | "accepted" | "fired" | "declined" | "cancelled";
+  // Terminal set per state-smith audit (docs/state-machines.md Machine 4):
+  //   pending   — proposer awaits recipient
+  //   accepted  — one-off pre-fire OR recurring steady state
+  //   fired     — one-off has run (gameId set); recurring never enters this
+  //   declined  — recipient dismissed (GAP-6 exit)
+  //   cancelled — either party ended the series
+  //   expired   — pending schedule whose startAt passed with grace (GAP-7 sweep)
+  status: "pending" | "accepted" | "fired" | "declined" | "cancelled" | "expired";
   gameId?: string;           // legacy one-off field — kept for old data
   lastGameId?: string;       // most-recent fired game for recurring series
   cancelledBy?: string;      // userId who ended the series
@@ -387,8 +402,14 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname === "/api/push/pending" && (request.method === "GET" || request.method === "POST")) return await this.pendingPush(request, user);
       if (url.pathname === "/api/friends/request" && request.method === "POST") return await this.requestFriend(request, user);
       if (url.pathname === "/api/friends/invite" && request.method === "POST") return await this.requestByInvite(request, user);
+      if (url.pathname.match(/^\/api\/friends\/requests\/[^/]+$/) && request.method === "DELETE") {
+        return await this.withdrawFriendRequest(url.pathname.split("/")[4], user);
+      }
       if (url.pathname.match(/^\/api\/friends\/[^/]+\/accept$/) && request.method === "POST") {
         return await this.acceptFriend(url.pathname.split("/")[3], user);
+      }
+      if (url.pathname.match(/^\/api\/friends\/[^/]+\/decline$/) && request.method === "POST") {
+        return await this.declineFriendRequest(url.pathname.split("/")[3], user);
       }
       if (url.pathname === "/api/challenges" && request.method === "POST") return await this.createChallenge(request, user);
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/accept$/) && request.method === "POST") {
@@ -410,6 +431,9 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname.match(/^\/api\/schedules\/[^/]+\/cancel$/) && request.method === "POST") {
         return await this.cancelSchedule(url.pathname.split("/")[3], user);
       }
+      if (url.pathname.match(/^\/api\/schedules\/[^/]+\/decline$/) && request.method === "POST") {
+        return await this.declineSchedule(url.pathname.split("/")[3], user);
+      }
       if (url.pathname === "/api/debug/push-log" && request.method === "GET") return await this.debugPushLog(request);
 
       return json({ error: "Not found" }, { status: 404 });
@@ -426,6 +450,19 @@ export class AppDO extends DurableObject<Env> {
     // schedules shipped.
     for (const s of Object.values(db.schedules)) {
       if (s.status === "accepted" && s.nextFireAt === undefined) s.nextFireAt = s.startAt;
+    }
+    // GAP-7 zombie sweep (state-smith): a schedule that stays "pending"
+    // past startAt + grace is unfireable and clutters both parties'
+    // lists forever. Sweep to a new terminal "expired" (preserving the
+    // record so the requester sees the outcome), NOT deleted. Grace of
+    // 60s matches the "startAt within 60s of now" tolerance the create
+    // endpoint accepts, so a proposal accepted seconds before startAt
+    // isn't racy with the sweep.
+    const ZOMBIE_GRACE_MS = 60_000;
+    for (const s of Object.values(db.schedules)) {
+      if (s.status === "pending" && s.startAt + ZOMBIE_GRACE_MS <= now) {
+        s.status = "expired";
+      }
     }
     const due = Object.values(db.schedules).filter(
       (s) => s.status === "accepted" && (s.nextFireAt ?? s.startAt) <= now,
@@ -647,7 +684,12 @@ export class AppDO extends DurableObject<Env> {
       .filter((challenge) => challenge.fromId === user.id && challenge.status === "pending")
       .map((challenge) => ({ ...challenge, toHandle: db.users[challenge.toId]?.handle }));
     const schedules = Object.values(db.schedules)
-      .filter((schedule) => (schedule.toId === user.id || schedule.fromId === user.id) && schedule.status !== "declined")
+      // Filter out terminals that shouldn't clutter either party's list:
+      // declined (invitee said no — GAP-6) and expired (pending past
+      // grace, swept by alarm — GAP-7). Cancelled remains visible so
+      // the ended-series row is discoverable; fired remains visible so
+      // the played game is discoverable via the schedule bullet.
+      .filter((schedule) => (schedule.toId === user.id || schedule.fromId === user.id) && schedule.status !== "declined" && schedule.status !== "expired")
       .map((schedule) => ({
         ...schedule,
         fromHandle: db.users[schedule.fromId]?.handle,
@@ -797,6 +839,44 @@ export class AppDO extends DurableObject<Env> {
     return await this.me(user);
   }
 
+  private async declineFriendRequest(id: string, user: User) {
+    // Recipient-initiated no on a pending FriendRequest (state-smith
+    // GAP-4). Only the toId may decline. Idempotent — a second decline
+    // (or decline of an already-accepted/withdrawn request) is a no-op
+    // success. Marks status="declined"; /api/me's `requests` filter
+    // (status === "pending") drops it from the invitee's incoming list;
+    // the sender's `sentRequests` (also status === "pending") drops it
+    // too, so the outbound bullet clears on their next refresh.
+    const db = await this.db();
+    const request = db.friendRequests[id];
+    if (!request) return json({ status: "gone" });
+    if (request.toId !== user.id) throw new Error("Only the recipient can decline.");
+    if (request.status === "pending") {
+      request.status = "declined";
+      await this.save(db);
+    }
+    return json({ status: request.status });
+  }
+
+  private async withdrawFriendRequest(id: string, user: User) {
+    // Sender-initiated cancel of a pending FriendRequest (state-smith
+    // GAP-5). Only the fromId may withdraw. Idempotent. Hard-deletes
+    // the row — a request the sender took back leaves no trace on the
+    // recipient side (no "@x wanted to be friends but changed their mind"
+    // ghost). Contrast with challenge withdraw, which sets a terminal
+    // status so the sender's WaitingRoom can display the outcome; a
+    // friend-request sender has no dedicated waiting surface, so hard
+    // delete is the simpler + correct shape.
+    const db = await this.db();
+    const request = db.friendRequests[id];
+    if (!request) return json({ status: "gone" });
+    if (request.fromId !== user.id) throw new Error("Only the sender can withdraw.");
+    if (request.status !== "pending") return json({ status: request.status });
+    delete db.friendRequests[id];
+    await this.save(db);
+    return json({ status: "withdrawn" });
+  }
+
   private async createChallenge(request: Request, user: User) {
     const db = await this.db();
     const body = await readJson<{ friendId: string; timeControl?: TimeControl }>(request);
@@ -934,6 +1014,23 @@ export class AppDO extends DurableObject<Env> {
     return json({ schedule });
   }
 
+  private async declineSchedule(id: string, user: User) {
+    // Recipient-initiated no on a pending Schedule proposal (state-smith
+    // GAP-6). Only the toId may decline. Idempotent — decline of an
+    // already-declined / cancelled / accepted / fired schedule is a
+    // no-op success. Marks status="declined".
+    const db = await this.db();
+    const schedule = db.schedules[id];
+    if (!schedule) return json({ status: "gone" });
+    if (schedule.toId !== user.id) throw new Error("Only the recipient can decline.");
+    if (schedule.status === "pending") {
+      schedule.status = "declined";
+      await this.save(db);
+      await this.setNextScheduleAlarm(db);
+    }
+    return json({ status: schedule.status });
+  }
+
   private async cancelSchedule(id: string, user: User) {
     // Either party can end the series. Cancels future firings; past
     // fired games remain playable (they're their own game objects).
@@ -1005,11 +1102,20 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async setNextScheduleAlarm(db: AppDb) {
-    const next = Object.values(db.schedules)
-      .filter((schedule) => schedule.status === "accepted")
-      .map((s) => ({ id: s.id, at: s.nextFireAt ?? s.startAt }))
-      .sort((a, b) => a.at - b.at)[0];
-    if (next) await this.ctx.storage.setAlarm(next.at);
+    // Consider two wake targets:
+    //   1. next accepted schedule fires (nextFireAt)
+    //   2. next pending schedule's zombie-sweep deadline (startAt + grace)
+    // Take the earliest. Ensures GAP-7's expired-sweep runs promptly for
+    // pending proposals that pass startAt without acceptance.
+    const ZOMBIE_GRACE_MS = 60_000;
+    const candidates: number[] = [];
+    for (const s of Object.values(db.schedules)) {
+      if (s.status === "accepted") candidates.push(s.nextFireAt ?? s.startAt);
+      else if (s.status === "pending") candidates.push(s.startAt + ZOMBIE_GRACE_MS);
+    }
+    if (!candidates.length) return;
+    const next = Math.min(...candidates);
+    await this.ctx.storage.setAlarm(next);
   }
 
   private async updateGameStatus(request: Request) {

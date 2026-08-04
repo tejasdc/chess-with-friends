@@ -2398,6 +2398,10 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
     await api(`/api/friends/${id}/accept`, { method: "POST", body: "{}" });
     await refresh();
   }
+  async function declineFriend(id: string) {
+    await api(`/api/friends/${id}/decline`, { method: "POST", body: "{}" });
+    await refresh();
+  }
   async function acceptChallenge(id: string) {
     const { game } = await api<{ game: GameMeta }>(`/api/challenges/${id}/accept`, { method: "POST", body: "{}" });
     navigate(`/game/${game.id}`);
@@ -2410,16 +2414,20 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
     await api(`/api/schedules/${id}/accept`, { method: "POST", body: "{}" });
     await refresh();
   }
+  async function declineSchedule(id: string) {
+    await api(`/api/schedules/${id}/decline`, { method: "POST", body: "{}" });
+    await refresh();
+  }
 
-  // Each row can have one primary Accept and an optional quiet Decline.
-  // Decline currently only applies to challenges (state-smith GAP-2 exit
-  // symmetry) — friend requests and schedule proposals get their own
-  // decline exits in follow-up rounds (GAP-4, GAP-6).
+  // Each row has a primary Accept and a quiet Decline. All three
+  // entities (friend request, challenge, schedule) now have decline
+  // exits per state-smith GAP-2/4/6.
   const items: Array<{ key: string; label: React.ReactNode; onAccept: () => void; onDecline?: () => void }> = [
     ...home.requests.map((request) => ({
       key: `f-${request.id}`,
       label: <><strong>@{request.fromHandle}</strong> wants to be friends</>,
       onAccept: () => void acceptFriend(request.id),
+      onDecline: () => void declineFriend(request.id),
     })),
     ...home.challenges.map((challenge) => ({
       key: `c-${challenge.id}`,
@@ -2438,6 +2446,7 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
           </>
         ),
         onAccept: () => void acceptSchedule(schedule.id),
+        onDecline: () => void declineSchedule(schedule.id),
       })),
   ];
 
@@ -2821,6 +2830,15 @@ function FriendsSection({
     }
   }
 
+  async function withdrawFriendRequest(requestId: string) {
+    try {
+      await api(`/api/friends/requests/${requestId}`, { method: "DELETE" });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Couldn't withdraw.", "error");
+    }
+  }
+
   // Online first, then offline; each group alphabetized so the order
   // stays stable across refreshes.
   const sortedFriends = [...home.friends].sort((a, b) => {
@@ -2834,10 +2852,25 @@ function FriendsSection({
     <section className="friends">
       <h2 className="section-title">Friends</h2>
 
+      {/* sentRequests is FRIEND requests (not game challenges). Label
+          reads "Friend request sent to @x" per state-smith GAP-15 —
+          disambiguates from sentChallenges which is a distinct list.
+          Small Withdraw link (GAP-5) so the sender who mistyped a
+          handle or changed their mind has a way out. */}
       {home.sentRequests.length ? (
         <ul className="pending">
           {home.sentRequests.map((request) => (
-            <li key={request.id}>Request sent to @{request.toHandle}</li>
+            <li key={request.id}>
+              Friend request sent to @{request.toHandle}
+              <button
+                type="button"
+                className="linkish pending-withdraw"
+                onClick={() => void withdrawFriendRequest(request.id)}
+                aria-label={`Withdraw friend request to @${request.toHandle}`}
+              >
+                Withdraw
+              </button>
+            </li>
           ))}
         </ul>
       ) : null}

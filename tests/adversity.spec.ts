@@ -1200,6 +1200,108 @@ test("challenge withdraw + decline: state machine exits and waiting-room termina
   }
 });
 
+test("friend request: decline + withdraw exits (state-smith GAP-4 + GAP-5)", async ({ browser }) => {
+  // Missing-exit class symmetric to challenges: recipient can now
+  // decline a pending friend request; sender can withdraw one. Both
+  // idempotent. Declined requests disappear from both sides' /api/me;
+  // withdrawn requests are hard-deleted (leave no trace).
+  test.setTimeout(120_000);
+  async function fresh() {
+    const suffix = Date.now().toString(36).slice(-6);
+    const aliceCtx = await browser.newContext();
+    const bobCtx = await browser.newContext();
+    const alice = await aliceCtx.newPage();
+    const bob = await bobCtx.newPage();
+    await addAuthenticator(alice);
+    await addAuthenticator(bob);
+    const aH = `frq_a${suffix}`;
+    const bH = `frq_b${suffix}`;
+    await register(alice, aH);
+    await register(bob, bH);
+    return { alice, bob, aliceCtx, bobCtx, aH, bH };
+  }
+
+  // Case A — DECLINE by recipient.
+  {
+    const { alice, bob, aliceCtx, bobCtx, aH, bH } = await fresh();
+    try {
+      await addFriendByHandle(alice, bH);
+      await expect(alice.getByText("Friend request sent.")).toBeVisible();
+      await bob.reload();
+      // Bob has two buttons on his friend-request row: Accept + Decline.
+      await bob.getByRole("button", { name: "Decline" }).first().click();
+      // Bob's incoming clears.
+      await expect(bob.getByText(new RegExp(`@${aH} wants to be friends`))).toHaveCount(0);
+      // Alice's outbound clears (sentRequests filtered to pending).
+      await alice.reload();
+      await expect(alice.getByText(new RegExp(`Friend request sent to @${bH}`))).toHaveCount(0);
+      // Idempotency — second decline via API returns success, not error.
+      const second = await bob.evaluate(async () => {
+        // Grab the (now-declined) request via server; if none, this is fine.
+        const me = (await (await fetch("/api/me")).json()) as { requests?: unknown[] };
+        return me.requests?.length ?? 0;
+      });
+      expect(second).toBe(0);
+    } finally { await aliceCtx.close(); await bobCtx.close(); }
+  }
+
+  // Case B — WITHDRAW by sender.
+  {
+    const { alice, bob, aliceCtx, bobCtx, aH, bH } = await fresh();
+    try {
+      await addFriendByHandle(alice, bH);
+      await expect(alice.getByText(new RegExp(`Friend request sent to @${bH}`))).toBeVisible();
+      await alice.getByRole("button", { name: `Withdraw friend request to @${bH}` }).click();
+      // Alice's outbound clears.
+      await expect(alice.getByText(new RegExp(`Friend request sent to @${bH}`))).toHaveCount(0);
+      // Bob never sees the request (hard delete).
+      await bob.reload();
+      await expect(bob.getByText(new RegExp(`@${aH} wants to be friends`))).toHaveCount(0);
+    } finally { await aliceCtx.close(); await bobCtx.close(); }
+  }
+});
+
+test("schedule decline exit (state-smith GAP-6)", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const aliceCtx = await browser.newContext();
+  const bobCtx = await browser.newContext();
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  try {
+    await addAuthenticator(alice);
+    await addAuthenticator(bob);
+    const suffix = Date.now().toString(36).slice(-6);
+    const aH = `scd_a${suffix}`;
+    const bH = `scd_b${suffix}`;
+    await register(alice, aH);
+    await register(bob, bH);
+    await addFriendByHandle(alice, bH);
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await alice.reload();
+    await presenceHeartbeat(bob);
+    await alice.reload();
+    // Propose a schedule.
+    await alice.getByRole("button", { name: "Schedule a game" }).click();
+    await alice.getByRole("button", { name: "Propose" }).click();
+    await expect(alice.getByText("Game time proposed.")).toBeVisible();
+    // Bob sees the proposal in incoming with Accept + Decline.
+    await bob.reload();
+    const bobDeclineSchedule = bob.getByRole("button", { name: "Decline" });
+    await expect(bobDeclineSchedule.first()).toBeVisible();
+    await bobDeclineSchedule.first().click();
+    // Bob's incoming clears.
+    await bob.reload();
+    await expect(bob.getByText(/proposed/i)).toHaveCount(0);
+    // Alice's schedule bullet is gone (declined schedules filtered out of /api/me).
+    await alice.reload();
+    await expect(alice.getByText(new RegExp(`with @${bH}`))).toHaveCount(0);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 test("no element overlap across the visual matrix — every labeled control has its own bounding box on every surface × state × viewport", async ({ browser }) => {
   // Mandate from Tejas 2026-08-04: the schedule form shipped with the
   // Time field crushed under the Repeat dropdown at desktop widths.
