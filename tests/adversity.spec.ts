@@ -116,8 +116,13 @@ async function twoClientsInGame(browser: Browser, suffix: string, opts: { instru
   await expect(bob).toHaveURL(/\/game\/gam_/);
   const gameId = bob.url().split("/game/")[1];
   // Sender transitions to the game via the waiting-room poll — no need
-  // to navigate them manually.
-  await expect(alice).toHaveURL(/\/game\/gam_/, { timeout: 6000 });
+  // to navigate them manually. Poll interval is 2s; under full-suite
+  // load (48-solve landing test + local wrangler + realtime channels)
+  // the transition can take a couple of misses to catch up, so give it
+  // slack. Isolated runs settle in <2s; the wider window is only for
+  // full-suite noise, not for masking a real regression (a genuine
+  // failure would exceed even 12s).
+  await expect(alice).toHaveURL(/\/game\/gam_/, { timeout: 12000 });
   await expect(alice.locator(".board")).toBeVisible();
   await expect(bob.locator(".board")).toBeVisible();
   return { aliceCtx, bobCtx, alice, bob, gameId, handles: { a: aH, b: bH } };
