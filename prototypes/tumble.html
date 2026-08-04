@@ -1,34 +1,41 @@
 <!doctype html>
 <!--
-  Chess-with-friends landing prototype v6 — PIECE-LEGAL walk.
+  Chess-with-friends landing prototype v7 — SETUP + REPLAY.
 
-  Tejas played v5 (now in production). Verdict: Manhattan makes
-  pieces jump in ways they never could — a bishop shouldn't turn
-  a corner, a pawn shouldn't sidestep. So v6 replaces the router:
-  every A→B journey now decomposes into segments that are legal
-  moves for that piece type, ignoring occupancy (pieces pass like
-  ghosts).
+  Tejas played v6 and evolved the design: instead of random walks,
+  show the LAST FEW MOVES OF THE PUZZLE as the transition itself.
+  Which side moves next becomes visible from the motion — a black
+  move plays last, so it's white to move (or vice versa).
 
-    knight — L-hops via BFS on the knight graph (small arc per hop)
-    rook   — 1 or 2 orthogonal slides (via a right-angle corner)
-    bishop — 1 or 2 diagonal slides; off-color targets go via tray
-    queen  — combines the above (always reachable in 1–2 slides)
-    king   — single-square steps, capped visual step count
-    pawn   — single forward pushes only, color-directional
+  Each POSITIONS entry can carry a `preMoves` object:
+    { fen: '<position N moves before the puzzle>',
+      moves: ['e2e4', 'e7e5', ...] }
 
-  Unreachable cases resolve via the TRAY, never via illegal motion:
-  piece exits its own legal geometry to the nearest edge and slides
-  to a tray slot; the incoming piece slides from a tray slot to a
-  board-edge square (a "hand of player" moment — no chess legality
-  required for tray placement/pickup) then walks legally to its
-  target.
+  A transition to a position that has preMoves runs in two phases:
 
-  Everything else from v5 stays: pacing, stagger, WHITE/BLACK TO
-  MOVE captions, tap-tap solving, chess.js legality (inlined so
-  file:// works offline), stuck-piece wobble on tap, trays.
+    1) SETUP WALK — v6 piece-legal walk from the currently-live
+       arrangement to the pre-position. This is "the hand arranging
+       the board": trays, entries, legal geometry — all unchanged
+       from v6. Busy, many pieces, ordinary pace.
 
-  The router is a pure function (square+square+type+color → segment
-  waypoints) so the sister app can port it verbatim once approved.
+    2) REPLAY — from the pre-position, the last N moves play out
+       one at a time as real chess moves. Proper alternation,
+       captures walking off to the tray as they happen. The beat
+       is theatrical — a breath between moves, one piece at a
+       time. The last replayed move belongs to the opponent, so
+       who moves NEXT is announced by the motion itself.
+
+  For positions without preMoves, the transition is just phase 1
+  (walks directly to the target FEN — same behavior as v6).
+
+  Data note: this prototype ships with hardcoded demo `preMoves`
+  for a couple of the classics until design-2 extends
+  positions.json with the pipeline-generated values (marked DEMO
+  in the array below — remove when the real data lands).
+
+  Everything else from v6 stays: piece-legal router (pure fn),
+  chess.js legality (inlined), WHITE/BLACK TO MOVE caption,
+  tap-tap play, stuck-piece wobble, tray discipline.
 
   Palette LOCKED to mockup D/E/F: celadon ground, buff + teal-dark
   squares, navy ink + cream chip, teak frame. No red.
@@ -37,7 +44,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>piece-legal walk — chess with friends landing prototype (v6)</title>
+<title>setup + replay — chess with friends landing prototype (v7)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
@@ -266,7 +273,7 @@ window.Chess = Chess;
 </head>
 <body>
   <div class="frame">
-    <div class="wordmark">chess with friends · piece-legal walk v6</div>
+    <div class="wordmark">chess with friends · setup + replay v7</div>
     <div class="stage" id="stage">
       <div class="board-frame">
         <div class="board" id="board"></div>
@@ -295,15 +302,37 @@ const FILES = ['a','b','c','d','e','f','g','h'];
 // where relevant, so the side to move actually has a move to make.
 // If a position is stored at the checkmate itself, `game.moves()` is
 // empty for every square and the puzzle silently dies.
+//
+// `preMoves` (optional): the FEN N moves BEFORE this puzzle plus the
+// moves list that walks the pre-position TO the puzzle. The v7
+// transition replays those moves live so the visitor sees what
+// happened just before it became their move. Move strings are the
+// standard 4-char (or 5 for promotions) UCI form: "e2e4", "e7e8q".
+//
+// DEMO note: the preMoves below are hardcoded for the 3 classics
+// whose game scores are canonical; design-2 will replace these with
+// pipeline-generated values from positions.json shortly.
 const POSITIONS = [
   { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
     credit: 'Starting position' },
   // After 1. f3 e5 2. g4 — black to play Qh4# (or anything else).
   { fen: 'rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2',
-    credit: "Fool's mate — 1836" },
+    credit: "Fool's mate — 1836",
+    // DEMO: pre-position after 1. f3, then the two moves that land
+    // us at Fool's mate one-before: ...e5 (black) and 2. g4 (white).
+    preMoves: {
+      fen: 'rnbqkbnr/pppppppp/8/8/8/5P2/PPPPPPPP/RNBQKBNR b KQkq - 0 1',
+      moves: ['e7e5', 'g2g4'],
+    } },
   // After 1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 — white to play Qxf7#.
   { fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4',
-    credit: "Scholar's mate — 1656 pattern" },
+    credit: "Scholar's mate — 1656 pattern",
+    // DEMO: pre-position after 2. Bc4, then 2...Nc6 3. Qh5 Nf6 —
+    // three moves that arrive at the puzzle.
+    preMoves: {
+      fen: 'rnbqkbnr/pppp1ppp/8/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR b KQkq - 2 2',
+      moves: ['b8c6', 'd1h5', 'g8f6'],
+    } },
   { fen: '4rrk1/pR5p/6p1/8/1n2Q3/8/PP4PP/6K1 w - - 0 1',
     credit: "Anastasia's mate — pattern" },
   { fen: '7K/8/k1P5/7p/8/8/8/8 w - - 0 1',
@@ -896,244 +925,77 @@ function nearestSq(candidates, t) {
 // (the "hand of player" moment — no chess legality required for
 // tray pickup / placement).
 // -------------------------------------------------------------------------
-function walkTransition() {
-  return new Promise((resolve) => {
-    const pos = POSITIONS[posIndex];
-    creditEl.textContent = formatCredit(pos, game);
-    const arr = fenToBoardArray(pos.fen);
+// Shared walk constants — used by both the setup walk and the replay.
+const WALK_SEG_MS      = 380;   // per-segment glide (setup default)
+const WALK_MAX_SEGS    = 6;     // pace-cap on long paths
+const WALK_SETTLE_MS   = 200;
+const REPLAY_SEG_MS    = 520;   // slower per-segment during replay
+const REPLAY_BEAT_MS   = 420;   // breath between replay moves
+const KNIGHT_ARC_RATIO = 0.16;  // fraction of sqSize for arc peak
 
-    // Build target list.
-    const targets = arr.map(item => ({
-      sq: item.file + item.rank,
-      color: item.char === item.char.toUpperCase() ? 'w' : 'b',
-      type: item.char.toLowerCase(),
-      char: item.char,
-      end: squareCenter(item.file + item.rank),
-      assigned: null,
-    }));
-
-    // Assign nearest-of-kind pool piece to each target that the piece
-    // can LEGALLY reach (v6). Bishops needing to change color and
-    // pawns needing to move sideways / backward are rejected here so
-    // they don't get stuck with an impossible assignment — they'll
-    // fall through to tray + fresh-spawn.
-    const pool = livePieces.slice();
-    for (const t of targets) {
-      let bestI = -1, bestD = Infinity;
-      for (let i = 0; i < pool.length; i++) {
-        const p = pool[i];
-        if (!p || p.color !== t.color || p.type !== t.type) continue;
-        if (!p.sq) continue;  // tray piece — separate flow below
-        const path = legalPath(p.sq, t.sq, p.type, p.color);
-        if (!path.ok) continue;
-        const pcx = p.x + sqSize / 2, pcy = p.y + sqSize / 2;
-        const d = (pcx - t.end.x) ** 2 + (pcy - t.end.y) ** 2;
-        if (d < bestD) { bestD = d; bestI = i; t._path = path; }
-      }
-      if (bestI >= 0) { t.assigned = pool[bestI]; pool[bestI] = null; }
+// Construct a walk object from a waypoints list. Returns null if the
+// path is a no-op (identical start/end and no explicit force).
+function makeWalk(piece, waypoints, opts = {}) {
+  if (!waypoints || waypoints.length < 2) return null;
+  const first = waypoints[0], last = waypoints[waypoints.length - 1];
+  const dist = Math.hypot(last.x - first.x, last.y - first.y);
+  if (dist < sqSize * 0.06 && waypoints.length === 2 && !opts.forceEvenIfShort) return null;
+  let segCount = waypoints.length - 1;
+  if (segCount > WALK_MAX_SEGS) {
+    const stride = Math.ceil(segCount / WALK_MAX_SEGS);
+    const collapsed = [waypoints[0]];
+    for (let i = stride; i < waypoints.length; i += stride) collapsed.push(waypoints[i]);
+    if (collapsed[collapsed.length - 1] !== waypoints[waypoints.length - 1]) {
+      collapsed.push(waypoints[waypoints.length - 1]);
     }
+    waypoints = collapsed;
+    segCount = waypoints.length - 1;
+  }
+  const segMs = opts.segMs ?? WALK_SEG_MS;
+  const duration = segCount * segMs;
+  return {
+    piece, waypoints, segCount,
+    endCX: last.x, endCY: last.y,
+    startAngle: piece.rot,
+    startAt: opts.startAt ?? performance.now(),
+    duration,
+    isTray:   opts.isTray   ?? false,
+    fadeIn:   opts.fadeIn   ?? false,
+    isKnight: opts.isKnight ?? false,
+  };
+}
 
-    // Also try tray pieces for still-unassigned targets: a tray piece
-    // that matches color+type walks BACK onto the board via a chosen
-    // entry square (which the piece type can legally reach the target
-    // from). Straight tray→entry glide first (hand of player), then a
-    // legal walk from entry to target.
-    for (const t of targets) {
-      if (t.assigned) continue;
-      let bestI = -1, bestD = Infinity;
-      for (let i = 0; i < pool.length; i++) {
-        const p = pool[i];
-        if (!p || p.color !== t.color || p.type !== t.type) continue;
-        const pcx = p.x + sqSize / 2, pcy = p.y + sqSize / 2;
-        const d = (pcx - t.end.x) ** 2 + (pcy - t.end.y) ** 2;
-        if (d < bestD) { bestD = d; bestI = i; }
-      }
-      if (bestI < 0) continue;
-      const p = pool[bestI];
-      pool[bestI] = null;
-      // Build a two-phase path: straight from current (tray) to entry
-      // square, then legal walk from entry to target. Both share one
-      // waypoint array.
-      const entrySq = chooseEntrySquare(t.type, t.color, t.sq);
-      const entryC = centerSq(entrySq);
-      const legal = legalPath(entrySq, t.sq, t.type, t.color);
-      const path = { ok: true, waypoints: [{ x: p.x + sqSize/2, y: p.y + sqSize/2 }, entryC] };
-      if (legal.ok) {
-        // Skip legal.waypoints[0] (=entryC) to avoid a duplicate point.
-        for (let k = 1; k < legal.waypoints.length; k++) path.waypoints.push(legal.waypoints[k]);
-      }
-      t.assigned = p;
-      t._path = path;
-      t._trayEntry = true;
-    }
-
-    // Spawn brand-new pieces for targets still without an assignment
-    // (empty pool). Same two-phase path — tray-side start point, legal
-    // walk from a chosen entry to target — with a fade-in.
-    for (const t of targets) {
-      if (t.assigned) continue;
-      const el = createPieceEl(t.char);
-      const entrySq = chooseEntrySquare(t.type, t.color, t.sq);
-      const entryC = centerSq(entrySq);
-      // Start off-board on the appropriate tray side.
-      const trayStart = t.color === 'w'
-        ? { x: entryC.x, y: boardY + boardH + sqSize * 0.7 }
-        : { x: entryC.x, y: boardY - sqSize * 0.7 };
-      el.style.opacity = '0';
-      el.style.transform = `translate(${trayStart.x - sqSize/2}px, ${trayStart.y - sqSize/2}px) rotate(0deg)`;
-      piecesLayer.appendChild(el);
-      const p = {
-        el, sq: t.sq, color: t.color, type: t.type, char: t.char,
-        x: trayStart.x - sqSize/2, y: trayStart.y - sqSize/2, rot: 0,
-      };
-      livePieces.push(p);
-      t.assigned = p;
-      const legal = legalPath(entrySq, t.sq, t.type, t.color);
-      const path = { ok: true, waypoints: [trayStart, entryC] };
-      if (legal.ok) {
-        for (let k = 1; k < legal.waypoints.length; k++) path.waypoints.push(legal.waypoints[k]);
-      }
-      t._path = path;
-      t._fadeIn = true;
-    }
-
-    // Anything still in the pool: stragglers heading to the tray.
-    // Whites BELOW the board on the celadon; blacks ABOVE. Straight
-    // glide from current square to slot — this is the "hand of the
-    // player" moment and needs no chess legality.
-    const stragglers = pool.filter(Boolean);
-    const trayGap = sqSize * 0.50;
-    const trayYWhite = boardY + boardH + sqSize * 0.50;
-    const trayYBlack = boardY - sqSize * 0.55;
-    const whiteQueue = stragglers.filter(p => p.color === 'w');
-    const blackQueue = stragglers.filter(p => p.color === 'b');
-
-    // v6 constants. Each SEGMENT of a piece's legal path is a full
-    // move for that piece (a rook slide, a knight hop, a pawn push).
-    // Each segment glides at SEG_MS regardless of segment length, so
-    // a rook sliding four squares takes the same time as a rook
-    // sliding one — feels right for a chess move. Knight hops get a
-    // slight arc so they read as hops, not slides.
-    const SEG_MS = 380;                 // per-move segment glide
-    const MAX_SEGS = 6;                 // pace-cap on long tray walks
-    const SETTLE_MS = 200;
-    const KNIGHT_ARC_AMP = sqSize * 0.16;   // upward peak of the hop
-    const now = performance.now();
-    const walks = [];
-
-    function pushWalkFromPath(piece, waypoints, isTray, rankHint, opts) {
-      if (!waypoints || waypoints.length < 2) return null;
-      // Skip animation when start ≈ end (piece already on target).
-      const first = waypoints[0], last = waypoints[waypoints.length - 1];
-      const dist = Math.hypot(last.x - first.x, last.y - first.y);
-      if (dist < sqSize * 0.06 && waypoints.length === 2) return null;
-
-      let segCount = waypoints.length - 1;
-      // Pace-cap: extremely long paths (tray-glide + long walk) would
-      // otherwise drag. Merge extra segments into fewer, longer ones.
-      if (segCount > MAX_SEGS) {
-        const stride = Math.ceil(segCount / MAX_SEGS);
-        const collapsed = [waypoints[0]];
-        for (let i = stride; i < waypoints.length; i += stride) {
-          collapsed.push(waypoints[i]);
-        }
-        if (collapsed[collapsed.length - 1] !== waypoints[waypoints.length - 1]) {
-          collapsed.push(waypoints[waypoints.length - 1]);
-        }
-        waypoints = collapsed;
-        segCount = waypoints.length - 1;
-      }
-      const duration = segCount * SEG_MS;
-
-      const rankDelay = (8 - (rankHint ?? 4)) * 90;
-      const jitter = Math.random() * 220;
-      const startAt = now + rankDelay + jitter;
-
-      const w = {
-        piece,
-        waypoints,
-        segCount,
-        endCX: last.x, endCY: last.y,
-        startAngle: piece.rot,
-        startAt, duration,
-        isTray,
-        fadeIn: false,
-        isKnight: opts?.isKnight ?? false,
-      };
-      walks.push(w);
-      return w;
-    }
-
-    // Push a walk for each target-assigned piece using the legal path
-    // computed during assignment. Register the new live/tray sets
-    // ahead of the animation so state is consistent immediately.
-    const nextLive = [];
-    const nextTray = [];
-    for (const t of targets) {
-      const p = t.assigned;
-      const w = pushWalkFromPath(p, t._path.waypoints, false,
-                                 Number(t.sq[1]),
-                                 { isKnight: p.type === 'n' });
-      p.sq = t.sq;
-      if (w && t._fadeIn) w.fadeIn = true;
-      nextLive.push(p);
-    }
-    // Stragglers: straight glide to tray slot — "hand of the player".
-    whiteQueue.forEach((p, i) => {
-      const endCX = boardX + sqSize * 0.5 + i * trayGap;
-      const endCY = trayYWhite;
-      const startC = { x: p.x + sqSize/2, y: p.y + sqSize/2 };
-      pushWalkFromPath(p, [startC, { x: endCX, y: endCY }], true, 8);
-      p.sq = null;
-      nextTray.push(p);
-    });
-    blackQueue.forEach((p, i) => {
-      const endCX = boardX + sqSize * 0.5 + i * trayGap;
-      const endCY = trayYBlack;
-      const startC = { x: p.x + sqSize/2, y: p.y + sqSize/2 };
-      pushWalkFromPath(p, [startC, { x: endCX, y: endCY }], true, 8);
-      p.sq = null;
-      nextTray.push(p);
-    });
-    livePieces = nextLive;
-    trayPieces = nextTray;
-
-    // Ensure no lingering CSS transitions interfere with rAF driving.
+// Reusable rAF-driven animation runner. Takes an already-built walks
+// list, resolves when everyone has arrived. Used by both the setup
+// walk (many pieces at once) and each replay move (1–2 pieces).
+function runWalkAnimation(walks) {
+  return new Promise(resolve => {
+    if (!walks.length) { setTimeout(resolve, 200); return; }
     for (const w of walks) w.piece.el.style.transition = 'none';
-    // Force reflow before we start.
     void piecesLayer.offsetHeight;
 
-    // Ease-in-out per segment: piece slows near each waypoint and
-    // accelerates away from it, so each square-crossing reads as a
-    // "step" without any actual bounce or vertical bob.
+    const arcAmp = sqSize * KNIGHT_ARC_RATIO;
+    const now = performance.now();
+    const globalEnd = walks.reduce(
+      (acc, w) => Math.max(acc, w.startAt + w.duration + WALK_SETTLE_MS), now) + 160;
+
     function easeInOut(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-
-    // Global end frame — a bit after the latest piece finishes. If no
-    // piece needs to walk (rare: identical positions), still play a
-    // short beat so the caption update doesn't feel dropped.
-    const globalEnd = walks.length
-      ? walks.reduce((acc, w) => Math.max(acc, w.startAt + w.duration + SETTLE_MS), now) + 160
-      : now + 380;
 
     function frame(tNow) {
       for (const w of walks) {
         const t = tNow - w.startAt;
         if (t < 0) continue;
-        const total = w.duration + SETTLE_MS;
+        const total = w.duration + WALK_SETTLE_MS;
         if (t >= total) {
-          const tx = w.endCX - sqSize / 2;
-          const ty = w.endCY - sqSize / 2;
-          w.piece.el.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(0deg) scale(1)`;
+          const tx = w.endCX - sqSize / 2, ty = w.endCY - sqSize / 2;
+          w.piece.el.style.transform =
+            `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(0deg) scale(1)`;
           w.piece.el.style.opacity = '1';
           w.piece.x = tx; w.piece.y = ty; w.piece.rot = 0;
           continue;
         }
 
-        // Travel: work out which segment we're in, then ease across
-        // it. For knight segments, add a small parabolic arc so the
-        // segment reads as a hop rather than a slide (arc peaks
-        // upward at mid-segment).
         let pt;
         if (t < w.duration) {
           const globalFrac = t / w.duration;
@@ -1141,55 +1003,247 @@ function walkTransition() {
           const segIdx = Math.min(w.segCount - 1, Math.floor(segFloat));
           const rawT = segFloat - segIdx;
           const segT = easeInOut(rawT);
-          const a = w.waypoints[segIdx];
-          const b = w.waypoints[segIdx + 1];
+          const a = w.waypoints[segIdx], b = w.waypoints[segIdx + 1];
           let x = a.x + (b.x - a.x) * segT;
           let y = a.y + (b.y - a.y) * segT;
-          if (w.isKnight) {
-            // Small upward arc, peak at rawT = 0.5.
-            y -= Math.sin(rawT * Math.PI) * KNIGHT_ARC_AMP;
-          }
+          if (w.isKnight) y -= Math.sin(rawT * Math.PI) * arcAmp;
           pt = { x, y };
         } else {
           pt = w.waypoints[w.waypoints.length - 1];
         }
 
-        // Fade-in for spawned pieces (empty pool fills from stage edge).
         if (w.fadeIn) w.piece.el.style.opacity = String(Math.min(1, t / 260));
 
-        // Arrival settle: a small scale beat after the walk finishes.
-        // Deliberately subtler than v4 (4% not 6%) so it reads as
-        // "arrival breath" not "bounce".
         let scale = 1;
         if (t >= w.duration) {
-          const s = (t - w.duration) / SETTLE_MS;
+          const s = (t - w.duration) / WALK_SETTLE_MS;
           scale = 1 - 0.04 * Math.sin(s * Math.PI);
         }
 
-        // Angle stays at 0 unless the piece began mid-transition with
-        // a non-zero angle (defensive — v5 pieces are all upright).
         let angleRad = 0;
         if (w.startAngle) {
           const standDur = Math.min(240, w.duration);
           if (t < standDur) angleRad = w.startAngle * (1 - easeOutCubic(t / standDur));
         }
 
-        const tx = pt.x - sqSize / 2;
-        const ty = pt.y - sqSize / 2;
+        const tx = pt.x - sqSize / 2, ty = pt.y - sqSize / 2;
         const deg = angleRad * 180 / Math.PI;
-        w.piece.el.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(${deg.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+        w.piece.el.style.transform =
+          `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) rotate(${deg.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
       }
 
       if (tNow < globalEnd) requestAnimationFrame(frame);
       else {
         for (const w of walks) w.piece.el.style.transition = '';
-        for (const p of livePieces) p.el.classList.add('live');
-        for (const p of trayPieces) p.el.classList.remove('live');
         resolve();
       }
     }
     requestAnimationFrame(frame);
   });
+}
+
+// SETUP WALK — piece-legal walk from currently-live arrangement to
+// the supplied target FEN. Runs the same assignment logic as v6:
+// nearest reachable pool piece per target, tray fallback for
+// unreachable, straggler exit to tray for unassigned pool pieces.
+async function walkToFen(targetFen) {
+  const arr = fenToBoardArray(targetFen);
+  const targets = arr.map(item => ({
+    sq: item.file + item.rank,
+    color: item.char === item.char.toUpperCase() ? 'w' : 'b',
+    type: item.char.toLowerCase(),
+    char: item.char,
+    end: squareCenter(item.file + item.rank),
+    assigned: null,
+    _path: null,
+    _fadeIn: false,
+  }));
+
+  // On-board pool → assign nearest legally-reachable piece per target.
+  const pool = livePieces.slice();
+  for (const t of targets) {
+    let bestI = -1, bestD = Infinity;
+    for (let i = 0; i < pool.length; i++) {
+      const p = pool[i];
+      if (!p || p.color !== t.color || p.type !== t.type) continue;
+      if (!p.sq) continue;   // tray piece — try in next pass
+      const path = legalPath(p.sq, t.sq, p.type, p.color);
+      if (!path.ok) continue;
+      const pcx = p.x + sqSize / 2, pcy = p.y + sqSize / 2;
+      const d = (pcx - t.end.x) ** 2 + (pcy - t.end.y) ** 2;
+      if (d < bestD) { bestD = d; bestI = i; t._path = path; }
+    }
+    if (bestI >= 0) { t.assigned = pool[bestI]; pool[bestI] = null; }
+  }
+
+  // Tray pieces → same color+type walk BACK onto the board via a
+  // chosen legal-entry square. This pass is ONLY for pieces already
+  // in the tray (p.sq === null). On-board pieces that failed the
+  // legal-path pass above stay in the pool and become stragglers —
+  // otherwise we'd animate an on-board straight-line that reads as
+  // an illegal chess move.
+  for (const t of targets) {
+    if (t.assigned) continue;
+    let bestI = -1, bestD = Infinity;
+    for (let i = 0; i < pool.length; i++) {
+      const p = pool[i];
+      if (!p || p.color !== t.color || p.type !== t.type) continue;
+      if (p.sq !== null) continue;   // on-board — skip here
+      const pcx = p.x + sqSize / 2, pcy = p.y + sqSize / 2;
+      const d = (pcx - t.end.x) ** 2 + (pcy - t.end.y) ** 2;
+      if (d < bestD) { bestD = d; bestI = i; }
+    }
+    if (bestI < 0) continue;
+    const p = pool[bestI]; pool[bestI] = null;
+    const entrySq = chooseEntrySquare(t.type, t.color, t.sq);
+    const entryC  = centerSq(entrySq);
+    const legal   = legalPath(entrySq, t.sq, t.type, t.color);
+    const path = { ok: true, waypoints: [{ x: p.x + sqSize/2, y: p.y + sqSize/2 }, entryC] };
+    if (legal.ok) for (let k = 1; k < legal.waypoints.length; k++) path.waypoints.push(legal.waypoints[k]);
+    t.assigned = p; t._path = path;
+  }
+
+  // Spawn fresh pieces for still-empty targets.
+  for (const t of targets) {
+    if (t.assigned) continue;
+    const el = createPieceEl(t.char);
+    const entrySq = chooseEntrySquare(t.type, t.color, t.sq);
+    const entryC  = centerSq(entrySq);
+    const trayStart = t.color === 'w'
+      ? { x: entryC.x, y: boardY + boardH + sqSize * 0.7 }
+      : { x: entryC.x, y: boardY - sqSize * 0.7 };
+    el.style.opacity = '0';
+    el.style.transform = `translate(${trayStart.x - sqSize/2}px, ${trayStart.y - sqSize/2}px) rotate(0deg)`;
+    piecesLayer.appendChild(el);
+    const p = {
+      el, sq: t.sq, color: t.color, type: t.type, char: t.char,
+      x: trayStart.x - sqSize/2, y: trayStart.y - sqSize/2, rot: 0,
+    };
+    livePieces.push(p);
+    t.assigned = p;
+    const legal = legalPath(entrySq, t.sq, t.type, t.color);
+    const path = { ok: true, waypoints: [trayStart, entryC] };
+    if (legal.ok) for (let k = 1; k < legal.waypoints.length; k++) path.waypoints.push(legal.waypoints[k]);
+    t._path = path; t._fadeIn = true;
+  }
+
+  // Stragglers → tray slots. Whites BELOW, navies ABOVE.
+  const stragglers  = pool.filter(Boolean);
+  const trayGap     = sqSize * 0.50;
+  const trayYWhite  = boardY + boardH + sqSize * 0.50;
+  const trayYBlack  = boardY - sqSize * 0.55;
+  const whiteQueue  = stragglers.filter(p => p.color === 'w');
+  const blackQueue  = stragglers.filter(p => p.color === 'b');
+
+  const now  = performance.now();
+  const walks = [];
+  const nextLive = [];
+  const nextTray = [];
+  for (const t of targets) {
+    const p = t.assigned;
+    const rankHint = Number(t.sq[1]);
+    const startAt = now + (8 - rankHint) * 90 + Math.random() * 220;
+    const w = makeWalk(p, t._path.waypoints, {
+      startAt,
+      isKnight: p.type === 'n',
+      fadeIn:   t._fadeIn,
+    });
+    if (w) walks.push(w);
+    p.sq = t.sq;
+    nextLive.push(p);
+  }
+  whiteQueue.forEach((p, i) => {
+    const endCX = boardX + sqSize * 0.5 + i * trayGap;
+    const startC = { x: p.x + sqSize/2, y: p.y + sqSize/2 };
+    const startAt = now + 8 * 90 + Math.random() * 220;
+    const w = makeWalk(p, [startC, { x: endCX, y: trayYWhite }],
+                      { startAt, isTray: true });
+    if (w) walks.push(w);
+    p.sq = null; nextTray.push(p);
+  });
+  blackQueue.forEach((p, i) => {
+    const endCX = boardX + sqSize * 0.5 + i * trayGap;
+    const startC = { x: p.x + sqSize/2, y: p.y + sqSize/2 };
+    const startAt = now + 8 * 90 + Math.random() * 220;
+    const w = makeWalk(p, [startC, { x: endCX, y: trayYBlack }],
+                      { startAt, isTray: true });
+    if (w) walks.push(w);
+    p.sq = null; nextTray.push(p);
+  });
+  livePieces = nextLive;
+  trayPieces = nextTray;
+  await runWalkAnimation(walks);
+}
+
+// REPLAY — animate one real chess move as it plays out. Handles
+// captures (captured piece walks to tray, starting midway through
+// the mover's arrival), en passant (captured pawn sits behind the
+// destination square), and promotion (defaults to queen). The move
+// is applied to the game state so `game.turn()` alternates and the
+// caption reflects who moves next once the replay finishes.
+async function playOneMove(moveStr) {
+  const from = moveStr.slice(0, 2);
+  const to   = moveStr.slice(2, 4);
+  const promotion = moveStr.length > 4 ? moveStr[4] : 'q';
+  const move = game.move({ from, to, promotion });
+  if (!move) { console.warn('[v7] replay move rejected:', moveStr); return; }
+
+  const mover = livePieces.find(p => p.sq === from);
+  if (!mover) { console.warn('[v7] no piece to replay from', from); return; }
+
+  // Captured piece square (en passant lives one rank behind the
+  // destination for the moving color).
+  let capturedSq = to;
+  if (move.flags && move.flags.includes('e')) {
+    const r = Number(to[1]);
+    capturedSq = to[0] + (move.color === 'w' ? r - 1 : r + 1);
+  }
+  const captured = (move.flags && (move.flags.includes('c') || move.flags.includes('e')))
+    ? livePieces.find(p => p.sq === capturedSq && p !== mover)
+    : null;
+
+  const path = legalPath(from, to, mover.type, mover.color);
+  if (!path.ok) { console.warn('[v7] illegal legalPath for replay:', moveStr); return; }
+
+  const nowT = performance.now();
+  const walks = [];
+  const moverWalk = makeWalk(mover, path.waypoints, {
+    startAt: nowT,
+    segMs:   REPLAY_SEG_MS,
+    isKnight: mover.type === 'n',
+    forceEvenIfShort: true,
+  });
+  if (moverWalk) walks.push(moverWalk);
+
+  mover.sq = to;
+
+  if (captured) {
+    const trayY = captured.color === 'w'
+      ? boardY + boardH + sqSize * 0.50
+      : boardY - sqSize * 0.55;
+    const trayGap = sqSize * 0.50;
+    const existing = trayPieces.filter(p => p.color === captured.color).length;
+    const endCX = boardX + sqSize * 0.5 + existing * trayGap;
+    const startC = { x: captured.x + sqSize/2, y: captured.y + sqSize/2 };
+    const startAt = nowT + (moverWalk?.duration ?? REPLAY_SEG_MS) * 0.55;
+    const capturedWalk = makeWalk(captured, [startC, { x: endCX, y: trayY }], {
+      startAt, segMs: REPLAY_SEG_MS, isTray: true,
+    });
+    if (capturedWalk) walks.push(capturedWalk);
+    livePieces.splice(livePieces.indexOf(captured), 1);
+    trayPieces.push(captured);
+    captured.sq = null;
+    captured.el.classList.remove('live');
+  }
+
+  await runWalkAnimation(walks);
+}
+
+async function replayMoves(moveStrs) {
+  for (let i = 0; i < moveStrs.length; i++) {
+    await playOneMove(moveStrs[i]);
+    if (i < moveStrs.length - 1) await new Promise(r => setTimeout(r, REPLAY_BEAT_MS));
+  }
 }
 
 
@@ -1211,7 +1265,9 @@ function pickEdgeSpawn(dest) {
 }
 
 // -------------------------------------------------------------------------
-// Orchestrator: live → walk → live. That's it. No tumble.
+// Orchestrator (v7): setup walk to pre-position → replay N moves.
+// Positions without preMoves collapse to a single setup walk to the
+// target FEN (same behavior as v6).
 // -------------------------------------------------------------------------
 async function transitionToNext() {
   if (animating) return;
@@ -1219,20 +1275,43 @@ async function transitionToNext() {
   skipBtn.disabled = true;
   clearSelection();
 
-  // Tray pieces from the previous cycle are eligible to walk back onto
-  // the board if the next position calls for them. Merge them into
-  // livePieces so the walk-transition pool sees them.
+  // Tray pieces from the previous cycle are eligible to walk back
+  // onto the board if the next position calls for them. Merge them
+  // into livePieces so the walk pool sees them.
   if (trayPieces.length) {
     for (const p of trayPieces) livePieces.push(p);
     trayPieces = [];
   }
-
-  // Live pieces can't be tapped mid-transition.
   for (const p of livePieces) p.el.classList.remove('live');
 
-  posIndex = (posIndex + 1) % POSITIONS.length;
-  game = newGame(POSITIONS[posIndex].fen);
-  await walkTransition();
+  const nextIdx = (posIndex + 1) % POSITIONS.length;
+  const pos = POSITIONS[nextIdx];
+  posIndex = nextIdx;
+
+  // Caption reflects the FINAL puzzle state from the start — the
+  // motion (last replayed move) is what announces the side to move;
+  // the caption is confirmation. Compute against a throwaway game
+  // instance so we don't disturb the working state.
+  creditEl.textContent = formatCredit(pos, newGame(pos.fen));
+
+  if (pos.preMoves) {
+    // Phase 1: piece-legal setup walk to the pre-position.
+    game = newGame(pos.preMoves.fen);
+    await walkToFen(pos.preMoves.fen);
+    // Phase 2: replay each move in sequence, advancing game state so
+    // captures land on the right pieces and side-to-move alternates
+    // naturally. The last replayed move belongs to the opponent, so
+    // it's the visitor's turn once the animation ends.
+    await replayMoves(pos.preMoves.moves);
+  } else {
+    game = newGame(pos.fen);
+    await walkToFen(pos.fen);
+  }
+
+  // Restore tap-tap on live pieces (they were locked during the
+  // transition). Tray pieces stay non-interactive.
+  for (const p of livePieces) p.el.classList.add('live');
+  for (const p of trayPieces) p.el.classList.remove('live');
 
   animating = false;
   skipBtn.disabled = false;
