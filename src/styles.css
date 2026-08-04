@@ -719,22 +719,45 @@ body[data-screen="landing"] .landing-copy {
 .clock-strip.bottom .clock.waiting-label { color: var(--ink); opacity: 0.7; }
 .clock-strip.bottom .clock.waiting-label { color: var(--paper); }
 
-/* Inspirations page — simple, in-world, on the ground. */
+/* Inspirations page — no-scroll on 390x844, 430x932, 1440x900. Mobile
+   stacks single column with the image scaled down; desktop splits into
+   two columns (prose LEFT, photograph RIGHT). Fills its .stage parent
+   via flex:1 so .made-by pins to viewport bottom via margin-top:auto. */
 .inspirations {
-  max-width: 720px;   /* Widened 640→720 with the dashboard 2026-08-04. */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
   margin: 0 auto;
-  padding: 8px 0 48px;
+  padding: 8px 0 8px;
   color: var(--ink);
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
+.insp-back { align-self: flex-start; }
 .insp-title {
   font-family: var(--sans);
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 500;
   letter-spacing: -0.01em;
-  margin: 24px 0 12px;
+  margin: 4px 0 8px;
   color: var(--ink);
 }
-.insp-body { font-size: 16px; margin: 0 0 24px; color: var(--ink); max-width: 60ch; }
+.insp-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  /* Content region grows to consume the middle; .made-by absorbs the
+     remainder via margin-top:auto (see .made-by pattern-global rule). */
+}
+.insp-prose {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.insp-body { font-size: 15px; margin: 0; color: var(--ink); max-width: 60ch; line-height: 1.45; }
 .insp-list {
   list-style: none;
   padding: 0;
@@ -1639,27 +1662,37 @@ body[data-screen="landing"] .landing-copy {
 }
 .insp-note em { font-style: italic; color: var(--ink); }
 
-/* Rodchenko chess-table photo on /inspirations — illustration, not
-   hero. Max width caps below the copy column so it stays a supporting
-   image; the figcaption carries photographer + license + source
-   (attribution is watertight per the inspirations honesty rule). */
+/* Rodchenko chess-table photo — illustration, not hero. Scales down on
+   mobile so the whole page fits one viewport (Tejas 2026-08-04 no-
+   scroll rule for /inspirations). Uses max-height: min(...) tied to
+   vh so the image shrinks alongside the shell padding, prose height,
+   and made-by pin. Attribution split into two lines so the descriptive
+   text can be one compact line and the attribution the other. */
 .insp-figure {
-  margin: 12px 0 4px;
-  max-width: 420px;
+  margin: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .insp-figure img {
   display: block;
-  width: 100%;
+  max-width: 100%;
+  max-height: min(280px, 34dvh);
+  width: auto;
   height: auto;
   border-radius: 2px;
 }
 .insp-figcaption {
-  margin: 8px 0 0;
+  margin: 0;
   font-family: var(--mono);
   font-size: 11px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   color: var(--stone);
-  line-height: 1.5;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .insp-figcaption a {
   color: var(--stone);
@@ -1667,6 +1700,34 @@ body[data-screen="landing"] .landing-copy {
   text-underline-offset: 2px;
 }
 .insp-figcaption a:hover { color: var(--ink); }
+.insp-figcaption-attr { opacity: 0.85; }
+
+@media (max-height: 700px) {
+  /* Tight vertical viewport (short desktop windows, some phones in
+     landscape) — squeeze the image further before touching prose. */
+  .insp-figure img { max-height: 32dvh; }
+  .insp-title { font-size: 24px; margin: 2px 0 4px; }
+}
+
+@media (min-width: 900px) {
+  /* Desktop: two visual columns. LEFT: all prose stacked. RIGHT: photo
+     + caption. Both start at top; made-by pins to the bottom of the
+     .inspirations flex column via margin-top:auto (pattern-global). */
+  .inspirations {
+    max-width: 1080px;
+    gap: 16px;
+    padding: 8px 0 12px;
+  }
+  .insp-content {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 56px;
+  }
+  .insp-prose { flex: 1 1 0; max-width: 520px; }
+  .insp-figure { flex: 1 1 0; max-width: 480px; }
+  .insp-figure img { max-height: 60dvh; }
+  .insp-title { font-size: 32px; }
+}
 
 .invite-fallback {
   font-family: var(--mono);

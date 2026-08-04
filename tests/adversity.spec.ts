@@ -976,6 +976,11 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
     setup: (page: Page) => Promise<void>;
     contentSelector: string;
     mustNotScroll: boolean;
+    /* If true, assert a .made-by element exists and its bottom edge
+       sits within one gutter of the viewport bottom. Catches the
+       recurring "made-by floating mid-page" pin regression (three
+       occurrences before this became a test). */
+    madeByPinned?: boolean;
     /* Ratio of expected content width the actual must meet (allows small
        widget-specific insets like the .puzzle-shelf sitting inside .auth-
        scene). Default 0.90 = "≥ 90% of viewport minus gutters." */
@@ -990,6 +995,8 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
         const el = document.querySelector<HTMLElement>(sel);
         if (!el) return null;
         const r = el.getBoundingClientRect();
+        const madeBy = document.querySelector<HTMLElement>(".made-by");
+        const madeByRect = madeBy ? madeBy.getBoundingClientRect().toJSON() : null;
         return {
           x: r.x,
           right: r.right,
@@ -997,6 +1004,7 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
           scrollHeight: document.documentElement.scrollHeight,
           innerHeight: window.innerHeight,
           bodyScreen: document.body.dataset.screen ?? "(none)",
+          madeByRect,
         };
       }, surface.contentSelector);
       if (!g) { failures.push(`[${surface.label} ${size.name}] selector "${surface.contentSelector}" not found`); return; }
@@ -1012,12 +1020,24 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
       if (trailing > gutter * 1.5) failures.push(`[${surface.label} ${size.name}] trailing space ${trailing.toFixed(1)} > ${(gutter * 1.5).toFixed(1)} (offset beyond gutter)`);
       // No-scroll surfaces: document scroll extent must not exceed the viewport.
       if (surface.mustNotScroll && g.scrollHeight > g.innerHeight + 1) failures.push(`[${surface.label} ${size.name}] scrollHeight ${g.scrollHeight} > innerHeight ${g.innerHeight} (no-scroll violated)`);
+      // Made-by pin: on every surface that carries it, the element's
+      // bottom edge must sit within one gutter of the viewport bottom.
+      // Catches the flex-chain-broke-and-margin-top-auto-stopped-working
+      // regression that has recurred three times on inspirations.
+      if (surface.madeByPinned) {
+        if (!g.madeByRect) failures.push(`[${surface.label} ${size.name}] .made-by missing but madeByPinned:true`);
+        else {
+          const bottomGap = size.height - g.madeByRect.bottom;
+          if (bottomGap > gutter * 2) failures.push(`[${surface.label} ${size.name}] .made-by bottom=${g.madeByRect.bottom.toFixed(1)} (gap ${bottomGap.toFixed(1)} > ${(gutter * 2).toFixed(1)} from viewport bottom ${size.height})`);
+          if (g.madeByRect.bottom < 0) failures.push(`[${surface.label} ${size.name}] .made-by clipped above viewport`);
+        }
+      }
     } finally {
       await ctx.close();
     }
   }
 
-  // Landing (unauthenticated).
+  // Landing (unauthenticated). Made-by pinned via LandingFooter.
   const landingSurface = {
     label: "landing",
     setup: async (page: Page) => {
@@ -1026,9 +1046,11 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
     },
     contentSelector: ".auth",
     mustNotScroll: true,
+    madeByPinned: true,
   };
 
-  // Inspirations (unauthenticated).
+  // Inspirations (unauthenticated). Tejas 2026-08-04: no-scroll AND
+  // made-by pinned to viewport bottom on both mobile and desktop.
   const inspirationsSurface = {
     label: "inspirations",
     setup: async (page: Page) => {
@@ -1036,7 +1058,8 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
       await page.waitForSelector(".insp-title", { timeout: 15000 });
     },
     contentSelector: ".inspirations",
-    mustNotScroll: false, // may scroll if content demands, but should not have odd offset
+    mustNotScroll: true,
+    madeByPinned: true,
   };
 
   // Dashboard (needs registration).

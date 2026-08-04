@@ -1663,48 +1663,69 @@ function NotificationInfo({ state, installed }: { state: "unknown" | "granted" |
 }
 
 // Attribution page. Plain prose. No designer voice.
+// Layout constraint (Tejas 2026-08-04): no-scroll on both mobile
+// viewports (390x844, 430x932) AND desktop (1440x900). Desktop uses two
+// columns — all prose LEFT, photograph + caption RIGHT. Mobile stacks
+// single column with the image scaled down. The strict no-scroll shell
+// (padding 12/8 + overflow:hidden) is enabled by setting
+// data-screen="inspirations" on body.
 function InspirationsPage() {
+  useEffect(() => {
+    document.body.dataset.screen = "inspirations";
+    return () => {
+      if (document.body.dataset.screen === "inspirations") delete document.body.dataset.screen;
+    };
+  }, []);
   return (
     <div className="inspirations">
-      <button className="link" onClick={() => navigate("/")}>← back</button>
+      <button className="link insp-back" onClick={() => navigate("/")}>← back</button>
       <h1 className="insp-title">Inspirations</h1>
-      <p className="insp-body">
-        Most apps are engagement machines. Playing a simple game with a friend
-        means walking through a casino to reach them. This app is built to
-        avoid that.
-      </p>
-      <p className="insp-body">
-        The design and the icon come from Alexander Rodchenko's Workers' Club,
-        1925. The Workers' Club reconceived leisure as active and collective
-        rather than passive and solitary, and chess was part of it.
-      </p>
-      <figure className="insp-figure">
-        <img
-          src="/rodchenko-chess-table.jpg"
-          alt="Rodchenko's chess table for the USSR Workers' Club, 1925 design. Two chairs and a chess table built as one piece of furniture. Photograph of a 2021 reconstruction at Château La Gaffelière."
-          loading="lazy"
-          width={683}
-          height={582}
-        />
-        <figcaption className="insp-figcaption">
-          The chess table for the USSR Workers' Club. Two chairs and a board
-          built as one piece of furniture. A 2021 reconstruction; photograph
-          by Bapak Alex,{" "}
-          <a href="https://commons.wikimedia.org/wiki/File:Chess_table_From_the_Workers_Club.jpg" target="_blank" rel="noreferrer">
-            Wikimedia Commons
-          </a>
-          {", "}
-          <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a>.
-        </figcaption>
-      </figure>
-      <p className="insp-body">
-        The palette comes from Virgilio Villalba's Untitled, 1955: celadon,
-        cream, teak, navy.
-      </p>
-      <p className="insp-body">
-        Puzzle positions from{" "}
-        <a href="https://lichess.org/database">lichess.org/database</a>, CC0.
-      </p>
+      <div className="insp-content">
+        <div className="insp-prose">
+          <p className="insp-body">
+            Most apps are engagement machines. Playing a simple game with a
+            friend means walking through a casino to reach them. This app is
+            built to avoid that.
+          </p>
+          <p className="insp-body">
+            The design and the icon come from Alexander Rodchenko's Workers'
+            Club, 1925. The Workers' Club reconceived leisure as active and
+            collective rather than passive and solitary, and chess was part of
+            it.
+          </p>
+          <p className="insp-body">
+            The palette comes from Virgilio Villalba's Untitled, 1955:
+            celadon, cream, teak, navy.
+          </p>
+          <p className="insp-body">
+            Puzzle positions from{" "}
+            <a href="https://lichess.org/database">lichess.org/database</a>, CC0.
+          </p>
+        </div>
+        <figure className="insp-figure">
+          <img
+            src="/rodchenko-chess-table.jpg"
+            alt="Rodchenko's chess table for the USSR Workers' Club, 1925 design. Two chairs and a chess table built as one piece of furniture. Photograph of a 2021 reconstruction at Château La Gaffelière."
+            loading="lazy"
+            width={683}
+            height={582}
+          />
+          <figcaption className="insp-figcaption">
+            <span className="insp-figcaption-desc">
+              The chess table for the USSR Workers' Club. Two chairs and a
+              board built as one piece of furniture. A 2021 reconstruction.
+            </span>
+            <span className="insp-figcaption-attr">
+              Photograph by Bapak Alex,{" "}
+              <a href="https://commons.wikimedia.org/wiki/File:Chess_table_From_the_Workers_Club.jpg" target="_blank" rel="noreferrer">
+                Wikimedia Commons
+              </a>
+              {", "}
+              <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a>.
+            </span>
+          </figcaption>
+        </figure>
+      </div>
       <MadeByTejas />
     </div>
   );
