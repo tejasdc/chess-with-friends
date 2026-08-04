@@ -1,70 +1,18 @@
 [
   {
-    "id": "fools-mate-1836",
-    "title": "Fool's mate",
-    "credit": "Traditional; earliest published 1836",
-    "fen": "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
-    "preMoves": {
-      "fen": "rnbqkbnr/pppppppp/8/8/8/5P2/PPPPP1PP/RNBQKBNR b KQkq - 0 1",
-      "moves": [
-        "e5",
-        "g4"
-      ]
-    },
-    "sideToMove": "b",
-    "solution": {
-      "from": "d8",
-      "to": "h4"
-    }
-  },
-  {
-    "id": "lichess-wNLuL",
+    "id": "lichess-OlMV0",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/wNLuL",
-    "fen": "8/4pp2/3p1kp1/3P2b1/rpPqP3/7Q/4BPK1/7R w - - 8 40",
+    "credit": "lichess.org · OlMV0",
+    "fen": "6Q1/p5q1/2p4p/3p2k1/P1pP2P1/2P2PK1/2r5/8 w - - 0 42",
     "sideToMove": "w",
     "solution": {
-      "from": "h3",
-      "to": "h8"
+      "from": "g8",
+      "to": "g7"
     },
     "preMoves": {
-      "fen": "8/4pp2/3p1kp1/2qP2b1/rpP1P3/7Q/4BPK1/7R b - - 7 39",
+      "fen": "6Q1/p5R1/2p3qp/3p2k1/P1pP2P1/2P2PK1/2r5/8 b - - 9 41",
       "moves": [
-        "Qd4"
-      ]
-    }
-  },
-  {
-    "id": "lichess-suVtA",
-    "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/suVtA",
-    "fen": "2kr1b1r/pppb2p1/2np1pN1/3NqP1p/4P1n1/3B4/PPP3PP/R1B1QRK1 b - - 2 14",
-    "sideToMove": "b",
-    "solution": {
-      "from": "e5",
-      "to": "h2"
-    },
-    "preMoves": {
-      "fen": "2kr1b1r/pppb2p1/2np1p2/3NqP1p/4P1nN/3B4/PPP3PP/R1B1QRK1 w - - 1 14",
-      "moves": [
-        "Ng6"
-      ]
-    }
-  },
-  {
-    "id": "lichess-Td2XT",
-    "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/Td2XT",
-    "fen": "r5k1/1p6/4b2p/2p1b3/p1P1QpqP/1P4P1/P4P1K/3R1NR1 b - - 0 35",
-    "sideToMove": "b",
-    "solution": {
-      "from": "g4",
-      "to": "h3"
-    },
-    "preMoves": {
-      "fen": "r5k1/1p6/4b2p/2p1b3/p1P1ppqP/1P4P1/P1Q2P1K/3R1NR1 w - - 0 35",
-      "moves": [
-        "Qxe4"
+        "Qxg7"
       ]
     }
   },
@@ -87,19 +35,19 @@
     }
   },
   {
-    "id": "lichess-OlMV0",
+    "id": "lichess-dv08J",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/OlMV0",
-    "fen": "6Q1/p5q1/2p4p/3p2k1/P1pP2P1/2P2PK1/2r5/8 w - - 0 42",
-    "sideToMove": "w",
+    "credit": "lichess.org · dv08J",
+    "fen": "1R6/5ppk/6b1/1P4q1/PQ5p/4BP1P/3r2P1/5RK1 b - - 0 37",
+    "sideToMove": "b",
     "solution": {
-      "from": "g8",
-      "to": "g7"
+      "from": "g5",
+      "to": "g2"
     },
     "preMoves": {
-      "fen": "6Q1/p5R1/2p3qp/3p2k1/P1pP2P1/2P2PK1/2r5/8 b - - 9 41",
+      "fen": "1R6/5ppk/6b1/1P4q1/PQ5p/4nP1P/3r1BP1/5RK1 w - - 5 37",
       "moves": [
-        "Qxg7"
+        "Bxe3"
       ]
     }
   },
@@ -123,94 +71,9 @@
     }
   },
   {
-    "id": "lichess-dv08J",
-    "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/dv08J",
-    "fen": "1R6/5ppk/6b1/1P4q1/PQ5p/4BP1P/3r2P1/5RK1 b - - 0 37",
-    "sideToMove": "b",
-    "solution": {
-      "from": "g5",
-      "to": "g2"
-    },
-    "preMoves": {
-      "fen": "1R6/5ppk/6b1/1P4q1/PQ5p/4nP1P/3r1BP1/5RK1 w - - 5 37",
-      "moves": [
-        "Bxe3"
-      ]
-    }
-  },
-  {
-    "id": "lichess-m4e8L",
-    "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/m4e8L",
-    "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B5/2NP4/PPP2PPP/R1BbK2R w KQkq - 0 8",
-    "sideToMove": "w",
-    "solution": {
-      "from": "c4",
-      "to": "f7"
-    },
-    "preMoves": {
-      "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B3b1/2NP4/PPP2PPP/R1BQK2R b KQkq - 0 7",
-      "moves": [
-        "Bxd1"
-      ]
-    }
-  },
-  {
-    "id": "lichess-Y69M6",
-    "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/Y69M6",
-    "fen": "4rk2/7p/p4r2/q2p4/4p2P/P4bQB/1PP5/2K3R1 w - - 0 30",
-    "sideToMove": "w",
-    "solution": {
-      "from": "g3",
-      "to": "g7"
-    },
-    "preMoves": {
-      "fen": "4rk2/5r1p/p4B2/q2p4/4p2P/P4bQB/1PP5/2K3R1 b - - 2 29",
-      "moves": [
-        "Rxf6"
-      ]
-    }
-  },
-  {
-    "id": "lichess-XlS3M",
-    "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/XlS3M",
-    "fen": "2kr1b1r/ppp3p1/6qp/4N3/2PnN1b1/3P4/PP3P2/R1BQRK2 b - - 0 17",
-    "sideToMove": "b",
-    "solution": {
-      "from": "g4",
-      "to": "h3"
-    },
-    "preMoves": {
-      "fen": "2kr1b1r/ppp3p1/6qp/4p3/2PnN1b1/3P1N2/PP3P2/R1BQRK2 w - - 4 17",
-      "moves": [
-        "Nxe5"
-      ]
-    }
-  },
-  {
-    "id": "lichess-aCFms",
-    "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/aCFms",
-    "fen": "2rQq2k/1p3p1p/4bp2/p3p3/7P/P4P2/NPr5/1K1R2R1 w - - 4 27",
-    "sideToMove": "w",
-    "solution": {
-      "from": "d8",
-      "to": "f6"
-    },
-    "preMoves": {
-      "fen": "2rQ3k/1p3p1p/4bp2/p3p3/q6P/P4P2/NPr5/1K1R2R1 b - - 3 26",
-      "moves": [
-        "Qe8"
-      ]
-    }
-  },
-  {
     "id": "lichess-wXcAE",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/wXcAE",
+    "credit": "lichess.org · wXcAE",
     "fen": "r3k2r/1b1p1pp1/p2qp3/1pp2P2/3NP1p1/P1NP2P1/BPP5/R2Q1RK1 b kq - 0 16",
     "sideToMove": "b",
     "solution": {
@@ -225,26 +88,146 @@
     }
   },
   {
-    "id": "lichess-3FjeC",
+    "id": "lichess-wNLuL",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/3FjeC",
-    "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2P5/P4BPP/R2KR3 b - - 0 25",
-    "sideToMove": "b",
+    "credit": "lichess.org · wNLuL",
+    "fen": "8/4pp2/3p1kp1/3P2b1/rpPqP3/7Q/4BPK1/7R w - - 8 40",
+    "sideToMove": "w",
     "solution": {
-      "from": "a5",
-      "to": "a4"
+      "from": "h3",
+      "to": "h8"
     },
     "preMoves": {
-      "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2n5/PP3BPP/R2KR3 w - - 0 25",
+      "fen": "8/4pp2/3p1kp1/2qP2b1/rpP1P3/7Q/4BPK1/7R b - - 7 39",
       "moves": [
-        "bxc3"
+        "Qd4"
+      ]
+    }
+  },
+  {
+    "id": "fools-mate-1836",
+    "title": "Fool's mate",
+    "credit": "Traditional; earliest published 1836",
+    "fen": "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
+    "preMoves": {
+      "fen": "rnbqkbnr/pppppppp/8/8/8/5P2/PPPPP1PP/RNBQKBNR b KQkq - 0 1",
+      "moves": [
+        "e5",
+        "g4"
+      ]
+    },
+    "sideToMove": "b",
+    "solution": {
+      "from": "d8",
+      "to": "h4"
+    }
+  },
+  {
+    "id": "lichess-Td2XT",
+    "title": "Mate in 1",
+    "credit": "lichess.org · Td2XT",
+    "fen": "r5k1/1p6/4b2p/2p1b3/p1P1QpqP/1P4P1/P4P1K/3R1NR1 b - - 0 35",
+    "sideToMove": "b",
+    "solution": {
+      "from": "g4",
+      "to": "h3"
+    },
+    "preMoves": {
+      "fen": "r5k1/1p6/4b2p/2p1b3/p1P1ppqP/1P4P1/P1Q2P1K/3R1NR1 w - - 0 35",
+      "moves": [
+        "Qxe4"
+      ]
+    }
+  },
+  {
+    "id": "lichess-suVtA",
+    "title": "Mate in 1",
+    "credit": "lichess.org · suVtA",
+    "fen": "2kr1b1r/pppb2p1/2np1pN1/3NqP1p/4P1n1/3B4/PPP3PP/R1B1QRK1 b - - 2 14",
+    "sideToMove": "b",
+    "solution": {
+      "from": "e5",
+      "to": "h2"
+    },
+    "preMoves": {
+      "fen": "2kr1b1r/pppb2p1/2np1p2/3NqP1p/4P1nN/3B4/PPP3PP/R1B1QRK1 w - - 1 14",
+      "moves": [
+        "Ng6"
+      ]
+    }
+  },
+  {
+    "id": "lichess-aCFms",
+    "title": "Mate in 1",
+    "credit": "lichess.org · aCFms",
+    "fen": "2rQq2k/1p3p1p/4bp2/p3p3/7P/P4P2/NPr5/1K1R2R1 w - - 4 27",
+    "sideToMove": "w",
+    "solution": {
+      "from": "d8",
+      "to": "f6"
+    },
+    "preMoves": {
+      "fen": "2rQ3k/1p3p1p/4bp2/p3p3/q6P/P4P2/NPr5/1K1R2R1 b - - 3 26",
+      "moves": [
+        "Qe8"
+      ]
+    }
+  },
+  {
+    "id": "lichess-XlS3M",
+    "title": "Mate in 1",
+    "credit": "lichess.org · XlS3M",
+    "fen": "2kr1b1r/ppp3p1/6qp/4N3/2PnN1b1/3P4/PP3P2/R1BQRK2 b - - 0 17",
+    "sideToMove": "b",
+    "solution": {
+      "from": "g4",
+      "to": "h3"
+    },
+    "preMoves": {
+      "fen": "2kr1b1r/ppp3p1/6qp/4p3/2PnN1b1/3P1N2/PP3P2/R1BQRK2 w - - 4 17",
+      "moves": [
+        "Nxe5"
+      ]
+    }
+  },
+  {
+    "id": "lichess-Y69M6",
+    "title": "Mate in 1",
+    "credit": "lichess.org · Y69M6",
+    "fen": "4rk2/7p/p4r2/q2p4/4p2P/P4bQB/1PP5/2K3R1 w - - 0 30",
+    "sideToMove": "w",
+    "solution": {
+      "from": "g3",
+      "to": "g7"
+    },
+    "preMoves": {
+      "fen": "4rk2/5r1p/p4B2/q2p4/4p2P/P4bQB/1PP5/2K3R1 b - - 2 29",
+      "moves": [
+        "Rxf6"
+      ]
+    }
+  },
+  {
+    "id": "lichess-m4e8L",
+    "title": "Mate in 1",
+    "credit": "lichess.org · m4e8L",
+    "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B5/2NP4/PPP2PPP/R1BbK2R w KQkq - 0 8",
+    "sideToMove": "w",
+    "solution": {
+      "from": "c4",
+      "to": "f7"
+    },
+    "preMoves": {
+      "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B3b1/2NP4/PPP2PPP/R1BQK2R b KQkq - 0 7",
+      "moves": [
+        "Bxd1"
       ]
     }
   },
   {
     "id": "lichess-yXWOk",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/yXWOk",
+    "credit": "lichess.org · yXWOk",
     "fen": "2k3r1/pR5Q/1p1qp3/2p1p3/2P1P3/3P1n1P/PP2N1r1/5R1K b - - 3 25",
     "sideToMove": "b",
     "solution": {
@@ -261,7 +244,7 @@
   {
     "id": "lichess-9KjBu",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/9KjBu",
+    "credit": "lichess.org · 9KjBu",
     "fen": "1rbnkb1r/1p2pppp/p4n2/1N2N3/2B5/8/PP3PPP/R1B1K2R w KQk - 0 11",
     "sideToMove": "w",
     "solution": {
@@ -278,7 +261,7 @@
   {
     "id": "lichess-ynqQC",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/ynqQC",
+    "credit": "lichess.org · ynqQC",
     "fen": "r2q1rbk/pp5p/2np2PQ/2p5/4P1p1/2PP4/PP4BP/R4RK1 w - - 1 19",
     "sideToMove": "w",
     "solution": {
@@ -314,7 +297,7 @@
   {
     "id": "lichess-rFKz2",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/rFKz2",
+    "credit": "lichess.org · rFKz2",
     "fen": "Q7/5pk1/3p2p1/2p1b3/8/5q1p/R2R1P2/5QK1 b - - 0 50",
     "sideToMove": "b",
     "solution": {
@@ -331,7 +314,7 @@
   {
     "id": "lichess-cVJhU",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/cVJhU",
+    "credit": "lichess.org · cVJhU",
     "fen": "2kr1q1r/pbpp3p/1pn2p2/2bN2B1/2B5/6Q1/PPP2PPP/R4RK1 w - - 0 15",
     "sideToMove": "w",
     "solution": {
@@ -348,7 +331,7 @@
   {
     "id": "lichess-veeZB",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/veeZB",
+    "credit": "lichess.org · veeZB",
     "fen": "8/6pk/7p/1p2BK2/2pP1P1Q/2P5/PP4qP/8 b - - 10 39",
     "sideToMove": "b",
     "solution": {
@@ -365,7 +348,7 @@
   {
     "id": "lichess-aoOAg",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/aoOAg",
+    "credit": "lichess.org · aoOAg",
     "fen": "5r2/1pnqk1P1/p2pr1p1/6P1/8/4B3/PPP4P/5RK1 w - - 0 29",
     "sideToMove": "w",
     "solution": {
@@ -381,26 +364,26 @@
     }
   },
   {
-    "id": "lichess-XVAvN",
+    "id": "lichess-3FjeC",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/XVAvN",
-    "fen": "8/pQb4p/4Npk1/2p5/3p1q2/1P5P/P4PP1/6K1 b - - 6 36",
+    "credit": "lichess.org · 3FjeC",
+    "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2P5/P4BPP/R2KR3 b - - 0 25",
     "sideToMove": "b",
     "solution": {
-      "from": "f4",
-      "to": "c1"
+      "from": "a5",
+      "to": "a4"
     },
     "preMoves": {
-      "fen": "8/pQb3Np/5pk1/2p5/3p1q2/1P5P/P4PP1/6K1 w - - 5 36",
+      "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2n5/PP3BPP/R2KR3 w - - 0 25",
       "moves": [
-        "Ne6"
+        "bxc3"
       ]
     }
   },
   {
     "id": "lichess-QRVYZ",
     "title": "Mate in 1",
-    "credit": "From a real game · lichess.org/puzzle/QRVYZ",
+    "credit": "lichess.org · QRVYZ",
     "fen": "5b1r/NR3p1p/2nkp1p1/3r4/5P2/4B3/P3KP1P/8 w - - 0 23",
     "sideToMove": "w",
     "solution": {
@@ -411,6 +394,23 @@
       "fen": "5b1r/NR2np1p/2Rkp1p1/3r4/5P2/4B3/P3KP1P/8 b - - 0 22",
       "moves": [
         "Nxc6"
+      ]
+    }
+  },
+  {
+    "id": "lichess-XVAvN",
+    "title": "Mate in 1",
+    "credit": "lichess.org · XVAvN",
+    "fen": "8/pQb4p/4Npk1/2p5/3p1q2/1P5P/P4PP1/6K1 b - - 6 36",
+    "sideToMove": "b",
+    "solution": {
+      "from": "f4",
+      "to": "c1"
+    },
+    "preMoves": {
+      "fen": "8/pQb3Np/5pk1/2p5/3p1q2/1P5P/P4PP1/6K1 w - - 5 36",
+      "moves": [
+        "Ne6"
       ]
     }
   }

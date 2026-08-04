@@ -1931,14 +1931,19 @@ function Dashboard({
           component so the schedule form logic is unchanged. */}
       <FriendsSection home={home} refresh={refresh} setMessage={setMessage} />
       <PastGamesSection games={home.games} />
-      <MadeByTejas />
+      {/* No <MadeByTejas /> on the dashboard — Tejas ordered it removed
+          from home. The attribution lives on exactly two surfaces now:
+          the landing (LandingFooter) and /inspirations. Never dashboard,
+          never game. See docs/requirements-ledger.md. */}
     </div>
   );
 }
 
-// "made by tejas.nyc" — quiet attribution line. Landing (auth), Dashboard,
-// and /inspirations only. NEVER on the game screen — the game stays pure.
-// Style follows Tejas's own site convention: small, mono, muted, one line.
+// "made by tejas.nyc" — quiet attribution line. Renders on exactly
+// two surfaces: the landing (via LandingFooter, one-line footer with
+// inspirations link) and /inspirations. NEVER on the dashboard (removed
+// per Tejas's directive), NEVER on the game screen (the game stays
+// pure). Style follows Tejas's own site convention: small, mono, muted.
 function MadeByTejas() {
   return (
     <p className="made-by">
@@ -2936,20 +2941,36 @@ function GameScreen({
           />
         ) : null}
 
-        {/* Slim bottom bar — turn status + move count only, per team-lead.
-            Home + Resign live in the ⋯ menu (topbar). */}
-        <div className="game-bottom">
-          <span className="turn-status">
-            {game.status === "active" ? (
-              game.turn === myColor ? "Your move" : "Their move"
-            ) : (
-              <span className="terminal">
-                {game.status}
-                {game.result ? ` · ${game.result}` : ""}
+        {/* Bottom bar — turn status on the left, quiet Home link on the
+            right (Tejas: "no easy way back" from the game; visible Home
+            in the game chrome is acceptable). Move count is subsumed
+            when the game is over — the terminal state upgrades the bar
+            to a prominent action row (Home + Rematch when we have it,
+            not just Home buried in the ⋯ menu). */}
+        <div className={`game-bottom ${game.status !== "active" ? "game-bottom-terminal" : ""}`}>
+          {game.status === "active" ? (
+            <>
+              <span className="turn-status">
+                {game.turn === myColor ? "Your move" : "Their move"}
               </span>
-            )}
-          </span>
-          <span className="move-count">{activeCount} move{activeCount === 1 ? "" : "s"}</span>
+              <div className="game-bottom-right">
+                <span className="move-count">{activeCount} move{activeCount === 1 ? "" : "s"}</span>
+                <button className="game-bottom-home" onClick={onHome} type="button">Home</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <span className="turn-status terminal-status">
+                <span className="terminal">
+                  {game.status}
+                  {game.result ? ` · ${game.result}` : ""}
+                </span>
+              </span>
+              <div className="game-bottom-actions">
+                <button className="ghost compact" onClick={onHome} type="button">Home</button>
+              </div>
+            </>
+          )}
         </div>
       </section>
     </Shell>

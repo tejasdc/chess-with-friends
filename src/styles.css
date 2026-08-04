@@ -171,16 +171,21 @@ a { color: inherit; }
   .account .ghost { padding: 6px 10px; font-size: 12px; }
 }
 .wordmark::before {
-  /* Identity mark — the Villalba cream chip (LIGHTER than the buff
-     board light square). Single 9px cream tag against celadon ground. */
+  /* Identity mark — the Rodchenko App-map-A icon (icon-smith's App-map-A,
+     shipped in /icon.svg). Was a placeholder cream square; now the real
+     mark. Sized at 18px so the two chairs + table read; contained via
+     background-image so the SVG scales cleanly. Placeholder until Tejas's
+     own icon lands (per his standing note). */
   content: "";
   display: inline-block;
-  width: 9px;
-  height: 9px;
-  background: var(--cream);
+  width: 18px;
+  height: 18px;
+  background-image: url("/icon.svg");
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
   margin-right: 10px;
-  vertical-align: 0.05em;
-  transform: translateY(-1px);
+  vertical-align: -0.28em;
 }
 
 .account {
@@ -381,10 +386,11 @@ body[data-screen="landing"] .auth-bottom {
   width: 100%;
 }
 body[data-screen="landing"] .auth-top {
-  /* Copy sits close to the board — they read as one unit ("puzzle +
-     caption + thesis"), not as separate sections. Small gap keeps the
-     coupling honest. */
-  gap: 12px;
+  /* Board + caption + copy read as one unit but need breath between
+     the SUB-units: (board+caption) then (copy). Bumped from 12 →
+     22px per Tejas's spacing verdict — caption is a reference line
+     under the board, copy is the thesis and needs to sit on its own. */
+  gap: 22px;
 }
 body[data-screen="landing"] .auth-bottom {
   /* Auth row and footer are also coupled — the row is what to do, the
@@ -556,7 +562,10 @@ body[data-screen="landing"] .landing-copy {
   justify-self: center;
 }
 
-/* Bottom bar — turn status + move count only. Home + Resign in ⋯ menu. */
+/* Bottom bar — turn status on the left, quiet Home + move count on
+   the right (visible Home affordance per Tejas: "no easy way back"
+   was the complaint). Terminal state upgrades the bar into a
+   prominent action row (Home button first-class, not buried in ⋯). */
 .game-bottom {
   display: flex;
   align-items: center;
@@ -568,6 +577,41 @@ body[data-screen="landing"] .landing-copy {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ink);
+}
+.game-bottom-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.game-bottom-home {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--stone);
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.game-bottom-home:hover { color: var(--ink); }
+/* Terminal state: bar becomes prominent — the game is over, action
+   row is what the user needs (not a small quiet chip). */
+.game-bottom.game-bottom-terminal {
+  padding: 14px 8px 10px;
+  border-top: 1px solid var(--hair);
+}
+.game-bottom.game-bottom-terminal .terminal-status { font-size: 13px; }
+.game-bottom.game-bottom-terminal .game-bottom-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.game-bottom.game-bottom-terminal .ghost.compact {
+  padding: 8px 14px;
+  font-size: 12px;
+  border-width: 1.5px;
 }
 .turn-status { color: var(--ink); }
 .turn-status .terminal { color: var(--vermillion); }
@@ -809,7 +853,9 @@ body[data-screen="landing"] .landing-copy {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* Real gap between board and caption — caption is a reference line
+     under the object, not the object itself. */
+  gap: 16px;
   align-items: center;
 }
 .puzzle-stage {
@@ -916,12 +962,16 @@ body[data-screen="landing"] .landing-copy {
   filter: drop-shadow(0 0 4px color-mix(in oklab, var(--ink) 35%, transparent));
 }
 .puzzle-caption {
+  /* Reference line — visibly smaller and quieter than the copy so the
+     copy reads as the star. Was 12px, felt same-size next to the 15px
+     copy; dropped to 10.5px + higher letter-spacing to keep monospaced
+     legibility at the smaller size. */
   margin: 0;
-  min-height: 18px;
+  min-height: 16px;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.35;
-  letter-spacing: 0.10em;
+  font-size: 10.5px;
+  line-height: 1.4;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--stone-on-ground);
   text-align: center;
@@ -1610,16 +1660,25 @@ body[data-screen="landing"] .landing-copy {
 
 .captured-strip {
   /* BIG + BOLD per Tejas — matches current-production glyph weight.
-     Fixed height reserved (empty or full) so the board never reflows. */
+     Fixed MIN-height reserved so the empty state doesn't collapse and
+     the board doesn't reflow when the first capture lands. Wrap allows
+     graceful stacking on heavy-capture midgame states (e.g. 8 pawns +
+     2 pieces per side); the row gap stays tight so a second row still
+     reads as the same strip. */
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
+  gap: 3px 6px;
   min-height: 36px;
+  max-height: 78px;    /* two rows cap so the strip never eats the board */
+  overflow: hidden;
   padding: 2px 8px 0;
-  font-size: 28px;
+  font-size: 26px;
   line-height: 1;
 }
+/* Under the game-fixed size compression, glyphs shrink a touch so two
+   rows of pawns still fit inside the 78px cap on a phone. */
+.game.game-fixed .captured-strip { font-size: 22px; max-height: 66px; }
 .captured-strip:empty::before {
   content: "";
   display: inline-block;

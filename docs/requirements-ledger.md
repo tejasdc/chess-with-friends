@@ -15,9 +15,9 @@ issues new orders.
 - [ ] No scrolling anywhere scrolling isn't needed (landing, game, inspirations
       no-scroll; dashboard may scroll only when content demands).
 - [ ] Fixes apply to the PATTERN everywhere — never only the reported page.
-- [ ] "made by tejas.nyc" on landing + dashboard + inspirations ONLY (never game),
-      pinned to bottom on every page that has it; landing footer also carries the
-      inspirations link.
+- [ ] "made by tejas.nyc" on landing + inspirations ONLY (removed from dashboard
+      by Tejas 2026-08-04; NEVER game). Pinned to bottom on every page that has
+      it. Landing footer also carries the inspirations link.
 - [ ] No ⋯ menu on the landing. ⋯ top-right on dashboard + game; menu holds
       sign out, install/notification state, invite link, inspirations.
 - [ ] Name is "two chairs" (lowercase): wordmark, <title>, manifest name/short_name,

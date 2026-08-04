@@ -59,7 +59,12 @@ function verifyPreMoves(entry) {
 }
 
 function lichessCredit(row) {
-  return `From a real game · lichess.org/puzzle/${row.puzzleId}`;
+  // "From a real game" was too abstract per Tejas's live verdict
+  // ("what is that?"). Named classics keep their names; unnamed
+  // Lichess mate-in-1s get the source tag alone — subtle, honest,
+  // and traceable. The side-to-move caption carries the "what to do"
+  // signal; the credit only has to answer "where from."
+  return `lichess.org · ${row.puzzleId}`;
 }
 
 function buildLichessEntry(row) {
@@ -190,8 +195,20 @@ function squareDelta(a, b) {
   return d;
 }
 
-const ordered = [shipped[0]];
-const pool = shipped.slice(1);
+// FIRST-PUZZLE PIN — the front door needs to be an EASY, SPARSE,
+// INVITING mate (few pieces, obvious mate) so a new visitor sees
+// "you can play this," not a dense midgame. lichess-OlMV0 is 15
+// pieces, White plays Qg7# — adjacent-to-king queen, iconic pattern,
+// zero deep thought. Team-lead's spec. If it stops satisfying that
+// standard, swap the id here; ordering re-flows from whatever's
+// first via the greedy density walk below.
+const FIRST_PUZZLE_ID = "lichess-OlMV0";
+const firstIdx = shipped.findIndex((entry) => entry.id === FIRST_PUZZLE_ID);
+if (firstIdx < 0) throw new Error(`FIRST_PUZZLE_ID ${FIRST_PUZZLE_ID} not in shelf`);
+const first = shipped[firstIdx];
+const rest = shipped.filter((_, i) => i !== firstIdx);
+const ordered = [first];
+const pool = rest.slice();
 while (pool.length) {
   const currentGrid = pieceGrid(ordered[ordered.length - 1].fen);
   let bestIdx = 0;
