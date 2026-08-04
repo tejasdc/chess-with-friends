@@ -4,6 +4,13 @@
     "title": "Fool's mate",
     "credit": "Traditional; earliest published 1836",
     "fen": "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
+    "preMoves": {
+      "fen": "rnbqkbnr/pppppppp/8/8/8/5P2/PPPPP1PP/RNBQKBNR b KQkq - 0 1",
+      "moves": [
+        "e5",
+        "g4"
+      ]
+    },
     "sideToMove": "b",
     "solution": {
       "from": "d8",
@@ -19,6 +26,12 @@
     "solution": {
       "from": "h3",
       "to": "h8"
+    },
+    "preMoves": {
+      "fen": "8/4pp2/3p1kp1/2qP2b1/rpP1P3/7Q/4BPK1/7R b - - 7 39",
+      "moves": [
+        "Qd4"
+      ]
     }
   },
   {
@@ -30,6 +43,12 @@
     "solution": {
       "from": "e5",
       "to": "h2"
+    },
+    "preMoves": {
+      "fen": "2kr1b1r/pppb2p1/2np1p2/3NqP1p/4P1nN/3B4/PPP3PP/R1B1QRK1 w - - 1 14",
+      "moves": [
+        "Ng6"
+      ]
     }
   },
   {
@@ -41,6 +60,12 @@
     "solution": {
       "from": "g4",
       "to": "h3"
+    },
+    "preMoves": {
+      "fen": "r5k1/1p6/4b2p/2p1b3/p1P1ppqP/1P4P1/P1Q2P1K/3R1NR1 w - - 0 35",
+      "moves": [
+        "Qxe4"
+      ]
     }
   },
   {
@@ -48,6 +73,13 @@
     "title": "Scholar's mate",
     "credit": "Francis Beale, 1656",
     "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+    "preMoves": {
+      "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 2 3",
+      "moves": [
+        "Qh5",
+        "Nf6"
+      ]
+    },
     "sideToMove": "w",
     "solution": {
       "from": "h5",
@@ -63,6 +95,12 @@
     "solution": {
       "from": "g8",
       "to": "g7"
+    },
+    "preMoves": {
+      "fen": "6Q1/p5R1/2p3qp/3p2k1/P1pP2P1/2P2PK1/2r5/8 b - - 9 41",
+      "moves": [
+        "Qxg7"
+      ]
     }
   },
   {
@@ -70,6 +108,14 @@
     "title": "Legal's mate",
     "credit": "Kermur de Legal, c. 1750",
     "fen": "rn1q1bnr/ppp1kB1p/3p2p1/4N3/4P3/2N5/PPPP1PPP/R1BbK2R w KQ - 1 7",
+    "preMoves": {
+      "fen": "rn1qkbnr/ppp2p1p/3p2p1/4N3/2B1P1b1/2N5/PPPP1PPP/R1BQK2R b KQkq - 0 5",
+      "moves": [
+        "Bxd1",
+        "Bxf7+",
+        "Ke7"
+      ]
+    },
     "sideToMove": "w",
     "solution": {
       "from": "c3",
@@ -85,6 +131,12 @@
     "solution": {
       "from": "g5",
       "to": "g2"
+    },
+    "preMoves": {
+      "fen": "1R6/5ppk/6b1/1P4q1/PQ5p/4nP1P/3r1BP1/5RK1 w - - 5 37",
+      "moves": [
+        "Bxe3"
+      ]
     }
   },
   {
@@ -96,6 +148,12 @@
     "solution": {
       "from": "c4",
       "to": "f7"
+    },
+    "preMoves": {
+      "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B3b1/2NP4/PPP2PPP/R1BQK2R b KQkq - 0 7",
+      "moves": [
+        "Bxd1"
+      ]
     }
   },
   {
@@ -107,6 +165,12 @@
     "solution": {
       "from": "g3",
       "to": "g7"
+    },
+    "preMoves": {
+      "fen": "4rk2/5r1p/p4B2/q2p4/4p2P/P4bQB/1PP5/2K3R1 b - - 2 29",
+      "moves": [
+        "Rxf6"
+      ]
     }
   },
   {
@@ -118,6 +182,12 @@
     "solution": {
       "from": "g4",
       "to": "h3"
+    },
+    "preMoves": {
+      "fen": "2kr1b1r/ppp3p1/6qp/4p3/2PnN1b1/3P1N2/PP3P2/R1BQRK2 w - - 4 17",
+      "moves": [
+        "Nxe5"
+      ]
     }
   },
   {
@@ -129,6 +199,12 @@
     "solution": {
       "from": "d8",
       "to": "f6"
+    },
+    "preMoves": {
+      "fen": "2rQ3k/1p3p1p/4bp2/p3p3/q6P/P4P2/NPr5/1K1R2R1 b - - 3 26",
+      "moves": [
+        "Qe8"
+      ]
     }
   },
   {
@@ -140,6 +216,12 @@
     "solution": {
       "from": "d6",
       "to": "g3"
+    },
+    "preMoves": {
+      "fen": "r3k2r/1b1p1pp1/p2qp3/1pp2P2/3nP1p1/P1NP2P1/BPP1N3/R2Q1RK1 w kq - 1 16",
+      "moves": [
+        "Nxd4"
+      ]
     }
   },
   {
@@ -151,6 +233,12 @@
     "solution": {
       "from": "a5",
       "to": "a4"
+    },
+    "preMoves": {
+      "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2n5/PP3BPP/R2KR3 w - - 0 25",
+      "moves": [
+        "bxc3"
+      ]
     }
   },
   {
@@ -162,6 +250,12 @@
     "solution": {
       "from": "g2",
       "to": "h2"
+    },
+    "preMoves": {
+      "fen": "2k3r1/pR5Q/1p1qp3/2p1p3/2P1P3/2NP1n1P/PP4r1/5R1K w - - 2 25",
+      "moves": [
+        "Ne2"
+      ]
     }
   },
   {
@@ -173,6 +267,12 @@
     "solution": {
       "from": "b5",
       "to": "c7"
+    },
+    "preMoves": {
+      "fen": "1rbnkb1r/pp2pppp/5n2/1N2N3/2B5/8/PP3PPP/R1B1K2R b KQk - 0 10",
+      "moves": [
+        "a6"
+      ]
     }
   },
   {
@@ -184,6 +284,12 @@
     "solution": {
       "from": "g6",
       "to": "g7"
+    },
+    "preMoves": {
+      "fen": "r2q1r1k/pp5p/2np2PQ/2pb4/4P1p1/2PP4/PP4BP/R4RK1 b - - 0 18",
+      "moves": [
+        "Bg8"
+      ]
     }
   },
   {
@@ -191,6 +297,14 @@
     "title": "Opera-house mate",
     "credit": "Morphy vs Duke Karl & Count Isouard, Paris 1858",
     "fen": "1n2kb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2KR4 w k - 0 17",
+    "preMoves": {
+      "fen": "4kb1r/p2B1ppp/4qn2/4p1B1/4P3/1Q6/PPP2PPP/2KR4 b k - 0 15",
+      "moves": [
+        "Nxd7",
+        "Qb8+",
+        "Nxb8"
+      ]
+    },
     "sideToMove": "w",
     "solution": {
       "from": "d1",
@@ -206,6 +320,12 @@
     "solution": {
       "from": "h3",
       "to": "h2"
+    },
+    "preMoves": {
+      "fen": "8/P4pk1/3p2p1/2p1b3/8/5q1p/R2R1P2/5QK1 w - - 1 50",
+      "moves": [
+        "a8=Q"
+      ]
     }
   },
   {
@@ -217,6 +337,12 @@
     "solution": {
       "from": "g3",
       "to": "c7"
+    },
+    "preMoves": {
+      "fen": "2kr1q1r/pbpp2pp/1pn2P2/2bN2B1/2B5/6Q1/PPP2PPP/R4RK1 b - - 0 14",
+      "moves": [
+        "gxf6"
+      ]
     }
   },
   {
@@ -228,6 +354,12 @@
     "solution": {
       "from": "g2",
       "to": "g6"
+    },
+    "preMoves": {
+      "fen": "8/6pk/7p/1p2B3/2pPKP1Q/2P5/PP4qP/8 w - - 9 39",
+      "moves": [
+        "Kf5"
+      ]
     }
   },
   {
@@ -240,6 +372,12 @@
       "from": "g7",
       "to": "f8",
       "promotion": "q"
+    },
+    "preMoves": {
+      "fen": "3r1Q2/1pnqk1P1/p2pr1p1/6P1/8/4B3/PPP4P/5RK1 b - - 5 28",
+      "moves": [
+        "Rxf8"
+      ]
     }
   },
   {
@@ -251,6 +389,12 @@
     "solution": {
       "from": "f4",
       "to": "c1"
+    },
+    "preMoves": {
+      "fen": "8/pQb3Np/5pk1/2p5/3p1q2/1P5P/P4PP1/6K1 w - - 5 36",
+      "moves": [
+        "Ne6"
+      ]
     }
   },
   {
@@ -262,6 +406,12 @@
     "solution": {
       "from": "a7",
       "to": "c8"
+    },
+    "preMoves": {
+      "fen": "5b1r/NR2np1p/2Rkp1p1/3r4/5P2/4B3/P3KP1P/8 b - - 0 22",
+      "moves": [
+        "Nxc6"
+      ]
     }
   }
 ]

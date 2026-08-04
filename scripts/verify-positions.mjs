@@ -32,6 +32,29 @@ for (const entry of positions) {
   if (!chess.isCheckmate()) {
     failures.push(`${entry.id}: solution move did not deliver mate (in-check=${chess.inCheck()}, over=${chess.isGameOver()})`);
   }
+  // preMoves invariant (optional per entry, but if present must chain):
+  // applying preMoves.moves to preMoves.fen must reproduce entry.fen and
+  // every intermediate move must be legal. Enforced here so the shipped
+  // JSON's replay data can never desync from the puzzle FEN.
+  if (entry.preMoves) {
+    const { fen: preFen, moves } = entry.preMoves;
+    if (!preFen || !Array.isArray(moves) || moves.length === 0) {
+      failures.push(`${entry.id}: preMoves malformed (need { fen, moves: [...] })`);
+    } else {
+      try {
+        const pre = new Chess(preFen);
+        let ok = true;
+        for (const move of moves) {
+          if (!pre.move(move)) { failures.push(`${entry.id}: preMove '${move}' illegal from ${pre.fen()}`); ok = false; break; }
+        }
+        if (ok && pre.fen() !== entry.fen) {
+          failures.push(`${entry.id}: preMoves apply → ${pre.fen()}, expected puzzle fen ${entry.fen}`);
+        }
+      } catch (error) {
+        failures.push(`${entry.id}: preMoves.fen did not parse — ${error.message}`);
+      }
+    }
+  }
 }
 
 if (failures.length) {

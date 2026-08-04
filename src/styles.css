@@ -353,14 +353,12 @@ body[data-screen="inspirations"] .shell {
 /* Mobile landing compression — sandbox board and form take the top,
    auth stack is a flex column not a grid so it lays out predictably. */
 body[data-screen="landing"] .auth {
-  /* Landing composition — shelf at top, auth-form in the middle band,
-     made-by at the bottom. Three flex items distributed via
-     space-between (works only because we neutralize the pattern-global
-     .made-by { margin-top: auto } inside this scope; auto margins on a
-     flex-main-axis item override justify-content, which was crowding
-     everything at the top with a void above the footer). align-items:
-     center gives caption + copy + form + footer one alignment
-     discipline (center) — team-lead's audit ask. */
+  /* Landing composition per mockup Register A: two groups distributed
+     across the viewport via space-between.
+       TOP:    shelf + copy (copy pinned UNDERNEATH the board)
+       BOTTOM: auth row (pinned to the BOTTOM EDGE) + footer
+     The center gap between the groups is the composition — not dead
+     space, not a void. */
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -371,10 +369,28 @@ body[data-screen="landing"] .auth {
   min-height: 0;
 }
 body[data-screen="landing"] .auth > .made-by {
-  /* Neutralize the pattern-global pin so space-between can distribute.
-     Made-by is still at the viewport bottom — it's just the LAST flex
-     item in a space-between column instead of an auto-margin pin. */
+  /* Neutralize the pattern-global pin so the .auth-bottom group can
+     position the footer naturally as its own flex child. */
   margin-top: 0;
+}
+body[data-screen="landing"] .auth-top,
+body[data-screen="landing"] .auth-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+body[data-screen="landing"] .auth-top {
+  /* Copy sits close to the board — they read as one unit ("puzzle +
+     caption + thesis"), not as separate sections. Small gap keeps the
+     coupling honest. */
+  gap: 12px;
+}
+body[data-screen="landing"] .auth-bottom {
+  /* Auth row and footer are also coupled — the row is what to do, the
+     footer is who made it. Tight gap; the row sits at the bottom edge
+     of the viewport with the footer directly beneath. */
+  gap: 14px;
 }
 body[data-screen="landing"] .auth-scene {
   width: min(100%, 94vw, 560px, calc(100dvh - 160px));
@@ -397,21 +413,29 @@ body[data-screen="landing"] .landing-copy {
   body[data-screen="landing"] .auth-scene { width: min(100%, 94vw, 430px); }
 }
 @media (min-width: 900px) {
+  /* Desktop layout — two-column flex row. Left: shelf + copy stacked.
+     Right: auth row + footer stacked, aligned to the vertical center.
+     Simpler than the previous grid-with-full-width-footer treatment,
+     and keeps the mobile 2-group wrappers as their own semantic
+     containers (no display:contents gymnastics). */
   body[data-screen="landing"] .auth {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
-    grid-template-rows: minmax(0, 1fr) auto;
+    display: flex;
+    flex-direction: row;
     align-items: center;
+    justify-content: center;
     gap: 48px;
+    padding: 0 24px;
   }
-  body[data-screen="landing"] .auth-scene,
-  body[data-screen="landing"] .auth-form {
-    grid-row: 1;
+  body[data-screen="landing"] .auth-top {
+    flex: 0 1 auto;
+    align-items: flex-start;
+    max-width: min(60vw, 640px);
   }
-  body[data-screen="landing"] .landing-footer {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    align-self: end;
+  body[data-screen="landing"] .auth-bottom {
+    flex: 0 1 auto;
+    align-items: stretch;
+    max-width: 400px;
+    width: 100%;
   }
 }
 

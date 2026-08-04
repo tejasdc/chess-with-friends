@@ -1439,42 +1439,53 @@ function AuthScreen({
   return (
     <Shell message={message} messageKind={messageKind} setMessage={setMessage} hideMenu>
       <section className="auth">
-        <div className="auth-scene">
-          <LandingShelfErrorBoundary><LandingPuzzleShelf /></LandingShelfErrorBoundary>
-        </div>
-        <form
-          className="auth-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          {/* One row: input flexes, button fixed. The button label
-              names the outcome ("Log in or create account") so we
-              don't need a separate "HANDLE" label or a footnote —
-              Apple's and Google's passkey sheets do the explaining. */}
-          <p className="landing-copy">{LANDING_COPY}</p>
-          <div className="auth-row">
-            <input
-              className="auth-input"
-              value={handle}
-              onChange={(event) => setHandle(event.target.value)}
-              placeholder="your_handle"
-              autoComplete="username webauthn"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              aria-label="Handle"
-            />
-            <button className="auth-primary" type="submit" disabled={busy || !handle}>
-              {buttonLabel}
-            </button>
+        {/* Composition per mockup Register A: shelf + copy grouped tight
+            at the top (copy pinned UNDERNEATH the board — they read as
+            one unit: puzzle + its thesis); auth row + footer grouped
+            tight at the bottom edge (row is what to do, footer is who
+            made it). The center gap between the two groups IS the
+            composition — not dead space, not a void. Signed-out user's
+            eye lands on the puzzle, reads the one-line thesis below,
+            then descends to the auth affordance where their thumb sits
+            on mobile. */}
+        <div className="auth-top">
+          <div className="auth-scene">
+            <LandingShelfErrorBoundary><LandingPuzzleShelf /></LandingShelfErrorBoundary>
           </div>
-          {/* Taken-handle UX is being rethought per Tejas's countermand —
-              no subline / no recovery toast until that directive lands.
-              The morphing button label stays. */}
-        </form>
-        <LandingFooter />
+          <p className="landing-copy">{LANDING_COPY}</p>
+        </div>
+        <div className="auth-bottom">
+          <form
+            className="auth-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            {/* One-line auth: input flexes, button fixed. Together they
+                read as ONE composed unit. Button label morphs via the
+                debounce probe ("Sign in or sign up" → "Sign in as @x"
+                / "Sign up as @x"); width reserved via min-width so the
+                row does not jump when the label changes. */}
+            <div className="auth-row">
+              <input
+                className="auth-input"
+                value={handle}
+                onChange={(event) => setHandle(event.target.value)}
+                placeholder="your_handle"
+                autoComplete="username webauthn"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Handle"
+              />
+              <button className="auth-primary" type="submit" disabled={busy || !handle}>
+                {buttonLabel}
+              </button>
+            </div>
+          </form>
+          <LandingFooter />
+        </div>
       </section>
     </Shell>
   );

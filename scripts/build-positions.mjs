@@ -36,6 +36,26 @@ function verifyEntry(entry) {
   if (!target) throw new Error(`${entry.id}: solution is not legal`);
   chess.move(entry.solution);
   if (!chess.isCheckmate()) throw new Error(`${entry.id}: solution did not deliver mate`);
+  verifyPreMoves(entry);
+}
+
+// preMoves invariant: applying preMoves.moves in order to preMoves.fen
+// MUST yield entry.fen exactly. Every move along the way must be legal.
+// If preMoves is absent, that's fine (data pass is optional per-entry).
+function verifyPreMoves(entry) {
+  if (!entry.preMoves) return;
+  const { fen, moves } = entry.preMoves;
+  if (!fen || !Array.isArray(moves) || moves.length === 0) {
+    throw new Error(`${entry.id}: preMoves malformed (need { fen, moves: [...] })`);
+  }
+  const chess = new Chess(fen);
+  for (const move of moves) {
+    const result = chess.move(move);
+    if (!result) throw new Error(`${entry.id}: preMove '${move}' illegal from ${chess.fen()}`);
+  }
+  if (chess.fen() !== entry.fen) {
+    throw new Error(`${entry.id}: preMoves apply → ${chess.fen()}, expected puzzle fen ${entry.fen}`);
+  }
 }
 
 function lichessCredit(row) {
@@ -55,6 +75,12 @@ function buildLichessEntry(row) {
   if (fen.split(" ")[1] !== sideToMove) throw new Error(`${row.puzzleId}: post-setup side-to-move mismatch`);
 
   const solution = uciToMove(moves[1]);
+  // preMoves — one real move before the puzzle. Free for Lichess entries:
+  // the CSV FEN IS the position before the setup move, and moves[0] IS
+  // that setup move. Store SAN (not UCI) so it renders naturally if we
+  // ever caption "…Nxe4 → puzzle". Chess.js .move() with an object
+  // input returns the played move with SAN already computed above.
+  const preMoves = { fen: row.fen, moves: [setup.san] };
   const entry = {
     id: `lichess-${row.puzzleId}`,
     title: "Mate in 1",
@@ -62,17 +88,45 @@ function buildLichessEntry(row) {
     fen,
     sideToMove,
     solution,
+    preMoves,
   };
   verifyEntry(entry);
   return entry;
 }
+
+// Historical classic: game score fragment + trailing count N. Splits
+// into (a) the moves BEFORE the last N (their apply yields preMoves.fen)
+// and (b) the last N moves (preMoves.moves). Applying moves to fen must
+// yield the puzzle FEN — the verifier asserts this too.
+function playedFromWithPre(allMoves, preCount) {
+  const cut = allMoves.length - preCount;
+  if (cut < 0) throw new Error(`playedFromWithPre: preCount ${preCount} > moves ${allMoves.length}`);
+  const preFen = playedFrom(allMoves.slice(0, cut));
+  const puzzleFen = playedFrom(allMoves);
+  const preMoves = { fen: preFen, moves: allMoves.slice(cut) };
+  return { fen: puzzleFen, preMoves };
+}
+
+// Historical classics — full game move lists. Each generates BOTH the
+// puzzle FEN (played to the end) AND preMoves (the last N moves as
+// replay data). preCount tuned per classic: Fool's/Scholar's have
+// short game scores so we rewind ~2; longer games rewind ~3.
+const foolsMoves = ["f3", "e5", "g4"];
+const scholarsMoves = ["e4", "e5", "Bc4", "Nc6", "Qh5", "Nf6"];
+const legalMoves = ["e4", "e5", "Nf3", "d6", "Bc4", "Bg4", "Nc3", "g6", "Nxe5", "Bxd1", "Bxf7+", "Ke7"];
+const operaMoves = [
+  "e4", "e5", "Nf3", "d6", "d4", "Bg4", "dxe5", "Bxf3", "Qxf3", "dxe5",
+  "Bc4", "Nf6", "Qb3", "Qe7", "Nc3", "c6", "Bg5", "b5", "Nxb5", "cxb5",
+  "Bxb5+", "Nbd7", "O-O-O", "Rd8", "Rxd7", "Rxd7", "Rd1", "Qe6", "Bxd7+",
+  "Nxd7", "Qb8+", "Nxb8",
+];
 
 const historical = [
   {
     id: "fools-mate-1836",
     title: "Fool's mate",
     credit: "Traditional; earliest published 1836",
-    fen: playedFrom(["f3", "e5", "g4"]),
+    ...playedFromWithPre(foolsMoves, 2),
     sideToMove: "b",
     solution: { from: "d8", to: "h4" },
   },
@@ -80,7 +134,7 @@ const historical = [
     id: "scholars-mate-1656",
     title: "Scholar's mate",
     credit: "Francis Beale, 1656",
-    fen: playedFrom(["e4", "e5", "Bc4", "Nc6", "Qh5", "Nf6"]),
+    ...playedFromWithPre(scholarsMoves, 2),
     sideToMove: "w",
     solution: { from: "h5", to: "f7" },
   },
@@ -88,7 +142,7 @@ const historical = [
     id: "legal-mate-1750",
     title: "Legal's mate",
     credit: "Kermur de Legal, c. 1750",
-    fen: playedFrom(["e4", "e5", "Nf3", "d6", "Bc4", "Bg4", "Nc3", "g6", "Nxe5", "Bxd1", "Bxf7+", "Ke7"]),
+    ...playedFromWithPre(legalMoves, 3),
     sideToMove: "w",
     solution: { from: "c3", to: "d5" },
   },
@@ -96,12 +150,7 @@ const historical = [
     id: "opera-house-final",
     title: "Opera-house mate",
     credit: "Morphy vs Duke Karl & Count Isouard, Paris 1858",
-    fen: playedFrom([
-      "e4", "e5", "Nf3", "d6", "d4", "Bg4", "dxe5", "Bxf3", "Qxf3", "dxe5",
-      "Bc4", "Nf6", "Qb3", "Qe7", "Nc3", "c6", "Bg5", "b5", "Nxb5", "cxb5",
-      "Bxb5+", "Nbd7", "O-O-O", "Rd8", "Rxd7", "Rxd7", "Rd1", "Qe6", "Bxd7+",
-      "Nxd7", "Qb8+", "Nxb8",
-    ]),
+    ...playedFromWithPre(operaMoves, 3),
     sideToMove: "w",
     solution: { from: "d1", to: "d8" },
   },
