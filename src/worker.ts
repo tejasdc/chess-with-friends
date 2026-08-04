@@ -700,11 +700,53 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async requestByInvite(request: Request, user: User) {
+    // Invite-link semantics: the LINK IS the inviter's standing
+    // consent, using it is the visitor's consent, two consents = a
+    // friendship. No request/accept ceremony. Fully idempotent. The
+    // request/accept dance stays ONLY for handle-search adds (see
+    // requestFriend) where the target hasn't consented yet.
+    //
+    // Five cases per the ledger:
+    //   1. Self-link → error (would be a friendship with yourself).
+    //   2. Already friends → no-op success, returns { status: "already-friends" }.
+    //   3. Pending request in either direction → accept it, friendship
+    //      is created immediately, returns { status: "accepted" }.
+    //   4. No relationship → create friendship immediately, returns
+    //      { status: "created" }.
+    //   5. Signed-out flow calls this AFTER auth completes with the
+    //      preserved token — same code path from here.
     const db = await this.db();
     const { token } = await readJson<{ token: string }>(request);
     const target = Object.values(db.users).find((candidate) => candidate.inviteToken === token);
     if (!target) throw new Error("Invite link not found.");
-    return await this.createFriendRequest(db, user, target);
+    if (target.id === user.id) throw new Error("That's your own invite link.");
+    const friendship = db.friendships[friendshipId(user.id, target.id)];
+    if (friendship) {
+      return json({ status: "already-friends", friend: { id: target.id, handle: target.handle } });
+    }
+    // Complete any pending request between the two (either direction).
+    // Do this by mutation, not by calling acceptFriend — acceptFriend
+    // only accepts requests where user.id === toId, but the pending
+    // request could be OUTBOUND (user requested target earlier). The
+    // invite link resolves both.
+    const pending = Object.values(db.friendRequests).find(
+      (req) =>
+        req.status === "pending" &&
+        ((req.fromId === user.id && req.toId === target.id) || (req.fromId === target.id && req.toId === user.id)),
+    );
+    if (pending) {
+      pending.status = "accepted";
+    }
+    db.friendships[friendshipId(user.id, target.id)] = {
+      id: friendshipId(user.id, target.id),
+      userIds: [user.id, target.id],
+      createdAt: Date.now(),
+    };
+    await this.save(db);
+    return json({
+      status: pending ? "accepted" : "created",
+      friend: { id: target.id, handle: target.handle },
+    });
   }
 
   private async createFriendRequest(db: AppDb, user: User, target: User) {

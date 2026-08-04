@@ -1936,7 +1936,7 @@ function Dashboard({
   return (
     <div className="dashboard">
       <InstallPrompt home={home} setMessage={setMessage} />
-      {inviteToken ? <InvitePanel token={inviteToken} refresh={refresh} setMessage={setMessage} /> : null}
+      {inviteToken ? <InvitePanel token={inviteToken} home={home} refresh={refresh} setMessage={setMessage} /> : null}
       {/* Ordering: (1) INCOMING actions the user must respond to, (2) games
           already IN PLAY — an accepted invite must not require scrolling
           past a Play form to find, (3) PLAY to start something new,
@@ -2098,28 +2098,97 @@ function detectInstalled(): boolean {
   return Boolean(standalone || iosStandalone);
 }
 
+// Invite-link landing panel. Signed-in visitor with a token in the URL
+// hits POST /api/friends/invite ON MOUNT — the endpoint is idempotent
+// and IS the friendship completion (see requestByInvite server-side).
+// Ceremony is gone; the panel just reports what happened and offers
+// the natural next action (invite the new friend to a game).
 function InvitePanel({
   token,
+  home,
   refresh,
   setMessage,
 }: {
   token: string;
+  home: HomeData;
   refresh: () => void;
   setMessage: SetMessage;
 }) {
-  async function send() {
+  const [state, setState] = useState<
+    | { kind: "working" }
+    | { kind: "ok"; status: "created" | "accepted" | "already-friends"; friend: { id: string; handle: string } }
+    | { kind: "error"; message: string }
+  >({ kind: "working" });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await api<{ status: "created" | "accepted" | "already-friends"; friend: { id: string; handle: string } }>(
+          "/api/friends/invite",
+          { method: "POST", body: JSON.stringify({ token }) },
+        );
+        if (cancelled) return;
+        setState({ kind: "ok", status: result.status, friend: result.friend });
+        // Refresh home so the new friendship + any accepted requests
+        // reconcile into the dashboard behind the panel.
+        void refresh();
+      } catch (error) {
+        if (cancelled) return;
+        setState({ kind: "error", message: error instanceof Error ? error.message : "Invite failed." });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, refresh]);
+
+  async function invite(friendId: string, handle: string) {
     try {
-      await api("/api/friends/invite", { method: "POST", body: JSON.stringify({ token }) });
-      setMessage("Friend request sent from invite link.");
-      navigate("/", refresh);
+      const { challenge } = await api<{ challenge: { id: string } }>("/api/challenges", {
+        method: "POST",
+        body: JSON.stringify({ friendId, timeControl: "10|0" }),
+      });
+      navigate(`/waiting/${challenge.id}`, refresh);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Invite failed.", "error");
+      setMessage(error instanceof Error ? error.message : `Couldn't invite @${handle}.`, "error");
     }
   }
+
+  function dismiss() { navigate("/", refresh); }
+
+  if (state.kind === "working") {
+    return (
+      <section className="invite">
+        <p className="muted">Connecting you…</p>
+      </section>
+    );
+  }
+  if (state.kind === "error") {
+    return (
+      <section className="invite">
+        <p>{state.message}</p>
+        <button className="ghost" onClick={dismiss}>Home</button>
+      </section>
+    );
+  }
+  // ok: three sub-messages, one for each terminal status.
+  const { friend, status } = state;
+  const line =
+    status === "already-friends" ? <>You and <strong>@{friend.handle}</strong> are already friends.</> :
+    status === "accepted"        ? <>You and <strong>@{friend.handle}</strong> are now friends.</> :
+                                    <>You and <strong>@{friend.handle}</strong> are now friends.</>;
+  // Check current presence so we only offer Invite when they're online.
+  const isOnline = home.friends.some((entry) => entry.id === friend.id && entry.online);
   return (
     <section className="invite">
-      <p>Someone invited you.</p>
-      <button className="primary" onClick={send}>Send friend request</button>
+      <p>{line}</p>
+      <div className="invite-actions">
+        {isOnline ? (
+          <button className="primary" onClick={() => void invite(friend.id, friend.handle)}>
+            Invite @{friend.handle} to a game
+          </button>
+        ) : null}
+        <button className="ghost" onClick={dismiss}>Home</button>
+      </div>
     </section>
   );
 }

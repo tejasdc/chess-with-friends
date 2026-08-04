@@ -698,5 +698,97 @@ test("landing replay animates a capture — captured piece walks to tray during 
   await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 15000 });
 });
 
+test("invite link is standing consent — five cases all resolve to friendship, idempotent, no request/accept dance", async ({ browser }) => {
+  // Semantics under test: /invite/<token> IS the inviter's consent.
+  // Visiting it while signed in resolves the friendship immediately.
+  // Ledger cases:
+  //   1. Self-link → server errors "That's your own invite link."
+  //   2. Already friends → status:"already-friends", no dupe, safe repeat.
+  //   3. Pending request either direction → status:"accepted", friendship
+  //      exists, request status flips to "accepted".
+  //   4. No relationship → status:"created", friendship exists.
+  //   5. Idempotent revisit → status:"already-friends", still safe.
+  test.setTimeout(120_000);
+
+  async function makeUser(suffix: string) {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await addAuthenticator(page);
+    await register(page, suffix);
+    // Grab inviteToken via /api/me
+    const info = await page.evaluate(async () => {
+      const r = await fetch("/api/me", { credentials: "include" });
+      const d = await r.json() as { user: { id: string; handle: string; inviteToken: string } };
+      return d.user;
+    });
+    return { ctx, page, ...info };
+  }
+  async function invitePost(page: Page, token: string) {
+    return await page.evaluate(async (t) => {
+      const r = await fetch("/api/friends/invite", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: t }) });
+      const body = await r.text();
+      try { return { status: r.status, body: JSON.parse(body) }; } catch { return { status: r.status, body }; }
+    }, token);
+  }
+  async function areFriends(page: Page, otherHandle: string) {
+    return await page.evaluate(async (h) => {
+      const r = await fetch("/api/me", { credentials: "include" });
+      const d = await r.json() as { friends: Array<{ handle: string }> };
+      return d.friends.some((f) => f.handle === h);
+    }, otherHandle);
+  }
+
+  const suffix = Date.now().toString(36).slice(-6);
+  const alice = await makeUser(`invA_${suffix}`);
+  const bob   = await makeUser(`invB_${suffix}`);
+  const carol = await makeUser(`invC_${suffix}`);
+
+  try {
+    // CASE 1 — self-link.
+    const self = await invitePost(alice.page, alice.inviteToken);
+    expect(self.status).toBeGreaterThanOrEqual(400);
+
+    // CASE 4 — no relationship: Alice hits Bob's invite link → created.
+    const created = await invitePost(alice.page, bob.inviteToken);
+    expect(created.status).toBe(200);
+    expect(created.body.status).toBe("created");
+    expect(created.body.friend.handle).toBe(bob.handle);
+    expect(await areFriends(alice.page, bob.handle)).toBe(true);
+    expect(await areFriends(bob.page,   alice.handle)).toBe(true);
+
+    // CASE 2 — already friends: Alice revisits Bob's link.
+    const alreadyA = await invitePost(alice.page, bob.inviteToken);
+    expect(alreadyA.body.status).toBe("already-friends");
+    // CASE 5 — idempotent from the OTHER side too: Bob hits Alice's link.
+    const alreadyB = await invitePost(bob.page, alice.inviteToken);
+    expect(alreadyB.body.status).toBe("already-friends");
+
+    // CASE 3 — pending request in either direction: Carol requests Alice
+    // via handle search first (creates pending request from Carol→Alice),
+    // THEN Alice hits Carol's invite link. The pending request should
+    // resolve into a friendship (status:"accepted"), not a duplicate.
+    await carol.page.getByPlaceholder("friend_handle").fill(alice.handle);
+    await carol.page.getByRole("button", { name: "Add" }).click();
+    await expect(carol.page.getByText("Friend request sent.")).toBeVisible();
+    const accepted = await invitePost(alice.page, carol.inviteToken);
+    expect(accepted.body.status).toBe("accepted");
+    expect(accepted.body.friend.handle).toBe(carol.handle);
+    expect(await areFriends(alice.page, carol.handle)).toBe(true);
+    expect(await areFriends(carol.page, alice.handle)).toBe(true);
+    // The pending request must NOT still be pending.
+    const carolPending = await carol.page.evaluate(async () => {
+      const r = await fetch("/api/me", { credentials: "include" });
+      const d = await r.json() as { sentRequests: Array<{ id: string }>; requests: Array<{ id: string }> };
+      return { sent: d.sentRequests.length, incoming: d.requests.length };
+    });
+    // Carol's sent-requests list should be empty (the pending request was consumed).
+    expect(carolPending.sent).toBe(0);
+  } finally {
+    await alice.ctx.close();
+    await bob.ctx.close();
+    await carol.ctx.close();
+  }
+});
+
 // Silence unused-import warning if a future refactor drops CDPSession above.
 export type _KeepCDP = CDPSession;
