@@ -1,28 +1,34 @@
 <!doctype html>
 <!--
-  Chess-with-friends landing prototype v5 — GRID walk.
+  Chess-with-friends landing prototype v6 — PIECE-LEGAL walk.
 
-  Tejas played v4. His words:
-    "The jumping around is fine but I don't think I'd like the
-     jumping. What I actually like is the pawns kind of TRACING
-     BACK THEIR STEPS — not just bopping around."
+  Tejas played v5 (now in production). Verdict: Manhattan makes
+  pieces jump in ways they never could — a bishop shouldn't turn
+  a corner, a pawn shouldn't sidestep. So v6 replaces the router:
+  every A→B journey now decomposes into segments that are legal
+  moves for that piece type, ignoring occupancy (pieces pass like
+  ghosts).
 
-  So v5 is a walk on the grid — no bezier arcs, no footstep bob, no
-  tilt. Pieces move square-by-square via Manhattan routing, files
-  then ranks or ranks then files (per-piece variation), with a
-  clean glide per square that eases in and out so each square-
-  crossing reads as a step. Same tap-tap play, same inlined
-  chess.js, same tray. Two additions Tejas asked for:
+    knight — L-hops via BFS on the knight graph (small arc per hop)
+    rook   — 1 or 2 orthogonal slides (via a right-angle corner)
+    bishop — 1 or 2 diagonal slides; off-color targets go via tray
+    queen  — combines the above (always reachable in 1–2 slides)
+    king   — single-square steps, capped visual step count
+    pawn   — single forward pushes only, color-directional
 
-    A) SLOWER. Speed dropped again — unhurried.
-    B) SIDE-TO-MOVE LABELLED in the caption ("WHITE TO MOVE ·
-       RÉTI 1921"), so single-move puzzles don't leave the player
-       poking dead pieces.
+  Unreachable cases resolve via the TRAY, never via illegal motion:
+  piece exits its own legal geometry to the nearest edge and slides
+  to a tray slot; the incoming piece slides from a tray slot to a
+  board-edge square (a "hand of player" moment — no chess legality
+  required for tray placement/pickup) then walks legally to its
+  target.
 
-  Also fixed the two saved FENs that stored the AFTER-mate
-  position (Fool's Mate, Scholar's Mate) — the side to move had no
-  legal moves, so every tap silently failed. Replaced with the
-  one-move-before FEN so the puzzle is actually playable.
+  Everything else from v5 stays: pacing, stagger, WHITE/BLACK TO
+  MOVE captions, tap-tap solving, chess.js legality (inlined so
+  file:// works offline), stuck-piece wobble on tap, trays.
+
+  The router is a pure function (square+square+type+color → segment
+  waypoints) so the sister app can port it verbatim once approved.
 
   Palette LOCKED to mockup D/E/F: celadon ground, buff + teal-dark
   squares, navy ink + cream chip, teak frame. No red.
@@ -31,7 +37,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>grid walk — chess with friends landing prototype (v5)</title>
+<title>piece-legal walk — chess with friends landing prototype (v6)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"/>
@@ -260,7 +266,7 @@ window.Chess = Chess;
 </head>
 <body>
   <div class="frame">
-    <div class="wordmark">chess with friends · grid walk v5</div>
+    <div class="wordmark">chess with friends · piece-legal walk v6</div>
     <div class="stage" id="stage">
       <div class="board-frame">
         <div class="board" id="board"></div>
@@ -671,23 +677,224 @@ skipBtn.addEventListener('click', () => {
 });
 
 // -------------------------------------------------------------------------
-// WALK TRANSITION — v5 grid walk. Every piece traces a Manhattan path
-// from its current square to its next-position square (or to a slot in
-// the tray if the next position doesn't need it). No bob, no tilt, no
-// bezier arc. The delight is that the pieces "trace back their steps"
-// on the grid — file-then-rank or rank-then-file, chosen per piece so
-// they don't all corner at the same square. Ease-in-out per segment
-// puts a natural pause at each square boundary without needing an
-// explicit bounce.
+// PIECE-LEGAL PATH ROUTER (pure — designed for verbatim port).
 //
-// Stagger is by target rank (far rank walks first). Larger per-piece
-// jitter than v4 (0–220ms) so the crowd doesn't march in step. Slower
-// pace: 360ms per square, capped at 6 segments (some tray walks are
-// long).
+// legalPath(fromSq, toSq, type, color) → { ok, waypoints }
+//   waypoints: array of { x, y } in stage-px, endpoints inclusive.
+//   Each successive waypoint pair is one legal-move segment for the
+//   piece type. Ignores occupancy entirely — pieces pass like ghosts
+//   during the transition; the animation is geometry-only.
+//   `ok:false` means the target is unreachable via this piece's move
+//   geometry (e.g. bishop to opposite-color square) — caller routes
+//   via the tray.
+// -------------------------------------------------------------------------
+function sqFR(sq) { return { f: sq.charCodeAt(0) - 97, r: Number(sq[1]) }; }
+function frToSq(f, r) { return FILES[f] + r; }
+function centerFR(f, r) {
+  return { x: boardX + f * sqSize + sqSize / 2,
+           y: boardY + (8 - r) * sqSize + sqSize / 2 };
+}
+function centerSq(sq) { const c = sqFR(sq); return centerFR(c.f, c.r); }
+
+function legalPath(fromSq, toSq, type, color) {
+  if (fromSq === toSq) return { ok: true, waypoints: [centerSq(fromSq)] };
+  const a = sqFR(fromSq), b = sqFR(toSq);
+  switch (type) {
+    case 'n': return knightPath(a, b);
+    case 'r': return rookPath(a, b);
+    case 'b': return bishopPath(a, b);
+    case 'q': return queenPath(a, b);
+    case 'k': return kingPath(a, b);
+    case 'p': return pawnPath(a, b, color);
+    default:  return { ok: false };
+  }
+}
+
+// Knight — BFS on the knight-graph. Any 8x8 square is reachable in ≤6
+// hops from any other; typical distance is 1–4. Returns the shortest
+// path as waypoints (square centers).
+function knightPath(a, b) {
+  const OFFSETS = [[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1],[-2,1],[-1,2]];
+  const key = (f, r) => f * 10 + r;
+  const start = key(a.f, a.r);
+  const seen = new Set([start]);
+  const parent = new Map();
+  const queue = [{ f: a.f, r: a.r }];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (cur.f === b.f && cur.r === b.r) {
+      const pathFR = [{ f: cur.f, r: cur.r }];
+      let node = key(cur.f, cur.r);
+      while (node !== start) {
+        const par = parent.get(node);
+        pathFR.unshift(par);
+        node = key(par.f, par.r);
+      }
+      return { ok: true, waypoints: pathFR.map(p => centerFR(p.f, p.r)) };
+    }
+    for (const [df, dr] of OFFSETS) {
+      const nf = cur.f + df, nr = cur.r + dr;
+      if (nf < 0 || nf > 7 || nr < 1 || nr > 8) continue;
+      const k = key(nf, nr);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      parent.set(k, { f: cur.f, r: cur.r });
+      queue.push({ f: nf, r: nr });
+    }
+  }
+  return { ok: false };
+}
+
+// Rook — one straight slide if same rank or file, otherwise two
+// (via a right-angle corner). Corner chosen per call so consecutive
+// rooks don't share corners in obvious lockstep.
+function rookPath(a, b) {
+  const wps = [centerFR(a.f, a.r)];
+  if (a.f === b.f || a.r === b.r) {
+    wps.push(centerFR(b.f, b.r));
+  } else {
+    const corner = Math.random() < 0.5
+      ? { f: b.f, r: a.r }
+      : { f: a.f, r: b.r };
+    wps.push(centerFR(corner.f, corner.r));
+    wps.push(centerFR(b.f, b.r));
+  }
+  return { ok: true, waypoints: wps };
+}
+
+// Bishop — one diagonal slide if already on the target's diagonal;
+// otherwise two, via a common-diagonal intermediate square. Off-color
+// targets return ok:false (bishops can't change color).
+function bishopPath(a, b) {
+  if ((a.f + a.r) % 2 !== (b.f + b.r) % 2) return { ok: false };
+  const df = b.f - a.f, dr = b.r - a.r;
+  const wps = [centerFR(a.f, a.r)];
+  if (Math.abs(df) === Math.abs(dr)) {
+    wps.push(centerFR(b.f, b.r));
+    return { ok: true, waypoints: wps };
+  }
+  // Find any square C such that C is diagonally reachable from both A
+  // and B. On same-color-square pairs there are always two candidates
+  // (the two "diamond" corners). Pick a valid one.
+  for (let cf = 0; cf < 8; cf++) {
+    for (let cr = 1; cr <= 8; cr++) {
+      if (cf === a.f && cr === a.r) continue;
+      if (cf === b.f && cr === b.r) continue;
+      const df1 = cf - a.f, dr1 = cr - a.r;
+      const df2 = b.f - cf, dr2 = b.r - cr;
+      if (df1 !== 0 && Math.abs(df1) === Math.abs(dr1) &&
+          df2 !== 0 && Math.abs(df2) === Math.abs(dr2)) {
+        wps.push(centerFR(cf, cr));
+        wps.push(centerFR(b.f, b.r));
+        return { ok: true, waypoints: wps };
+      }
+    }
+  }
+  return { ok: false };
+}
+
+// Queen — try rook first, then bishop, else two rook-style slides.
+// Any two squares are reachable by queen in 1–2 moves.
+function queenPath(a, b) {
+  if (a.f === b.f || a.r === b.r) return rookPath(a, b);
+  if (Math.abs(a.f - b.f) === Math.abs(a.r - b.r)) return bishopPath(a, b);
+  return rookPath(a, b);
+}
+
+// King — chained one-square steps. Cap the visual step count so a
+// king walking clear across the board doesn't take forever — caller
+// resolves the too-far case via the tray.
+function kingPath(a, b) {
+  const MAX_STEPS = 4;
+  const steps = Math.max(Math.abs(b.f - a.f), Math.abs(b.r - a.r));
+  if (steps > MAX_STEPS) return { ok: false };
+  const wps = [centerFR(a.f, a.r)];
+  let f = a.f, r = a.r;
+  while (f !== b.f || r !== b.r) {
+    if (f < b.f) f++; else if (f > b.f) f--;
+    if (r < b.r) r++; else if (r > b.r) r--;
+    wps.push(centerFR(f, r));
+  }
+  return { ok: true, waypoints: wps };
+}
+
+// Pawn — single forward pushes only (color-directional). Backward or
+// lateral targets return ok:false.
+function pawnPath(a, b, color) {
+  if (a.f !== b.f) return { ok: false };
+  const dir = color === 'w' ? +1 : -1;
+  const advance = (b.r - a.r) * dir;
+  if (advance <= 0) return { ok: false };
+  const wps = [centerFR(a.f, a.r)];
+  for (let i = 1; i <= advance; i++) {
+    wps.push(centerFR(a.f, a.r + i * dir));
+  }
+  return { ok: true, waypoints: wps };
+}
+
+// Pick a board-edge square this piece type can legally reach the
+// target from — for pieces entering from the tray. Ensures the
+// on-board segment is a real move.
+function chooseEntrySquare(type, color, targetSq) {
+  const t = sqFR(targetSq);
+  // Pawn: color's starting rank on the target's file. If target is
+  // BEHIND that rank (impossible via forward pushes), pick the closest
+  // valid entry-file rank that can still push forward to target.
+  if (type === 'p') {
+    const startRank = color === 'w' ? 2 : 7;
+    const dir = color === 'w' ? +1 : -1;
+    // If target rank is beyond starting rank in the forward direction,
+    // just start there. Otherwise pick the entry rank one square in
+    // front of the color's back rank (rare edge case).
+    if ((t.r - startRank) * dir >= 0) return frToSq(t.f, startRank);
+    return frToSq(t.f, color === 'w' ? 2 : 7);
+  }
+  // Bishop: nearest edge square of the same color as the target.
+  const edges = [];
+  for (let f = 0; f < 8; f++) { edges.push({ f, r: 1 }); edges.push({ f, r: 8 }); }
+  for (let r = 2; r <= 7; r++) { edges.push({ f: 0, r }); edges.push({ f: 7, r }); }
+  if (type === 'b') {
+    const parity = (t.f + t.r) % 2;
+    const valid = edges.filter(e => (e.f + e.r) % 2 === parity &&
+                                    !(e.f === t.f && e.r === t.r));
+    return nearestSq(valid, t);
+  }
+  // Rook: edge square on the target's rank or file.
+  if (type === 'r') {
+    const opts = [
+      { f: 0, r: t.r }, { f: 7, r: t.r },
+      { f: t.f, r: 1 }, { f: t.f, r: 8 },
+    ].filter(e => !(e.f === t.f && e.r === t.r));
+    return nearestSq(opts, t);
+  }
+  // Knight / Queen / King: nearest edge square (all universally
+  // reachable by these types). For king, if all edges are too far,
+  // pick the closest anyway — caller handles the too-far case.
+  const valid = edges.filter(e => !(e.f === t.f && e.r === t.r));
+  return nearestSq(valid, t);
+}
+function nearestSq(candidates, t) {
+  let best = candidates[0], bestD = Infinity;
+  for (const c of candidates) {
+    const d = (c.f - t.f) ** 2 + (c.r - t.r) ** 2;
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return frToSq(best.f, best.r);
+}
+
+// -------------------------------------------------------------------------
+// WALK TRANSITION — v6. Each assigned piece walks from its current
+// square to its next-position square via a piece-legal path (see
+// legalPath above). If the path is not legally reachable (e.g. bishop
+// to off-color square), the piece routes to the tray instead and a
+// new piece enters from a chosen edge square.
 //
-// Stragglers walk to the tray (whites below the board, navies above)
-// and rest there visibly — never off-screen. Any tray pieces the next
-// position calls for walk back onto the board.
+// Same pacing/stagger/settle from v5. New: knight segments animate
+// with a slight parabolic arc — reads as a hop, not a slide.
+//
+// Stragglers (unassigned pieces) walk straight to their tray slots
+// (the "hand of player" moment — no chess legality required for
+// tray pickup / placement).
 // -------------------------------------------------------------------------
 function walkTransition() {
   return new Promise((resolve) => {
@@ -705,9 +912,34 @@ function walkTransition() {
       assigned: null,
     }));
 
-    // Assign nearest-of-kind fallen piece to each target (greedy).
+    // Assign nearest-of-kind pool piece to each target that the piece
+    // can LEGALLY reach (v6). Bishops needing to change color and
+    // pawns needing to move sideways / backward are rejected here so
+    // they don't get stuck with an impossible assignment — they'll
+    // fall through to tray + fresh-spawn.
     const pool = livePieces.slice();
     for (const t of targets) {
+      let bestI = -1, bestD = Infinity;
+      for (let i = 0; i < pool.length; i++) {
+        const p = pool[i];
+        if (!p || p.color !== t.color || p.type !== t.type) continue;
+        if (!p.sq) continue;  // tray piece — separate flow below
+        const path = legalPath(p.sq, t.sq, p.type, p.color);
+        if (!path.ok) continue;
+        const pcx = p.x + sqSize / 2, pcy = p.y + sqSize / 2;
+        const d = (pcx - t.end.x) ** 2 + (pcy - t.end.y) ** 2;
+        if (d < bestD) { bestD = d; bestI = i; t._path = path; }
+      }
+      if (bestI >= 0) { t.assigned = pool[bestI]; pool[bestI] = null; }
+    }
+
+    // Also try tray pieces for still-unassigned targets: a tray piece
+    // that matches color+type walks BACK onto the board via a chosen
+    // entry square (which the piece type can legally reach the target
+    // from). Straight tray→entry glide first (hand of player), then a
+    // legal walk from entry to target.
+    for (const t of targets) {
+      if (t.assigned) continue;
       let bestI = -1, bestD = Infinity;
       for (let i = 0; i < pool.length; i++) {
         const p = pool[i];
@@ -716,30 +948,59 @@ function walkTransition() {
         const d = (pcx - t.end.x) ** 2 + (pcy - t.end.y) ** 2;
         if (d < bestD) { bestD = d; bestI = i; }
       }
-      if (bestI >= 0) { t.assigned = pool[bestI]; pool[bestI] = null; }
+      if (bestI < 0) continue;
+      const p = pool[bestI];
+      pool[bestI] = null;
+      // Build a two-phase path: straight from current (tray) to entry
+      // square, then legal walk from entry to target. Both share one
+      // waypoint array.
+      const entrySq = chooseEntrySquare(t.type, t.color, t.sq);
+      const entryC = centerSq(entrySq);
+      const legal = legalPath(entrySq, t.sq, t.type, t.color);
+      const path = { ok: true, waypoints: [{ x: p.x + sqSize/2, y: p.y + sqSize/2 }, entryC] };
+      if (legal.ok) {
+        // Skip legal.waypoints[0] (=entryC) to avoid a duplicate point.
+        for (let k = 1; k < legal.waypoints.length; k++) path.waypoints.push(legal.waypoints[k]);
+      }
+      t.assigned = p;
+      t._path = path;
+      t._trayEntry = true;
     }
 
-    // Spawn any missing kinds from the nearest stage edge.
+    // Spawn brand-new pieces for targets still without an assignment
+    // (empty pool). Same two-phase path — tray-side start point, legal
+    // walk from a chosen entry to target — with a fade-in.
     for (const t of targets) {
       if (t.assigned) continue;
       const el = createPieceEl(t.char);
-      const spawn = pickEdgeSpawn(t.end);
+      const entrySq = chooseEntrySquare(t.type, t.color, t.sq);
+      const entryC = centerSq(entrySq);
+      // Start off-board on the appropriate tray side.
+      const trayStart = t.color === 'w'
+        ? { x: entryC.x, y: boardY + boardH + sqSize * 0.7 }
+        : { x: entryC.x, y: boardY - sqSize * 0.7 };
       el.style.opacity = '0';
-      el.style.transform = `translate(${spawn.x - sqSize/2}px, ${spawn.y - sqSize/2}px) rotate(0deg)`;
+      el.style.transform = `translate(${trayStart.x - sqSize/2}px, ${trayStart.y - sqSize/2}px) rotate(0deg)`;
       piecesLayer.appendChild(el);
       const p = {
         el, sq: t.sq, color: t.color, type: t.type, char: t.char,
-        x: spawn.x - sqSize/2, y: spawn.y - sqSize/2, rot: 0,
+        x: trayStart.x - sqSize/2, y: trayStart.y - sqSize/2, rot: 0,
       };
       livePieces.push(p);
       t.assigned = p;
+      const legal = legalPath(entrySq, t.sq, t.type, t.color);
+      const path = { ok: true, waypoints: [trayStart, entryC] };
+      if (legal.ok) {
+        for (let k = 1; k < legal.waypoints.length; k++) path.waypoints.push(legal.waypoints[k]);
+      }
+      t._path = path;
       t._fadeIn = true;
     }
 
-    // Stragglers: everything left in pool. White pieces rest on the
-    // celadon strip BELOW the board (they're the "bottom" side); black
-    // pieces rest on the strip ABOVE. Both stay inside the stage and
-    // never overlap the wordmark / foot content.
+    // Anything still in the pool: stragglers heading to the tray.
+    // Whites BELOW the board on the celadon; blacks ABOVE. Straight
+    // glide from current square to slot — this is the "hand of the
+    // player" moment and needs no chess legality.
     const stragglers = pool.filter(Boolean);
     const trayGap = sqSize * 0.50;
     const trayYWhite = boardY + boardH + sqSize * 0.50;
@@ -747,70 +1008,29 @@ function walkTransition() {
     const whiteQueue = stragglers.filter(p => p.color === 'w');
     const blackQueue = stragglers.filter(p => p.color === 'b');
 
-    // v5 GRID WALK. Each piece traces a Manhattan (L-shaped) path
-    // from its current center to its destination center, in one-
-    // square segments. Half the pieces route file-first, half rank-
-    // first — chosen per-piece so a shelf of pieces doesn't corner at
-    // the same square. Segment duration is a slow, deliberate glide
-    // with ease-in-out at each end, so the crossing of each square
-    // reads as a step without a bounce or a bob.
-    const SEG_MS = 360;                 // per-square glide, unhurried
+    // v6 constants. Each SEGMENT of a piece's legal path is a full
+    // move for that piece (a rook slide, a knight hop, a pawn push).
+    // Each segment glides at SEG_MS regardless of segment length, so
+    // a rook sliding four squares takes the same time as a rook
+    // sliding one — feels right for a chess move. Knight hops get a
+    // slight arc so they read as hops, not slides.
+    const SEG_MS = 380;                 // per-move segment glide
     const MAX_SEGS = 6;                 // pace-cap on long tray walks
     const SETTLE_MS = 200;
+    const KNIGHT_ARC_AMP = sqSize * 0.16;   // upward peak of the hop
     const now = performance.now();
     const walks = [];
 
-    function buildWaypoints(startCX, startCY, endCX, endCY, prefer) {
-      // Corner where the L bends. On-board pieces sit at square centers
-      // so the corner also lands on a square center; tray pieces land
-      // slightly off-grid, which is fine — the L still reads.
-      const corner = prefer === 'file-first'
-        ? { x: endCX,   y: startCY }
-        : { x: startCX, y: endCY   };
-      const points = [{ x: startCX, y: startCY }];
-      pushIntermediate(points, corner);
-      pushIntermediate(points, { x: endCX, y: endCY });
-      return points;
-    }
-    // Interpolate square-sized steps between last-point and target, so
-    // each waypoint sits on the grid boundary.
-    function pushIntermediate(points, target) {
-      const last = points[points.length - 1];
-      const dx = target.x - last.x, dy = target.y - last.y;
-      const len = Math.hypot(dx, dy);
-      if (len < 0.5) return;
-      const steps = Math.max(1, Math.round(len / sqSize));
-      for (let i = 1; i <= steps; i++) {
-        const t = i / steps;
-        points.push({ x: last.x + dx * t, y: last.y + dy * t });
-      }
-    }
+    function pushWalkFromPath(piece, waypoints, isTray, rankHint, opts) {
+      if (!waypoints || waypoints.length < 2) return null;
+      // Skip animation when start ≈ end (piece already on target).
+      const first = waypoints[0], last = waypoints[waypoints.length - 1];
+      const dist = Math.hypot(last.x - first.x, last.y - first.y);
+      if (dist < sqSize * 0.06 && waypoints.length === 2) return null;
 
-    function pushWalk(piece, endCX, endCY, isTray, rankHint) {
-      const startCX = piece.x + sqSize / 2;
-      const startCY = piece.y + sqSize / 2;
-      const totalDist = Math.hypot(endCX - startCX, endCY - startCY);
-      // Piece is already on its target square — skip the animation
-      // (a bob-in-place looked like a bug in v4; a step-in-place would
-      // read the same). Most pieces don't change squares between
-      // adjacent chess positions, so this branch fires often.
-      if (totalDist < sqSize * 0.06) return null;
-
-      // Per-piece Manhattan preference. Slight bias so pieces going
-      // primarily rightward tend file-first and vice-versa — that
-      // stops all 8 pieces of a rank from cornering at the same
-      // square. Pure random for the rest.
-      const dxAbs = Math.abs(endCX - startCX);
-      const dyAbs = Math.abs(endCY - startCY);
-      const bias = dxAbs > dyAbs * 1.4 ? 0.30 : 0.65;
-      const prefer = Math.random() < bias ? 'file-first' : 'rank-first';
-
-      const waypoints = buildWaypoints(startCX, startCY, endCX, endCY, prefer);
       let segCount = waypoints.length - 1;
-      // Pace-cap: extremely long tray walks would otherwise take too
-      // long. Merge extra segments into fewer, longer ones (still
-      // grid-shaped visually because the endpoints of the merged
-      // segments still land on square boundaries most of the time).
+      // Pace-cap: extremely long paths (tray-glide + long walk) would
+      // otherwise drag. Merge extra segments into fewer, longer ones.
       if (segCount > MAX_SEGS) {
         const stride = Math.ceil(segCount / MAX_SEGS);
         const collapsed = [waypoints[0]];
@@ -820,15 +1040,11 @@ function walkTransition() {
         if (collapsed[collapsed.length - 1] !== waypoints[waypoints.length - 1]) {
           collapsed.push(waypoints[waypoints.length - 1]);
         }
-        waypoints.length = 0;
-        waypoints.push(...collapsed);
+        waypoints = collapsed;
         segCount = waypoints.length - 1;
       }
       const duration = segCount * SEG_MS;
 
-      // Stagger by target rank so the far rank walks first (near-rank
-      // pieces don't get walked over). Larger per-piece jitter so the
-      // shelf doesn't march in lockstep.
       const rankDelay = (8 - (rankHint ?? 4)) * 90;
       const jitter = Math.random() * 220;
       const startAt = now + rankDelay + jitter;
@@ -837,42 +1053,45 @@ function walkTransition() {
         piece,
         waypoints,
         segCount,
-        segMs: SEG_MS,
-        endCX, endCY,
+        endCX: last.x, endCY: last.y,
         startAngle: piece.rot,
         startAt, duration,
         isTray,
         fadeIn: false,
+        isKnight: opts?.isKnight ?? false,
       };
       walks.push(w);
       return w;
     }
 
-    // Register the new live and tray sets FIRST — independent of
-    // whether each piece actually needed a walk. Some pieces are
-    // already on their target squares (very common in v4: most pieces
-    // don't change squares between adjacent chess positions) so their
-    // walk is skipped, but they still belong to livePieces.
+    // Push a walk for each target-assigned piece using the legal path
+    // computed during assignment. Register the new live/tray sets
+    // ahead of the animation so state is consistent immediately.
     const nextLive = [];
     const nextTray = [];
     for (const t of targets) {
       const p = t.assigned;
-      const w = pushWalk(p, t.end.x, t.end.y, false, Number(t.sq[1]));
+      const w = pushWalkFromPath(p, t._path.waypoints, false,
+                                 Number(t.sq[1]),
+                                 { isKnight: p.type === 'n' });
       p.sq = t.sq;
       if (w && t._fadeIn) w.fadeIn = true;
       nextLive.push(p);
     }
+    // Stragglers: straight glide to tray slot — "hand of the player".
     whiteQueue.forEach((p, i) => {
       const endCX = boardX + sqSize * 0.5 + i * trayGap;
       const endCY = trayYWhite;
-      pushWalk(p, endCX, endCY, true, 8);
+      const startC = { x: p.x + sqSize/2, y: p.y + sqSize/2 };
+      pushWalkFromPath(p, [startC, { x: endCX, y: endCY }], true, 8);
       p.sq = null;
       nextTray.push(p);
     });
     blackQueue.forEach((p, i) => {
       const endCX = boardX + sqSize * 0.5 + i * trayGap;
       const endCY = trayYBlack;
-      pushWalk(p, endCX, endCY, true, 8);
+      const startC = { x: p.x + sqSize/2, y: p.y + sqSize/2 };
+      pushWalkFromPath(p, [startC, { x: endCX, y: endCY }], true, 8);
       p.sq = null;
       nextTray.push(p);
     });
@@ -911,16 +1130,26 @@ function walkTransition() {
           continue;
         }
 
-        // Travel: work out which segment we're in, then ease across it.
+        // Travel: work out which segment we're in, then ease across
+        // it. For knight segments, add a small parabolic arc so the
+        // segment reads as a hop rather than a slide (arc peaks
+        // upward at mid-segment).
         let pt;
         if (t < w.duration) {
           const globalFrac = t / w.duration;
           const segFloat = globalFrac * w.segCount;
           const segIdx = Math.min(w.segCount - 1, Math.floor(segFloat));
-          const segT = easeInOut(segFloat - segIdx);
+          const rawT = segFloat - segIdx;
+          const segT = easeInOut(rawT);
           const a = w.waypoints[segIdx];
           const b = w.waypoints[segIdx + 1];
-          pt = { x: a.x + (b.x - a.x) * segT, y: a.y + (b.y - a.y) * segT };
+          let x = a.x + (b.x - a.x) * segT;
+          let y = a.y + (b.y - a.y) * segT;
+          if (w.isKnight) {
+            // Small upward arc, peak at rawT = 0.5.
+            y -= Math.sin(rawT * Math.PI) * KNIGHT_ARC_AMP;
+          }
+          pt = { x, y };
         } else {
           pt = w.waypoints[w.waypoints.length - 1];
         }
