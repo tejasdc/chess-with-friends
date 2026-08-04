@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
-import { Chess, type Color, type PieceSymbol, type Square } from "chess.js";
+import { Chess, type Color, type Move as ChessMove, type PieceSymbol, type Square } from "chess.js";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -16,6 +16,7 @@ type ShelfPosition = {
   fen: string;
   sideToMove: Color;
   solution: { from: Square; to: Square; promotion?: "q" | "r" | "b" | "n" };
+  preMoves?: { fen: string; moves: string[] };
 };
 
 type ShelfPiece = {
@@ -41,6 +42,29 @@ type ShelfMetrics = {
   sqSize: number;
 };
 
+type WalkPoint = { x: number; y: number };
+type LegalPathResult = { ok: true; waypoints: WalkPoint[] } | { ok: false; waypoints?: undefined };
+type LandingWalk = {
+  piece: ShelfPiece;
+  waypoints: WalkPoint[];
+  segCount: number;
+  startAt: number;
+  duration: number;
+  endCX: number;
+  endCY: number;
+  startAngle: number;
+  isTray: boolean;
+  fadeIn: boolean;
+  isKnight: boolean;
+};
+
+const WALK_SEG_MS = 380;
+const WALK_MAX_SEGS = 6;
+const WALK_SETTLE_MS = 200;
+const REPLAY_SEG_MS = 520;
+const REPLAY_BEAT_MS = 420;
+const KNIGHT_ARC_RATIO = 0.16;
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
 const LANDING_COPY = "No infinite pool of opponents. A game happens when two friends sit down.";
 const shelf = shelfPositions as ShelfPosition[];
 
@@ -99,6 +123,7 @@ function LandingPuzzleShelf() {
   const piecesLayerRef = React.useRef<HTMLDivElement | null>(null);
   const pieceEls = React.useRef(new Map<string, HTMLSpanElement>());
   const piecesRef = React.useRef<ShelfPiece[]>([]);
+  const trayRef = React.useRef<ShelfPiece[]>([]);
   const gameRef = React.useRef(new Chess(shelf[0].fen));
   const selectedRef = React.useRef<Square | null>(null);
   const animatingRef = React.useRef(false);
@@ -154,6 +179,7 @@ function LandingPuzzleShelf() {
     pieceEls.current.clear();
     const next = piecesFromFen(position.fen, metrics);
     piecesRef.current = next;
+    trayRef.current = [];
     gameRef.current = new Chess(position.fen);
     for (const piece of next) {
       const el = createLandingPieceEl(piece, metrics);
@@ -165,7 +191,7 @@ function LandingPuzzleShelf() {
 
   useEffect(() => {
     if (!metrics || animatingRef.current) return;
-    for (const piece of piecesRef.current) {
+    for (const piece of [...piecesRef.current, ...trayRef.current]) {
       if (piece.sq) {
         const { x, y } = squareToXY(piece.sq, metrics);
         piece.x = x;
@@ -307,8 +333,16 @@ function LandingPuzzleShelf() {
     const nextIndex = (index + 1) % shelf.length;
     const nextPosition = shelf[nextIndex];
     setIndex(nextIndex);
+    const setupFen = nextPosition.preMoves?.fen ?? nextPosition.fen;
+    setWalkPhase("setup");
+    await walkToFen(setupFen, metrics);
+    if (nextPosition.preMoves) {
+      setWalkPhase("replay");
+      gameRef.current = new Chess(nextPosition.preMoves.fen);
+      await replayMoves(nextPosition.preMoves.moves, metrics);
+    }
+    setWalkPhase("idle");
     gameRef.current = new Chess(nextPosition.fen);
-    await walkLandingPieces(nextPosition, metrics);
     setAnimating(false);
     animatingRef.current = false;
   }
@@ -340,248 +374,439 @@ function LandingPuzzleShelf() {
     }
   }
 
-  function walkLandingPieces(nextPosition: ShelfPosition, m: ShelfMetrics) {
+  function ensurePieceElement(piece: ShelfPiece, m: ShelfMetrics) {
+    if (pieceEls.current.has(piece.id)) return;
+    const layer = piecesLayerRef.current;
+    if (!layer) return;
+    const el = createLandingPieceEl(piece, m);
+    layer.appendChild(el);
+    pieceEls.current.set(piece.id, el);
+  }
+
+  function setWalkPhase(phase: "idle" | "setup" | "replay") {
+    const layer = piecesLayerRef.current;
+    if (layer) layer.dataset.walkPhase = phase;
+  }
+
+  function syncPieceElement(piece: ShelfPiece, m: ShelfMetrics) {
+    const el = pieceEls.current.get(piece.id);
+    if (!el) return;
+    el.classList.toggle("live", piece.live);
+    el.dataset.square = piece.sq || "tray";
+    el.dataset.piece = `${piece.color}${piece.type}`;
+    el.textContent = filledGlyphs[piece.type];
+    sizeAndPlacePiece(el, piece, m);
+  }
+
+  function makeWalk(piece: ShelfPiece, waypoints: WalkPoint[], opts: {
+    startAt?: number;
+    segMs?: number;
+    isTray?: boolean;
+    fadeIn?: boolean;
+    isKnight?: boolean;
+    forceEvenIfShort?: boolean;
+  } = {}): LandingWalk | null {
+    if (!waypoints || waypoints.length < 2) return null;
+    const first = waypoints[0];
+    const last = waypoints[waypoints.length - 1];
+    const dist = Math.hypot(last.x - first.x, last.y - first.y);
+    if (dist < currentRouteMetrics().sqSize * 0.06 && waypoints.length === 2 && !opts.forceEvenIfShort) return null;
+    let route = waypoints;
+    let segCount = route.length - 1;
+    if (segCount > WALK_MAX_SEGS) {
+      const stride = Math.ceil(segCount / WALK_MAX_SEGS);
+      const collapsed = [route[0]];
+      for (let i = stride; i < route.length; i += stride) collapsed.push(route[i]);
+      if (collapsed[collapsed.length - 1] !== route[route.length - 1]) collapsed.push(route[route.length - 1]);
+      route = collapsed;
+      segCount = route.length - 1;
+    }
+    const segMs = opts.segMs ?? WALK_SEG_MS;
+    return {
+      piece,
+      waypoints: route,
+      segCount,
+      endCX: last.x,
+      endCY: last.y,
+      startAngle: piece.rot,
+      startAt: opts.startAt ?? performance.now(),
+      duration: segCount * segMs,
+      isTray: opts.isTray ?? false,
+      fadeIn: opts.fadeIn ?? false,
+      isKnight: opts.isKnight ?? false,
+    };
+  }
+
+  function runWalkAnimation(walks: LandingWalk[], m: ShelfMetrics) {
     return new Promise<void>((resolve) => {
-      const targets = piecesFromFen(nextPosition.fen, m).map((piece) => ({
-        ...piece,
-        end: squareCenter(piece.sq as Square, m),
-        assigned: null as ShelfPiece | null,
-      }));
-      const pool = piecesRef.current.slice();
-
-      for (const target of targets) {
-        let bestI = -1;
-        let bestD = Infinity;
-        for (let i = 0; i < pool.length; i++) {
-          const candidate = pool[i];
-          if (!candidate || candidate.color !== target.color || candidate.type !== target.type) continue;
-          const pcx = candidate.x + m.sqSize / 2;
-          const pcy = candidate.y + m.sqSize / 2;
-          const distance = (pcx - target.end.x) ** 2 + (pcy - target.end.y) ** 2;
-          if (distance < bestD) {
-            bestD = distance;
-            bestI = i;
-          }
-        }
-        if (bestI >= 0) {
-          target.assigned = pool[bestI];
-          pool[bestI] = null as unknown as ShelfPiece;
-        }
+      if (!walks.length) {
+        window.setTimeout(resolve, WALK_SETTLE_MS);
+        return;
       }
-
-      const nextLive: ShelfPiece[] = [];
-      for (const target of targets) {
-        if (!target.assigned) {
-          const spawn = pickEdgeSpawn(target.end, m);
-          const spawned: ShelfPiece = {
-            id: `landing-piece-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            sq: target.sq,
-            color: target.color,
-            type: target.type,
-            char: target.char,
-            x: spawn.x - m.sqSize / 2,
-            y: spawn.y - m.sqSize / 2,
-            rot: 0,
-            live: false,
-            fadeIn: true,
-          };
-          target.assigned = spawned;
-          pool.push(spawned);
-        }
+      for (const walk of walks) {
+        const el = pieceEls.current.get(walk.piece.id);
+        if (el) el.style.transition = "none";
       }
+      void piecesLayerRef.current?.offsetHeight;
 
-      const walks: Array<{
-        piece: ShelfPiece;
-        waypoints: Array<{ x: number; y: number }>;
-        segCount: number;
-        startAt: number;
-        duration: number;
-        endCX: number;
-        endCY: number;
-        fadeIn: boolean;
-      }> = [];
-      const nextTray: ShelfPiece[] = [];
-      const used = new Set<ShelfPiece>();
+      const arcAmp = m.sqSize * KNIGHT_ARC_RATIO;
       const now = performance.now();
-      const segMs = 360;
-      const maxSegs = 6;
-      const settleMs = 200;
+      const globalEnd = walks.reduce((acc, walk) => Math.max(acc, walk.startAt + walk.duration + WALK_SETTLE_MS), now) + 160;
 
-      function pushIntermediate(points: Array<{ x: number; y: number }>, target: { x: number; y: number }) {
-        const last = points[points.length - 1];
-        const dx = target.x - last.x;
-        const dy = target.y - last.y;
-        const len = Math.hypot(dx, dy);
-        if (len < 0.5) return;
-        const steps = Math.max(1, Math.round(len / m.sqSize));
-        for (let i = 1; i <= steps; i++) {
-          const t = i / steps;
-          points.push({ x: last.x + dx * t, y: last.y + dy * t });
-        }
-      }
+      function easeInOut(t: number) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+      function easeOutCubic(t: number) { return 1 - Math.pow(1 - t, 3); }
 
-      function buildWaypoints(startCX: number, startCY: number, endCX: number, endCY: number, prefer: "file-first" | "rank-first") {
-        const corner = prefer === "file-first" ? { x: endCX, y: startCY } : { x: startCX, y: endCY };
-        const points = [{ x: startCX, y: startCY }];
-        pushIntermediate(points, corner);
-        pushIntermediate(points, { x: endCX, y: endCY });
-        return points;
-      }
-
-      function pushWalk(piece: ShelfPiece, endCX: number, endCY: number, rankHint: number) {
-        const startCX = piece.x + m.sqSize / 2;
-        const startCY = piece.y + m.sqSize / 2;
-        const totalDist = Math.hypot(endCX - startCX, endCY - startCY);
-        if (totalDist < m.sqSize * 0.06) return;
-        const dxAbs = Math.abs(endCX - startCX);
-        const dyAbs = Math.abs(endCY - startCY);
-        const bias = dxAbs > dyAbs * 1.4 ? 0.30 : 0.65;
-        const prefer = seededWalkChoice(piece.id, nextPosition.id) < bias ? "file-first" : "rank-first";
-        const waypoints = buildWaypoints(startCX, startCY, endCX, endCY, prefer);
-        let segCount = waypoints.length - 1;
-        if (segCount > maxSegs) {
-          const stride = Math.ceil(segCount / maxSegs);
-          const collapsed = [waypoints[0]];
-          for (let i = stride; i < waypoints.length; i += stride) collapsed.push(waypoints[i]);
-          const final = waypoints[waypoints.length - 1];
-          if (collapsed[collapsed.length - 1] !== final) collapsed.push(final);
-          waypoints.length = 0;
-          waypoints.push(...collapsed);
-          segCount = waypoints.length - 1;
-        }
-        const rankDelay = (8 - rankHint) * 90;
-        const jitter = seededWalkChoice(nextPosition.id, piece.id) * 220;
-        walks.push({
-          piece,
-          waypoints,
-          segCount,
-          startAt: now + rankDelay + jitter,
-          duration: segCount * segMs,
-          endCX,
-          endCY,
-          fadeIn: Boolean(piece.fadeIn),
-        });
-      }
-
-      for (const target of targets) {
-        const piece = target.assigned;
-        if (!piece) continue;
-        const targetSq = target.sq as Square;
-        used.add(piece);
-        piece.sq = targetSq;
-        piece.live = false;
-        pushWalk(piece, target.end.x, target.end.y, Number(targetSq[1]));
-        nextLive.push(piece);
-      }
-
-      const stragglers = pool.filter((piece) => piece && !used.has(piece));
-      const trayGap = m.sqSize * 0.43;
-      const trayYWhite = m.boardY + m.boardH + m.sqSize * 0.22;
-      const trayYBlack = m.boardY - m.sqSize * 0.22;
-      stragglers.filter((piece) => piece.color === "w").forEach((piece, i) => {
-        const endCX = m.boardX + m.sqSize * 0.55 + i * trayGap;
-        piece.sq = null;
-        piece.live = false;
-        pushWalk(piece, endCX, trayYWhite, 1);
-        nextTray.push(piece);
-      });
-      stragglers.filter((piece) => piece.color === "b").forEach((piece, i) => {
-        const endCX = m.boardX + m.sqSize * 0.55 + i * trayGap;
-        piece.sq = null;
-        piece.live = false;
-        pushWalk(piece, endCX, trayYBlack, 8);
-        nextTray.push(piece);
-      });
-
-      piecesRef.current = [...nextLive, ...nextTray];
-      // Spawn DOM nodes for any newly-added pieces (fresh position had
-      // more of a color/type than the previous pool). React no longer
-      // renders these — the pieces layer is imperative.
-      const layer = piecesLayerRef.current;
-      if (layer) {
-        for (const piece of piecesRef.current) {
-          if (pieceEls.current.has(piece.id)) continue;
-          const el = createLandingPieceEl(piece, m);
-          layer.appendChild(el);
-          pieceEls.current.set(piece.id, el);
-        }
-      }
-
-      window.setTimeout(() => {
-        for (const piece of piecesRef.current) {
-          const el = pieceEls.current.get(piece.id);
-          if (!el) continue;
-          sizeAndPlacePiece(el, piece, m);
-          el.style.transition = "none";
-        }
-        void piecesLayerRef.current?.offsetHeight;
-
-        const globalEnd = walks.length
-          ? walks.reduce((acc, walk) => Math.max(acc, walk.startAt + walk.duration + settleMs), now) + 160
-          : now + 380;
-
-        function easeInOut(t: number) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
-
-        function frame(tNow: number) {
-          for (const walk of walks) {
-            const t = tNow - walk.startAt;
-            if (t < 0) continue;
-            const total = walk.duration + settleMs;
-            if (t >= total) {
-              const tx = walk.endCX - m.sqSize / 2;
-              const ty = walk.endCY - m.sqSize / 2;
-              walk.piece.x = tx;
-              walk.piece.y = ty;
-              walk.piece.rot = 0;
-              const el = pieceEls.current.get(walk.piece.id);
-              if (el) {
-                el.style.opacity = "1";
-                el.style.transform = landingPieceTransform(tx, ty, 0, 1);
-              }
-              continue;
-            }
-
-            let point: { x: number; y: number };
-            if (t < walk.duration) {
-              const globalFrac = t / walk.duration;
-              const segFloat = globalFrac * walk.segCount;
-              const segIdx = Math.min(walk.segCount - 1, Math.floor(segFloat));
-              const segT = easeInOut(segFloat - segIdx);
-              const a = walk.waypoints[segIdx];
-              const b = walk.waypoints[segIdx + 1];
-              point = { x: a.x + (b.x - a.x) * segT, y: a.y + (b.y - a.y) * segT };
-            } else {
-              point = walk.waypoints[walk.waypoints.length - 1];
-            }
-
-            const settleT = t >= walk.duration ? (t - walk.duration) / settleMs : 0;
-            const scale = t >= walk.duration ? 1 - 0.04 * Math.sin(settleT * Math.PI) : 1;
-            const tx = point.x - m.sqSize / 2;
-            const ty = point.y - m.sqSize / 2;
+      function frame(tNow: number) {
+        for (const walk of walks) {
+          const t = tNow - walk.startAt;
+          if (t < 0) continue;
+          const total = walk.duration + WALK_SETTLE_MS;
+          if (t >= total) {
+            const tx = walk.endCX - m.sqSize / 2;
+            const ty = walk.endCY - m.sqSize / 2;
             walk.piece.x = tx;
             walk.piece.y = ty;
+            walk.piece.rot = 0;
             const el = pieceEls.current.get(walk.piece.id);
             if (el) {
-              if (walk.fadeIn) el.style.opacity = String(Math.min(1, t / 260));
-              el.style.transform = landingPieceTransform(tx, ty, 0, scale);
+              el.style.opacity = "1";
+              el.style.transform = landingPieceTransform(tx, ty, 0, 1);
             }
+            continue;
           }
 
-          if (tNow < globalEnd) {
-            rafRef.current = requestAnimationFrame(frame);
+          let point: WalkPoint;
+          if (t < walk.duration) {
+            const globalFrac = t / walk.duration;
+            const segFloat = globalFrac * walk.segCount;
+            const segIdx = Math.min(walk.segCount - 1, Math.floor(segFloat));
+            const rawT = segFloat - segIdx;
+            const segT = easeInOut(rawT);
+            const a = walk.waypoints[segIdx];
+            const b = walk.waypoints[segIdx + 1];
+            const x = a.x + (b.x - a.x) * segT;
+            let y = a.y + (b.y - a.y) * segT;
+            if (walk.isKnight) y -= Math.sin(rawT * Math.PI) * arcAmp;
+            point = { x, y };
           } else {
-            for (const piece of nextLive) {
-              piece.live = true;
-              piece.fadeIn = false;
-            }
-            for (const piece of nextTray) piece.fadeIn = false;
-            piecesRef.current = [...nextLive, ...nextTray];
-            resolve();
+            point = walk.waypoints[walk.waypoints.length - 1];
+          }
+
+          const settleT = t >= walk.duration ? (t - walk.duration) / WALK_SETTLE_MS : 0;
+          const scale = t >= walk.duration ? 1 - 0.04 * Math.sin(settleT * Math.PI) : 1;
+          let angleDeg = 0;
+          if (walk.startAngle) {
+            const standDur = Math.min(240, walk.duration);
+            if (t < standDur) angleDeg = walk.startAngle * (1 - easeOutCubic(t / standDur));
+          }
+          const tx = point.x - m.sqSize / 2;
+          const ty = point.y - m.sqSize / 2;
+          walk.piece.x = tx;
+          walk.piece.y = ty;
+          const el = pieceEls.current.get(walk.piece.id);
+          if (el) {
+            if (walk.fadeIn) el.style.opacity = String(Math.min(1, t / 260));
+            el.style.transform = landingPieceTransform(tx, ty, angleDeg, scale);
           }
         }
-        rafRef.current = requestAnimationFrame(frame);
-      }, 0);
+
+        if (tNow < globalEnd) {
+          rafRef.current = requestAnimationFrame(frame);
+        } else {
+          for (const walk of walks) {
+            const el = pieceEls.current.get(walk.piece.id);
+            if (el) el.style.transition = "";
+          }
+          resolve();
+        }
+      }
+      rafRef.current = requestAnimationFrame(frame);
     });
+  }
+
+  async function walkToFen(targetFen: string, m: ShelfMetrics) {
+    setRouteMetrics(m);
+    const targets = piecesFromFen(targetFen, m).map((piece) => ({
+      sq: piece.sq as Square,
+      color: piece.color,
+      type: piece.type,
+      char: piece.char,
+      end: squareCenter(piece.sq as Square, m),
+      assigned: null as ShelfPiece | null,
+      path: null as LegalPathResult | null,
+      fadeIn: false,
+    }));
+
+    const pool: Array<ShelfPiece | null> = [...piecesRef.current, ...trayRef.current];
+    for (const target of targets) {
+      let bestI = -1;
+      let bestD = Infinity;
+      let bestPath: LegalPathResult | null = null;
+      for (let i = 0; i < pool.length; i++) {
+        const piece = pool[i];
+        if (!piece || piece.color !== target.color || piece.type !== target.type) continue;
+        if (!piece.sq) continue;
+        const path = legalPath(piece.sq, target.sq, piece.type, piece.color);
+        if (!path.ok) continue;
+        const pcx = piece.x + m.sqSize / 2;
+        const pcy = piece.y + m.sqSize / 2;
+        const distance = (pcx - target.end.x) ** 2 + (pcy - target.end.y) ** 2;
+        if (distance < bestD) {
+          bestD = distance;
+          bestI = i;
+          bestPath = path;
+        }
+      }
+      if (bestI >= 0 && bestPath) {
+        target.assigned = pool[bestI];
+        target.path = bestPath;
+        pool[bestI] = null;
+      }
+    }
+
+    for (const target of targets) {
+      if (target.assigned) continue;
+      let bestI = -1;
+      let bestD = Infinity;
+      for (let i = 0; i < pool.length; i++) {
+        const piece = pool[i];
+        if (!piece || piece.color !== target.color || piece.type !== target.type) continue;
+        if (piece.sq !== null) continue;
+        const pcx = piece.x + m.sqSize / 2;
+        const pcy = piece.y + m.sqSize / 2;
+        const distance = (pcx - target.end.x) ** 2 + (pcy - target.end.y) ** 2;
+        if (distance < bestD) {
+          bestD = distance;
+          bestI = i;
+        }
+      }
+      if (bestI < 0) continue;
+      const piece = pool[bestI];
+      if (!piece) continue;
+      pool[bestI] = null;
+      const entrySq = chooseEntrySquare(target.type, target.color, target.sq);
+      const entryCenter = centerSq(entrySq);
+      const legal = legalPath(entrySq, target.sq, target.type, target.color);
+      const waypoints = [{ x: piece.x + m.sqSize / 2, y: piece.y + m.sqSize / 2 }, entryCenter];
+      if (legal.ok) waypoints.push(...legal.waypoints.slice(1));
+      target.assigned = piece;
+      target.path = { ok: true, waypoints };
+    }
+
+    for (const target of targets) {
+      if (target.assigned) continue;
+      const entrySq = chooseEntrySquare(target.type, target.color, target.sq);
+      const entryCenter = centerSq(entrySq);
+      const trayStart = target.color === "w"
+        ? { x: entryCenter.x, y: m.boardY + m.boardH + m.sqSize * 0.7 }
+        : { x: entryCenter.x, y: m.boardY - m.sqSize * 0.7 };
+      const spawned: ShelfPiece = {
+        id: `landing-piece-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        sq: target.sq,
+        color: target.color,
+        type: target.type,
+        char: target.char,
+        x: trayStart.x - m.sqSize / 2,
+        y: trayStart.y - m.sqSize / 2,
+        rot: 0,
+        live: false,
+        fadeIn: true,
+      };
+      ensurePieceElement(spawned, m);
+      const legal = legalPath(entrySq, target.sq, target.type, target.color);
+      const waypoints = [trayStart, entryCenter];
+      if (legal.ok) waypoints.push(...legal.waypoints.slice(1));
+      target.assigned = spawned;
+      target.path = { ok: true, waypoints };
+      target.fadeIn = true;
+    }
+
+    const walks: LandingWalk[] = [];
+    const nextLive: ShelfPiece[] = [];
+    const nextTray: ShelfPiece[] = [];
+    const stragglers = pool.filter((piece): piece is ShelfPiece => Boolean(piece));
+    const now = performance.now();
+
+    for (const target of targets) {
+      const piece = target.assigned;
+      if (!piece || !target.path?.ok) continue;
+      piece.sq = target.sq;
+      piece.color = target.color;
+      piece.type = target.type;
+      piece.char = target.char;
+      piece.live = false;
+      piece.fadeIn = target.fadeIn || piece.fadeIn;
+      ensurePieceElement(piece, m);
+      syncPieceElement(piece, m);
+      const rankHint = Number(target.sq[1]);
+      const walk = makeWalk(piece, target.path.waypoints, {
+        startAt: now + (8 - rankHint) * 90 + Math.random() * 220,
+        isKnight: piece.type === "n",
+        fadeIn: Boolean(piece.fadeIn),
+      });
+      if (walk) walks.push(walk);
+      nextLive.push(piece);
+    }
+
+    const trayGap = m.sqSize * 0.5;
+    const trayYWhite = m.boardY + m.boardH + m.sqSize * 0.5;
+    const trayYBlack = m.boardY - m.sqSize * 0.55;
+    stragglers.filter((piece) => piece.color === "w").forEach((piece, i) => {
+      const endCX = m.boardX + m.sqSize * 0.5 + i * trayGap;
+      const startC = { x: piece.x + m.sqSize / 2, y: piece.y + m.sqSize / 2 };
+      piece.sq = null;
+      piece.live = false;
+      piece.fadeIn = false;
+      ensurePieceElement(piece, m);
+      syncPieceElement(piece, m);
+      const walk = makeWalk(piece, [startC, { x: endCX, y: trayYWhite }], {
+        startAt: now + 8 * 90 + Math.random() * 220,
+        isTray: true,
+      });
+      if (walk) walks.push(walk);
+      nextTray.push(piece);
+    });
+    stragglers.filter((piece) => piece.color === "b").forEach((piece, i) => {
+      const endCX = m.boardX + m.sqSize * 0.5 + i * trayGap;
+      const startC = { x: piece.x + m.sqSize / 2, y: piece.y + m.sqSize / 2 };
+      piece.sq = null;
+      piece.live = false;
+      piece.fadeIn = false;
+      ensurePieceElement(piece, m);
+      syncPieceElement(piece, m);
+      const walk = makeWalk(piece, [startC, { x: endCX, y: trayYBlack }], {
+        startAt: now + 8 * 90 + Math.random() * 220,
+        isTray: true,
+      });
+      if (walk) walks.push(walk);
+      nextTray.push(piece);
+    });
+
+    piecesRef.current = nextLive;
+    trayRef.current = nextTray;
+    await runWalkAnimation(walks, m);
+    for (const piece of nextLive) {
+      piece.live = true;
+      piece.fadeIn = false;
+      syncPieceElement(piece, m);
+    }
+    for (const piece of nextTray) {
+      piece.live = false;
+      piece.fadeIn = false;
+      syncPieceElement(piece, m);
+    }
+  }
+
+  function replayPathForMove(move: ChessMove, mover: ShelfPiece): LegalPathResult {
+    if (mover.type === "p" && move.from[0] !== move.to[0]) {
+      return { ok: true, waypoints: [centerSq(move.from), centerSq(move.to)] };
+    }
+    return legalPath(move.from, move.to, mover.type, mover.color);
+  }
+
+  async function playOneMove(moveStr: string, m: ShelfMetrics) {
+    setRouteMetrics(m);
+    let move: ChessMove;
+    try {
+      move = gameRef.current.move(moveStr);
+    } catch {
+      console.warn("[landing-v7] replay move rejected:", moveStr);
+      return;
+    }
+    const mover = piecesRef.current.find((piece) => piece.sq === move.from);
+    if (!mover) {
+      console.warn("[landing-v7] no piece to replay from", move.from);
+      return;
+    }
+    const path = replayPathForMove(move, mover);
+    if (!path.ok) {
+      console.warn("[landing-v7] illegal path for replay:", moveStr);
+      return;
+    }
+
+    let capturedSq: Square = move.to;
+    if (move.flags.includes("e")) {
+      const rank = Number(move.to[1]) + (move.color === "w" ? -1 : 1);
+      capturedSq = `${move.to[0]}${rank}` as Square;
+    }
+    const captured = move.flags.includes("c") || move.flags.includes("e")
+      ? piecesRef.current.find((piece) => piece.sq === capturedSq && piece !== mover)
+      : null;
+
+    const now = performance.now();
+    const walks: LandingWalk[] = [];
+    const moverWalk = makeWalk(mover, path.waypoints, {
+      startAt: now,
+      segMs: REPLAY_SEG_MS,
+      isKnight: mover.type === "n",
+      forceEvenIfShort: true,
+    });
+    if (moverWalk) walks.push(moverWalk);
+
+    const rookWalk = castleRookWalk(move, m, now);
+    if (rookWalk) walks.push(rookWalk);
+
+    mover.sq = move.to;
+    if (captured) {
+      const trayY = captured.color === "w"
+        ? m.boardY + m.boardH + m.sqSize * 0.5
+        : m.boardY - m.sqSize * 0.55;
+      const trayGap = m.sqSize * 0.5;
+      const existing = trayRef.current.filter((piece) => piece.color === captured.color).length;
+      const endCX = m.boardX + m.sqSize * 0.5 + existing * trayGap;
+      const startC = { x: captured.x + m.sqSize / 2, y: captured.y + m.sqSize / 2 };
+      const capturedWalk = makeWalk(captured, [startC, { x: endCX, y: trayY }], {
+        startAt: now + (moverWalk?.duration ?? REPLAY_SEG_MS) * 0.55,
+        segMs: REPLAY_SEG_MS,
+        isTray: true,
+      });
+      if (capturedWalk) walks.push(capturedWalk);
+      piecesRef.current = piecesRef.current.filter((piece) => piece !== captured);
+      captured.sq = null;
+      captured.live = false;
+      trayRef.current.push(captured);
+      const capturedEl = pieceEls.current.get(captured.id);
+      if (capturedEl) {
+        capturedEl.dataset.square = "tray";
+        capturedEl.dataset.replayCapture = move.san;
+        capturedEl.classList.remove("live");
+      }
+    }
+
+    await runWalkAnimation(walks, m);
+    if (move.promotion) {
+      mover.type = move.promotion;
+      mover.char = move.color === "w" ? move.promotion.toUpperCase() : move.promotion;
+    }
+    mover.live = true;
+    syncPieceElement(mover, m);
+    for (const piece of trayRef.current) syncPieceElement(piece, m);
+  }
+
+  function castleRookWalk(move: ChessMove, m: ShelfMetrics, now: number) {
+    if (!move.flags.includes("k") && !move.flags.includes("q")) return null;
+    const rank = move.color === "w" ? "1" : "8";
+    const rookFrom = `${move.flags.includes("k") ? "h" : "a"}${rank}` as Square;
+    const rookTo = `${move.flags.includes("k") ? "f" : "d"}${rank}` as Square;
+    const rook = piecesRef.current.find((piece) => piece.sq === rookFrom && piece.type === "r" && piece.color === move.color);
+    if (!rook) return null;
+    const path = legalPath(rookFrom, rookTo, "r", move.color);
+    if (!path.ok) return null;
+    rook.sq = rookTo;
+    return makeWalk(rook, path.waypoints, {
+      startAt: now + REPLAY_SEG_MS * 0.18,
+      segMs: REPLAY_SEG_MS,
+      forceEvenIfShort: true,
+    });
+  }
+
+  async function replayMoves(moveStrs: string[], m: ShelfMetrics) {
+    for (let i = 0; i < moveStrs.length; i++) {
+      await playOneMove(moveStrs[i], m);
+      if (i < moveStrs.length - 1) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, REPLAY_BEAT_MS));
+      }
+    }
   }
 
   return (
@@ -675,6 +900,181 @@ function squareToXY(sq: Square, metrics: ShelfMetrics) {
 function squareCenter(sq: Square, metrics: ShelfMetrics) {
   const { x, y } = squareToXY(sq, metrics);
   return { x: x + metrics.sqSize / 2, y: y + metrics.sqSize / 2 };
+}
+
+let routeMetrics: ShelfMetrics | null = null;
+
+function setRouteMetrics(metrics: ShelfMetrics) {
+  routeMetrics = metrics;
+}
+
+function currentRouteMetrics() {
+  if (!routeMetrics) throw new Error("landing route metrics unavailable");
+  return routeMetrics;
+}
+
+function sqFR(sq: Square) { return { f: sq.charCodeAt(0) - 97, r: Number(sq[1]) }; }
+function frToSq(f: number, r: number) { return `${FILES[f]}${r}` as Square; }
+function centerFR(f: number, r: number) {
+  const { boardX, boardY, sqSize } = currentRouteMetrics();
+  return {
+    x: boardX + f * sqSize + sqSize / 2,
+    y: boardY + (8 - r) * sqSize + sqSize / 2,
+  };
+}
+function centerSq(sq: Square) { const c = sqFR(sq); return centerFR(c.f, c.r); }
+
+function legalPath(fromSq: Square, toSq: Square, type: PieceSymbol, color: Color): LegalPathResult {
+  if (fromSq === toSq) return { ok: true, waypoints: [centerSq(fromSq)] };
+  const a = sqFR(fromSq), b = sqFR(toSq);
+  switch (type) {
+    case "n": return knightPath(a, b);
+    case "r": return rookPath(a, b);
+    case "b": return bishopPath(a, b);
+    case "q": return queenPath(a, b);
+    case "k": return kingPath(a, b);
+    case "p": return pawnPath(a, b, color);
+    default: return { ok: false };
+  }
+}
+
+function knightPath(a: { f: number; r: number }, b: { f: number; r: number }): LegalPathResult {
+  const offsets = [[1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2]];
+  const key = (f: number, r: number) => f * 10 + r;
+  const start = key(a.f, a.r);
+  const seen = new Set([start]);
+  const parent = new Map<number, { f: number; r: number }>();
+  const queue = [{ f: a.f, r: a.r }];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    if (cur.f === b.f && cur.r === b.r) {
+      const pathFR = [{ f: cur.f, r: cur.r }];
+      let node = key(cur.f, cur.r);
+      while (node !== start) {
+        const par = parent.get(node)!;
+        pathFR.unshift(par);
+        node = key(par.f, par.r);
+      }
+      return { ok: true, waypoints: pathFR.map((p) => centerFR(p.f, p.r)) };
+    }
+    for (const [df, dr] of offsets) {
+      const nf = cur.f + df, nr = cur.r + dr;
+      if (nf < 0 || nf > 7 || nr < 1 || nr > 8) continue;
+      const k = key(nf, nr);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      parent.set(k, { f: cur.f, r: cur.r });
+      queue.push({ f: nf, r: nr });
+    }
+  }
+  return { ok: false };
+}
+
+function rookPath(a: { f: number; r: number }, b: { f: number; r: number }): LegalPathResult {
+  const wps = [centerFR(a.f, a.r)];
+  if (a.f === b.f || a.r === b.r) {
+    wps.push(centerFR(b.f, b.r));
+  } else {
+    const corner = Math.random() < 0.5
+      ? { f: b.f, r: a.r }
+      : { f: a.f, r: b.r };
+    wps.push(centerFR(corner.f, corner.r));
+    wps.push(centerFR(b.f, b.r));
+  }
+  return { ok: true, waypoints: wps };
+}
+
+function bishopPath(a: { f: number; r: number }, b: { f: number; r: number }): LegalPathResult {
+  if ((a.f + a.r) % 2 !== (b.f + b.r) % 2) return { ok: false };
+  const df = b.f - a.f, dr = b.r - a.r;
+  const wps = [centerFR(a.f, a.r)];
+  if (Math.abs(df) === Math.abs(dr)) {
+    wps.push(centerFR(b.f, b.r));
+    return { ok: true, waypoints: wps };
+  }
+  for (let cf = 0; cf < 8; cf++) {
+    for (let cr = 1; cr <= 8; cr++) {
+      if (cf === a.f && cr === a.r) continue;
+      if (cf === b.f && cr === b.r) continue;
+      const df1 = cf - a.f, dr1 = cr - a.r;
+      const df2 = b.f - cf, dr2 = b.r - cr;
+      if (df1 !== 0 && Math.abs(df1) === Math.abs(dr1) &&
+          df2 !== 0 && Math.abs(df2) === Math.abs(dr2)) {
+        wps.push(centerFR(cf, cr));
+        wps.push(centerFR(b.f, b.r));
+        return { ok: true, waypoints: wps };
+      }
+    }
+  }
+  return { ok: false };
+}
+
+function queenPath(a: { f: number; r: number }, b: { f: number; r: number }): LegalPathResult {
+  if (a.f === b.f || a.r === b.r) return rookPath(a, b);
+  if (Math.abs(a.f - b.f) === Math.abs(a.r - b.r)) return bishopPath(a, b);
+  return rookPath(a, b);
+}
+
+function kingPath(a: { f: number; r: number }, b: { f: number; r: number }): LegalPathResult {
+  const MAX_STEPS = 4;
+  const steps = Math.max(Math.abs(b.f - a.f), Math.abs(b.r - a.r));
+  if (steps > MAX_STEPS) return { ok: false };
+  const wps = [centerFR(a.f, a.r)];
+  let f = a.f, r = a.r;
+  while (f !== b.f || r !== b.r) {
+    if (f < b.f) f++; else if (f > b.f) f--;
+    if (r < b.r) r++; else if (r > b.r) r--;
+    wps.push(centerFR(f, r));
+  }
+  return { ok: true, waypoints: wps };
+}
+
+function pawnPath(a: { f: number; r: number }, b: { f: number; r: number }, color: Color): LegalPathResult {
+  if (a.f !== b.f) return { ok: false };
+  const dir = color === "w" ? +1 : -1;
+  const advance = (b.r - a.r) * dir;
+  if (advance <= 0) return { ok: false };
+  const wps = [centerFR(a.f, a.r)];
+  for (let i = 1; i <= advance; i++) {
+    wps.push(centerFR(a.f, a.r + i * dir));
+  }
+  return { ok: true, waypoints: wps };
+}
+
+function chooseEntrySquare(type: PieceSymbol, color: Color, targetSq: Square) {
+  const t = sqFR(targetSq);
+  if (type === "p") {
+    const startRank = color === "w" ? 2 : 7;
+    const dir = color === "w" ? +1 : -1;
+    if ((t.r - startRank) * dir >= 0) return frToSq(t.f, startRank);
+    return frToSq(t.f, color === "w" ? 2 : 7);
+  }
+  const edges: Array<{ f: number; r: number }> = [];
+  for (let f = 0; f < 8; f++) { edges.push({ f, r: 1 }); edges.push({ f, r: 8 }); }
+  for (let r = 2; r <= 7; r++) { edges.push({ f: 0, r }); edges.push({ f: 7, r }); }
+  if (type === "b") {
+    const parity = (t.f + t.r) % 2;
+    const valid = edges.filter((e) => (e.f + e.r) % 2 === parity && !(e.f === t.f && e.r === t.r));
+    return nearestSq(valid, t);
+  }
+  if (type === "r") {
+    const opts = [
+      { f: 0, r: t.r }, { f: 7, r: t.r },
+      { f: t.f, r: 1 }, { f: t.f, r: 8 },
+    ].filter((e) => !(e.f === t.f && e.r === t.r));
+    return nearestSq(opts, t);
+  }
+  const valid = edges.filter((e) => !(e.f === t.f && e.r === t.r));
+  return nearestSq(valid, t);
+}
+
+function nearestSq(candidates: Array<{ f: number; r: number }>, t: { f: number; r: number }) {
+  let best = candidates[0], bestD = Infinity;
+  for (const c of candidates) {
+    const d = (c.f - t.f) ** 2 + (c.r - t.r) ** 2;
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return frToSq(best.f, best.r);
 }
 
 function pickEdgeSpawn(dest: { x: number; y: number }, metrics: ShelfMetrics) {
@@ -815,7 +1215,7 @@ interface GameState {
   connectionState: Record<string, "connected" | "reconnecting" | "gone">;
 }
 
-const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+const files = [...FILES];
 const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
 const pieceNames: Record<PieceSymbol, string> = {
   p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king",

@@ -16,7 +16,10 @@ test.describe.configure({ mode: "serial" });
 type LandingPuzzle = {
   id: string;
   fen: string;
+  credit: string;
+  sideToMove: "w" | "b";
   solution: { from: string; to: string; promotion?: string };
+  preMoves?: { fen: string; moves: string[] };
 };
 
 function loadLandingPositions() {
@@ -43,6 +46,11 @@ function firstFenPiece(fen: string) {
     };
   }
   throw new Error(`FEN has no pieces: ${fen}`);
+}
+
+async function solveLandingPuzzle(page: Page, puzzle: LandingPuzzle) {
+  await page.locator(`.landing-square[data-square="${puzzle.solution.from}"]`).click({ timeout: 8000 });
+  await page.locator(`.landing-square[data-square="${puzzle.solution.to}"]`).click({ timeout: 8000 });
 }
 
 // ---------- helpers (kept in-file so this suite is self-contained) ----------
@@ -590,8 +598,8 @@ test(`landing shelf survives all ${loadLandingPositions().length} puzzles twice 
   // shelf puzzle twice, ZERO pageerrors captured.
   const positions = loadLandingPositions();
   const rounds = positions.length * 2;
-  // Each walk can legitimately take around 4s; give the full loop slack.
-  test.setTimeout(Math.max(180_000, rounds * 6_000));
+  // v7 walks arrange the setup FEN, then replay preMoves; give the full loop slack.
+  test.setTimeout(Math.max(240_000, rounds * 9_000));
   const byId = new Map(positions.map((p) => [p.id, p]));
 
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -631,7 +639,7 @@ test(`landing shelf survives all ${loadLandingPositions().length} puzzles twice 
           return el && el.getAttribute("data-puzzle-id") !== prev;
         },
         id,
-        { timeout: 25000 },
+        { timeout: 40000 },
       );
       await page.waitForTimeout(400);   // let the settle beat land
     }
@@ -642,6 +650,47 @@ test(`landing shelf survives all ${loadLandingPositions().length} puzzles twice 
   } finally {
     await ctx.close();
   }
+});
+
+test("landing replay animates a capture — captured piece walks to tray during preMoves replay", async ({ page }) => {
+  test.setTimeout(70_000);
+  const positions = loadLandingPositions();
+  const targetIndex = positions.findIndex((p, i) => i > 0 && p.id.startsWith("lichess-") && p.preMoves?.moves[0]?.includes("x"));
+  expect(targetIndex, "expected a Lichess landing puzzle with a first preMove SAN capture").toBeGreaterThan(0);
+  const target = positions[targetIndex];
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const shelf = page.locator(".puzzle-shelf");
+  await expect(shelf).toHaveAttribute("data-puzzle-id", positions[0].id);
+
+  for (let i = 0; i < targetIndex - 1; i++) {
+    await solveLandingPuzzle(page, positions[i]);
+    await expect(shelf).toHaveAttribute("data-puzzle-id", positions[i + 1].id, { timeout: 40000 });
+    await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 40000 });
+  }
+
+  await solveLandingPuzzle(page, positions[targetIndex - 1]);
+  await expect(shelf).toHaveAttribute("data-puzzle-id", target.id, { timeout: 40000 });
+  await expect(page.locator(".puzzle-caption")).toHaveText(`${target.sideToMove === "w" ? "WHITE" : "BLACK"} TO MOVE · ${target.credit}`);
+
+  await page.waitForFunction(
+    () => {
+      const shelfEl = document.querySelector<HTMLElement>(".puzzle-shelf");
+      const board = document.querySelector<HTMLElement>(".landing-board");
+      const captured = document.querySelector<HTMLElement>(".landing-piece[data-replay-capture]");
+      if (!shelfEl || !board || !captured) return false;
+      if (shelfEl.dataset.animating !== "true") return false;
+      const boardBox = board.getBoundingClientRect();
+      const pieceBox = captured.getBoundingClientRect();
+      if (pieceBox.width <= 0 || pieceBox.height <= 0) return false;
+      const centerY = pieceBox.top + pieceBox.height / 2;
+      return centerY > boardBox.bottom + pieceBox.height * 0.08 || centerY < boardBox.top - pieceBox.height * 0.08;
+    },
+    { timeout: 40000, polling: "raf" },
+  );
+
+  await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 15000 });
 });
 
 // Silence unused-import warning if a future refactor drops CDPSession above.
