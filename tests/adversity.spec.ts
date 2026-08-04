@@ -10,6 +10,7 @@
 
 import { expect, test, type Browser, type CDPSession, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { Chess } from "chess.js";
 
 test.describe.configure({ mode: "serial" });
 
@@ -677,7 +678,8 @@ test("landing replay animates a capture — captured piece walks to tray during 
 
   await solveLandingPuzzle(page, positions[targetIndex - 1]);
   await expect(shelf).toHaveAttribute("data-puzzle-id", target.id, { timeout: 40000 });
-  await expect(page.locator(".puzzle-caption")).toHaveText(`${target.sideToMove === "w" ? "WHITE" : "BLACK"} TO MOVE · ${target.credit}`);
+  // Lichess entries carry side-to-move only (credit lives on /inspirations).
+  await expect(page.locator(".puzzle-caption")).toHaveText(`${target.sideToMove === "w" ? "WHITE" : "BLACK"} TO MOVE`);
 
   await page.waitForFunction(
     () => {
@@ -787,6 +789,71 @@ test("invite link is standing consent — five cases all resolve to friendship, 
     await alice.ctx.close();
     await bob.ctx.close();
     await carol.ctx.close();
+  }
+});
+
+test(`replay wash lands on the last preMove's from+to for every landing position`, async ({ page }) => {
+  // Landing shelf carries a "last-move" wash on the from+to squares of
+  // the LAST preMove that produced the puzzle FEN. This test computes
+  // the expected {from,to} for each entry from the CSV of truth (Chess
+  // over the preMoves.fen + preMoves.moves), then walks the whole
+  // shelf and asserts DOM matches expectation on EVERY landing —
+  // initial mount plus each transition. Any drift (wrong squares, no
+  // wash, wash from the previous position bleeding into the next) is
+  // a hard regression.
+  const positions = loadLandingPositions();
+  test.setTimeout(Math.max(300_000, positions.length * 12_000));
+
+  // Expected last-move per entry, computed the same way the production
+  // client does (chess.move(san) on the preMoves.fen, take from+to of
+  // the final applied move).
+  const expected = new Map<string, { from: string; to: string }>();
+  for (const p of positions) {
+    if (!p.preMoves || !p.preMoves.moves.length) continue;
+    const game = new Chess(p.preMoves.fen);
+    let last: { from: string; to: string } | null = null;
+    for (const san of p.preMoves.moves) {
+      const move = game.move(san);
+      if (move) last = { from: move.from, to: move.to };
+    }
+    if (!last) throw new Error(`preMoves failed to play through for ${p.id}`);
+    expected.set(p.id, last);
+  }
+  expect(expected.size).toBe(positions.length);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const shelf = page.locator(".puzzle-shelf");
+  await expect(shelf).toHaveAttribute("data-puzzle-id", positions[0].id);
+
+  async function assertWash(pos: LandingPuzzle) {
+    const want = expected.get(pos.id)!;
+    // Attribute-based assertion (single source of truth on the shelf div).
+    await expect(shelf).toHaveAttribute("data-last-from", want.from, { timeout: 8000 });
+    await expect(shelf).toHaveAttribute("data-last-to", want.to);
+    // Class-based assertion (the actual visual wash on the board).
+    await expect(page.locator(`.landing-square.last-from[data-square="${want.from}"]`)).toHaveCount(1);
+    await expect(page.locator(`.landing-square.last-to[data-square="${want.to}"]`)).toHaveCount(1);
+    // No stray last-move classes on any OTHER squares — exactly two
+    // squares carry the wash vocabulary at any time.
+    const fromCount = await page.locator(".landing-square.last-from").count();
+    const toCount = await page.locator(".landing-square.last-to").count();
+    expect(fromCount, `stray last-from on ${pos.id}`).toBe(1);
+    expect(toCount, `stray last-to on ${pos.id}`).toBe(1);
+  }
+
+  // Wash on first mount (index 0, no walk has run).
+  await assertWash(positions[0]);
+
+  // Walk the shelf and assert wash on each landing.
+  for (let i = 0; i < positions.length; i++) {
+    const from = positions[i];
+    await solveLandingPuzzle(page, from);
+    const nextIndex = (i + 1) % positions.length;
+    const next = positions[nextIndex];
+    await expect(shelf).toHaveAttribute("data-puzzle-id", next.id, { timeout: 40000 });
+    await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 40000 });
+    await assertWash(next);
   }
 });
 

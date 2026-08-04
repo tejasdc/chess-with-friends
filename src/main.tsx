@@ -119,6 +119,13 @@ function LandingPuzzleShelf() {
   const [selected, setSelected] = useState<Square | null>(null);
   const [animating, setAnimating] = useState(false);
   const [metrics, setMetrics] = useState<ShelfMetrics | null>(null);
+  // Last-move wash on the from + to squares of the LAST preMove that led
+  // to the current puzzle FEN. Set on first mount (position is already
+  // post-preMove — the walk hasn't run, but the wash represents the
+  // implied history) and after each replay completes. Cleared during
+  // the walk so the transitioning board doesn't hold a wash from the
+  // OUTGOING position.
+  const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
   const stageRef = React.useRef<HTMLDivElement | null>(null);
   const piecesLayerRef = React.useRef<HTMLDivElement | null>(null);
   const pieceEls = React.useRef(new Map<string, HTMLSpanElement>());
@@ -142,14 +149,19 @@ function LandingPuzzleShelf() {
       const rect = node.getBoundingClientRect();
       const stageW = rect.width;
       const stageH = rect.height;
-      const frameInset = stageW * 0.06;
+      // Stage is now aspect-ratio 1/1.18 (see .puzzle-stage in styles.css)
+      // to reserve vertical space for tray zones above and below the
+      // board. Board frame is fixed 88% wide and self-square (CSS
+      // aspect-ratio 1/1) — position it centered in the stage box so
+      // the top/bottom margins hold the tray pieces without clipping.
       const framePad = stageW * 0.0175;
       const frameW = stageW * 0.88;
-      const boardX = frameInset + framePad;
-      const boardY = frameInset + framePad;
       const boardW = frameW - framePad * 2;
+      const boardH = boardW;
+      const boardX = (stageW - boardW) / 2;
+      const boardY = (stageH - boardH) / 2;
       const sqSize = boardW / 8;
-      setMetrics({ stageW, stageH, boardX, boardY, boardW, boardH: boardW, sqSize });
+      setMetrics({ stageW, stageH, boardX, boardY, boardW, boardH, sqSize });
     }
     measure();
     const observer = new ResizeObserver(measure);
@@ -177,16 +189,33 @@ function LandingPuzzleShelf() {
     // real DOM only).
     while (layer.firstChild) layer.removeChild(layer.firstChild);
     pieceEls.current.clear();
-    const next = piecesFromFen(position.fen, metrics);
-    piecesRef.current = next;
-    trayRef.current = [];
+    const onBoard = piecesFromFen(position.fen, metrics);
+    // First-load / non-animated re-seed: populate the trays with the
+    // full off-board complement (every piece from a standard 32-piece
+    // set not currently on the board) so the initial view of the sparse
+    // opener reads with the same visual honesty as later transitions
+    // — captured/absent pieces sit BESIDE the board, not missing.
+    const initialTray = offBoardPieces(position.fen, metrics);
+    piecesRef.current = onBoard;
+    trayRef.current = initialTray;
     gameRef.current = new Chess(position.fen);
-    for (const piece of next) {
+    for (const piece of onBoard) {
+      const el = createLandingPieceEl(piece, metrics);
+      layer.appendChild(el);
+      pieceEls.current.set(piece.id, el);
+    }
+    for (const piece of initialTray) {
       const el = createLandingPieceEl(piece, metrics);
       layer.appendChild(el);
       pieceEls.current.set(piece.id, el);
     }
     setSelected(null);
+    // Wash represents the implied history of the current puzzle FEN —
+    // the last move that led to it. This fires on first mount (index=0)
+    // and on any non-animated reset (error boundary bump); it does NOT
+    // fire during a normal transition (guarded by animatingRef above),
+    // where transitionToNext manages the wash lifecycle explicitly.
+    setLastMove(computeLastMove(position));
   }, [metrics, index]);
 
   useEffect(() => {
@@ -330,6 +359,11 @@ function LandingPuzzleShelf() {
     if (!metrics || animatingRef.current) return;
     setAnimating(true);
     animatingRef.current = true;
+    // Wash on the OUTGOING position is stale for the incoming walk —
+    // clear it while the setup + replay is running; re-set to the new
+    // position's last preMove once the replay has actually shown that
+    // move on the board.
+    setLastMove(null);
     const nextIndex = (index + 1) % shelf.length;
     const nextPosition = shelf[nextIndex];
     setIndex(nextIndex);
@@ -345,6 +379,7 @@ function LandingPuzzleShelf() {
     gameRef.current = new Chess(nextPosition.fen);
     setAnimating(false);
     animatingRef.current = false;
+    setLastMove(computeLastMove(nextPosition));
   }
 
   function applyLandingMove(from: Square, to: Square, m: ShelfMetrics) {
@@ -810,7 +845,13 @@ function LandingPuzzleShelf() {
   }
 
   return (
-    <div className="puzzle-shelf" data-puzzle-id={position.id} data-animating={animating ? "true" : "false"}>
+    <div
+      className="puzzle-shelf"
+      data-puzzle-id={position.id}
+      data-animating={animating ? "true" : "false"}
+      data-last-from={lastMove?.from ?? ""}
+      data-last-to={lastMove?.to ?? ""}
+    >
       <div className="puzzle-stage" ref={stageRef}>
         <div className="landing-board-frame">
           <div className="landing-board" role="grid" aria-label="Landing chess puzzle">
@@ -821,9 +862,17 @@ function LandingPuzzleShelf() {
                 const target = legalTargets.get(square);
                 const showFile = rank === "1";
                 const showRank = file === "a";
+                const isFromLast = lastMove?.from === square;
+                const isToLast = lastMove?.to === square;
                 return (
                   <button
-                    className={`landing-square ${dark ? "dark" : "light"} ${selected === square ? "selected" : ""}`}
+                    className={[
+                      "landing-square",
+                      dark ? "dark" : "light",
+                      selected === square ? "selected" : "",
+                      isFromLast ? "last-from" : "",
+                      isToLast ? "last-to" : "",
+                    ].filter(Boolean).join(" ")}
                     data-square={square}
                     key={square}
                     onClick={() => choose(square)}
@@ -849,9 +898,25 @@ function LandingPuzzleShelf() {
             .remove() and NotFoundError kills the shelf on ~round 3. */}
         <div className="landing-pieces" ref={piecesLayerRef} aria-hidden="true" />
       </div>
-      <p className="puzzle-caption">{position.sideToMove === "w" ? "WHITE" : "BLACK"} TO MOVE · {position.credit}</p>
+      <p className="puzzle-caption">{formatPuzzleCaption(position)}</p>
     </div>
   );
+}
+
+// Caption vocabulary:
+//   Lichess entries (id starts with "lichess-") — side-to-move only.
+//     The lichess.org · <id> handle is random-puzzle noise for a landing
+//     audience; CC0 compliance is carried by the /inspirations page.
+//   Named classics — side-to-move · TITLE · YEAR. The name is the point.
+function formatPuzzleCaption(pos: ShelfPosition): string {
+  const side = pos.sideToMove === "w" ? "WHITE TO MOVE" : "BLACK TO MOVE";
+  if (pos.id.startsWith("lichess-")) return side;
+  return `${side} · ${pos.title.toUpperCase()} · ${extractYear(pos.credit)}`;
+}
+
+function extractYear(credit: string): string {
+  const match = credit.match(/\b(1[0-9]{3}|20[0-9]{2})\b/);
+  return match ? match[1] : credit;
 }
 
 function piecesFromFen(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
@@ -886,6 +951,86 @@ function piecesFromFen(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
     fileIndex += 1;
   }
   return pieces;
+}
+
+// Standard 32-piece set per color. Used by offBoardPieces to compute
+// what pieces "should" be in the position and populate the tray zones
+// with the complement not currently on the board.
+const STANDARD_SET: Record<PieceSymbol, number> = { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 };
+const PIECE_ORDER: PieceSymbol[] = ["q", "r", "b", "n", "p", "k"];
+
+function offBoardPieces(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
+  const board = new Chess(fen).board();
+  const present: Record<Color, Partial<Record<PieceSymbol, number>>> = { w: {}, b: {} };
+  for (const row of board) {
+    for (const cell of row) {
+      if (!cell) continue;
+      present[cell.color][cell.type] = (present[cell.color][cell.type] ?? 0) + 1;
+    }
+  }
+  const missing: Array<{ color: Color; type: PieceSymbol }> = [];
+  for (const color of ["w", "b"] as const) {
+    for (const type of PIECE_ORDER) {
+      const need = STANDARD_SET[type] - (present[color][type] ?? 0);
+      for (let i = 0; i < need; i++) missing.push({ color, type });
+    }
+  }
+  const trayGap = metrics.sqSize * 0.5;
+  const trayYWhite = metrics.boardY + metrics.boardH + metrics.sqSize * 0.5;
+  const trayYBlack = metrics.boardY - metrics.sqSize * 0.55;
+  const half = metrics.sqSize / 2;
+  const startX = metrics.boardX + half;
+  const pieces: ShelfPiece[] = [];
+  const whiteMissing = missing.filter((m) => m.color === "w");
+  const blackMissing = missing.filter((m) => m.color === "b");
+  whiteMissing.forEach((m, i) => {
+    pieces.push({
+      id: `landing-tray-w-${m.type}-${i}`,
+      sq: null,
+      color: "w",
+      type: m.type,
+      char: m.type.toUpperCase(),
+      x: startX + i * trayGap - half,
+      y: trayYWhite - half,
+      rot: 0,
+      live: false,
+      fadeIn: false,
+    });
+  });
+  blackMissing.forEach((m, i) => {
+    pieces.push({
+      id: `landing-tray-b-${m.type}-${i}`,
+      sq: null,
+      color: "b",
+      type: m.type,
+      char: m.type,
+      x: startX + i * trayGap - half,
+      y: trayYBlack - half,
+      rot: 0,
+      live: false,
+      fadeIn: false,
+    });
+  });
+  return pieces;
+}
+
+// Compute the from+to of the LAST preMove that led to the current puzzle
+// FEN. This is the "last move" the wash on the shelf represents. Returns
+// null when a position has no preMoves (shouldn't happen for shipped
+// entries — verify-positions gates it, but keep the guard).
+function computeLastMove(pos: ShelfPosition): { from: Square; to: Square } | null {
+  if (!pos.preMoves || !pos.preMoves.moves.length) return null;
+  const game = new Chess(pos.preMoves.fen);
+  let last: { from: Square; to: Square } | null = null;
+  for (const san of pos.preMoves.moves) {
+    try {
+      const move = game.move(san);
+      if (move) last = { from: move.from as Square, to: move.to as Square };
+    } catch {
+      return null;
+    }
+  }
+  return last;
 }
 
 function squareToXY(sq: Square, metrics: ShelfMetrics) {
@@ -1870,8 +2015,15 @@ function AuthScreen({
           <div className="auth-scene">
             <LandingShelfErrorBoundary><LandingPuzzleShelf /></LandingShelfErrorBoundary>
           </div>
-          <p className="landing-copy">{LANDING_COPY}</p>
         </div>
+        {/* Copy is a DIRECT child of .auth (not nested inside .auth-top)
+            so the parent's justify-content: space-between distributes
+            three items and places the copy at the geometric center of
+            the vertical void between the shelf and the auth row —
+            "centered in the gap, not hugging the caption." On desktop
+            (>=900px), CSS grid-areas re-pair copy with the shelf as one
+            left-column stack. */}
+        <p className="landing-copy">{LANDING_COPY}</p>
         <div className="auth-bottom">
           <form
             className="auth-form"

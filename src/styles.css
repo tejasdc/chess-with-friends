@@ -358,12 +358,17 @@ body[data-screen="inspirations"] .shell {
 /* Mobile landing compression — sandbox board and form take the top,
    auth stack is a flex column not a grid so it lays out predictably. */
 body[data-screen="landing"] .auth {
-  /* Landing composition per mockup Register A: two groups distributed
-     across the viewport via space-between.
-       TOP:    shelf + copy (copy pinned UNDERNEATH the board)
-       BOTTOM: auth row (pinned to the BOTTOM EDGE) + footer
-     The center gap between the groups is the composition — not dead
-     space, not a void. */
+  /* Landing composition per mockup Register A: THREE flex children in a
+     column, distributed via space-between so the middle child (the copy)
+     sits at the geometric center of the remaining space. With three
+     items and space-between, free space is split into TWO equal gaps —
+     one above copy, one below — which is what "copy CENTERED in the gap
+     between top unit and auth row" wants.
+       TOP:    puzzle shelf (board + tray zones + caption) as one unit.
+       MIDDLE: copy — the thesis line, centered in the vertical void.
+       BOTTOM: auth row + footer, pinned to the viewport bottom edge.
+     Copy is a direct child of .auth (not nested inside .auth-top) so
+     space-between can distribute it. */
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -386,11 +391,12 @@ body[data-screen="landing"] .auth-bottom {
   width: 100%;
 }
 body[data-screen="landing"] .auth-top {
-  /* Board + caption + copy read as one unit but need breath between
-     the SUB-units: (board+caption) then (copy). Bumped from 12 →
-     22px per Tejas's spacing verdict — caption is a reference line
-     under the board, copy is the thesis and needs to sit on its own. */
-  gap: 22px;
+  /* Top unit is now just the puzzle shelf (board + trays + caption).
+     Copy has moved OUT to become a separate middle child of .auth so
+     it can center in the gap. Auth-top's internal gap only ever
+     separates the shelf from anything else that might land inside it
+     later; today it holds a single child. */
+  gap: 12px;
 }
 body[data-screen="landing"] .auth-bottom {
   /* Auth row and footer are also coupled — the row is what to do, the
@@ -419,29 +425,39 @@ body[data-screen="landing"] .landing-copy {
   body[data-screen="landing"] .auth-scene { width: min(100%, 94vw, 430px); }
 }
 @media (min-width: 900px) {
-  /* Desktop layout — two-column flex row. Left: shelf + copy stacked.
-     Right: auth row + footer stacked, aligned to the vertical center.
-     Simpler than the previous grid-with-full-width-footer treatment,
-     and keeps the mobile 2-group wrappers as their own semantic
-     containers (no display:contents gymnastics). */
+  /* Desktop layout — two visual columns. Left column stacks shelf +
+     copy; right column is the auth block. Copy is a direct child of
+     .auth on mobile (so space-between can center it in the gap), so on
+     desktop we use grid-areas to re-pair the copy with the shelf. */
   body[data-screen="landing"] .auth {
-    display: flex;
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: minmax(0, min(60vw, 640px)) minmax(0, 400px);
+    grid-template-rows: auto auto;
+    grid-template-areas:
+      "shelf bottom"
+      "copy  bottom";
     align-items: center;
     justify-content: center;
-    gap: 48px;
+    column-gap: 48px;
+    row-gap: 22px;
     padding: 0 24px;
   }
-  body[data-screen="landing"] .auth-top {
-    flex: 0 1 auto;
+  body[data-screen="landing"] .auth > .auth-top {
+    grid-area: shelf;
     align-items: flex-start;
-    max-width: min(60vw, 640px);
+    justify-self: end;
   }
-  body[data-screen="landing"] .auth-bottom {
-    flex: 0 1 auto;
+  body[data-screen="landing"] .auth > .landing-copy {
+    grid-area: copy;
+    justify-self: end;
+    text-align: right;
+    margin: 0;
+  }
+  body[data-screen="landing"] .auth > .auth-bottom {
+    grid-area: bottom;
     align-items: stretch;
-    max-width: 400px;
-    width: 100%;
+    justify-self: start;
+    align-self: center;
   }
 }
 
@@ -859,19 +875,30 @@ body[data-screen="landing"] .landing-copy {
   align-items: center;
 }
 .puzzle-stage {
+  /* Aspect wider-than-tall reserves vertical space for tray zones above
+     and below the board. The board is now vertically centered inside the
+     stage; the top/bottom margins hold the black/white tray rows that
+     previously spilled past the stage box and clipped against the shell's
+     overflow:hidden. Ratio 1/1.18 gives ~9% breath above and below the
+     tray pieces at stageW ≈ tray-piece side, so glyphs render whole. */
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 1 / 1.18;
   overflow: visible;
   -webkit-tap-highlight-color: transparent;
 }
 .landing-board-frame {
+  /* Board frame centered inside the taller stage. Uses translate to
+     center rather than percentage top/height (which would stop being
+     square once stage aspect ≠ 1). Frame carries its own aspect-ratio
+     1/1 so it stays square while the stage grows in height. */
   position: absolute;
-  left: 6%;
-  top: 6%;
+  left: 50%;
+  top: 50%;
   width: 88%;
-  height: 88%;
+  aspect-ratio: 1 / 1;
   padding: 1.75%;
+  transform: translate(-50%, -50%);
   background: var(--teak);
   box-shadow:
     inset 0 1px 0 color-mix(in oklab, var(--cream) 18%, transparent),
@@ -919,6 +946,27 @@ body[data-screen="landing"] .landing-copy {
 .landing-square.dark.selected::after { border-color: var(--cream); }
 .landing-square.dark .legal-dot { background: var(--paper); }
 .landing-square.dark .legal-capture { border-color: var(--paper); }
+/* LAST-MOVE wash on the landing shelf — same vocabulary as the game board
+   (see .square.last-from/.last-to below). Wash lives on the from + to
+   squares of the LAST preMove that led to the current puzzle FEN. No
+   border; only a tint of the underlying square color. Selection remains
+   the ONLY border on the board. */
+.landing-square.last-from.light,
+.landing-square.last-to.light {
+  background: color-mix(in oklab, var(--paper) 62%, var(--cream));
+}
+.landing-square.last-from.dark,
+.landing-square.last-to.dark {
+  background: color-mix(in oklab, var(--walnut) 58%, var(--cream));
+}
+.landing-square.last-from.light:hover:not(:disabled),
+.landing-square.last-to.light:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--paper-2) 62%, var(--cream));
+}
+.landing-square.last-from.dark:hover:not(:disabled),
+.landing-square.last-to.dark:hover:not(:disabled) {
+  background: color-mix(in oklab, color-mix(in oklab, var(--walnut) 85%, var(--ink)) 58%, var(--cream));
+}
 .landing-pieces {
   position: absolute;
   inset: 0;
