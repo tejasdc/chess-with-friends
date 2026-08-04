@@ -359,11 +359,20 @@ function LandingPuzzleShelf() {
     if (!metrics || animatingRef.current) return;
     setAnimating(true);
     animatingRef.current = true;
-    // Wash on the OUTGOING position is stale for the incoming walk —
-    // clear it while the setup + replay is running; re-set to the new
-    // position's last preMove once the replay has actually shown that
-    // move on the board.
+    // A new puzzle is a NEW GAME. Clear every trace of the outgoing
+    // puzzle's transient state (Tejas 2026-08-04: after solving, the
+    // next puzzle showed the previous move's square marked "kind of
+    // like selected"). React-owned state: selected, lastMove. Ref-
+    // mirrored: selectedRef. Imperative DOM: the piece-selected class
+    // added by the [selected] effect on the pieces layer. Belt-and-
+    // suspenders — clear all four synchronously here so nothing lingers
+    // across the walk. The [selected] effect will also fire and drop
+    // classes, but doing it imperatively too guards against React
+    // scheduling gaps on mobile Safari.
+    setSelected(null);
+    selectedRef.current = null;
     setLastMove(null);
+    for (const el of pieceEls.current.values()) el.classList.remove("selected");
     const nextIndex = (index + 1) % shelf.length;
     const nextPosition = shelf[nextIndex];
     setIndex(nextIndex);
@@ -1664,43 +1673,38 @@ function InspirationsPage() {
         means walking through a casino to reach them. This app is built to
         avoid that.
       </p>
-      <ul className="insp-list">
-        <li>
-          <strong>Alexander Rodchenko</strong> · Chess table for the USSR
-          Workers' Club, 1925. Two chairs and a board built as one piece of
-          furniture.
-          <figure className="insp-figure">
-            <img
-              src="/rodchenko-chess-table.jpg"
-              alt="Rodchenko's chess table for the USSR Workers' Club, 1925 design. Two chairs and a chess table built as one piece of furniture. Photograph of a 2021 reconstruction at Château La Gaffelière."
-              loading="lazy"
-              width={683}
-              height={582}
-            />
-            <figcaption className="insp-figcaption">
-              2021 reconstruction of the 1925 design, Château La Gaffelière, Saint-Émilion.
-              Photograph by Bapak Alex,{" "}
-              <a href="https://commons.wikimedia.org/wiki/File:Chess_table_From_the_Workers_Club.jpg" target="_blank" rel="noreferrer">
-                Wikimedia Commons
-              </a>
-              {" "}·{" "}
-              <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a>.
-            </figcaption>
-          </figure>
-          <p className="insp-note">
-            The Workers' Club reconceived leisure as active and collective
-            rather than passive and solitary.
-          </p>
-        </li>
-        <li>
-          <strong>Virgilio Villalba</strong> · Untitled, 1955. The palette on
-          this page comes from this painting: celadon, cream, teak, navy.
-        </li>
-        <li>
-          Puzzle positions from{" "}
-          <a href="https://lichess.org/database">lichess.org/database</a>, CC0.
-        </li>
-      </ul>
+      <p className="insp-body">
+        The design and the icon come from Alexander Rodchenko's Workers' Club,
+        1925. The Workers' Club reconceived leisure as active and collective
+        rather than passive and solitary, and chess was part of it.
+      </p>
+      <figure className="insp-figure">
+        <img
+          src="/rodchenko-chess-table.jpg"
+          alt="Rodchenko's chess table for the USSR Workers' Club, 1925 design. Two chairs and a chess table built as one piece of furniture. Photograph of a 2021 reconstruction at Château La Gaffelière."
+          loading="lazy"
+          width={683}
+          height={582}
+        />
+        <figcaption className="insp-figcaption">
+          The chess table for the USSR Workers' Club. Two chairs and a board
+          built as one piece of furniture. A 2021 reconstruction; photograph
+          by Bapak Alex,{" "}
+          <a href="https://commons.wikimedia.org/wiki/File:Chess_table_From_the_Workers_Club.jpg" target="_blank" rel="noreferrer">
+            Wikimedia Commons
+          </a>
+          {", "}
+          <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a>.
+        </figcaption>
+      </figure>
+      <p className="insp-body">
+        The palette comes from Virgilio Villalba's Untitled, 1955: celadon,
+        cream, teak, navy.
+      </p>
+      <p className="insp-body">
+        Puzzle positions from{" "}
+        <a href="https://lichess.org/database">lichess.org/database</a>, CC0.
+      </p>
       <MadeByTejas />
     </div>
   );
@@ -2028,15 +2032,15 @@ function AuthScreen({
             <LandingShelfErrorBoundary><LandingPuzzleShelf /></LandingShelfErrorBoundary>
           </div>
         </div>
-        {/* Copy is a DIRECT child of .auth (not nested inside .auth-top)
-            so the parent's justify-content: space-between distributes
-            three items and places the copy at the geometric center of
-            the vertical void between the shelf and the auth row —
-            "centered in the gap, not hugging the caption." On desktop
-            (>=900px), CSS grid-areas re-pair copy with the shelf as one
-            left-column stack. */}
-        <p className="landing-copy">{LANDING_COPY}</p>
+        {/* BOTTOM GROUP (Tejas 2026-08-04): copy + auth row + footer read
+            as one unit at the bottom of the viewport. Reverses the
+            earlier geometric-centering pass — grouped-with-buttons won.
+            .auth is space-between over TWO children (auth-top, auth-
+            bottom); .auth-bottom stacks copy → auth-row → made-by. On
+            desktop (>=900px) the right column is the same stack; the
+            left column is the puzzle-shelf. */}
         <div className="auth-bottom">
+          <p className="landing-copy">{LANDING_COPY}</p>
           <form
             className="auth-form"
             onSubmit={(event) => {

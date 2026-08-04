@@ -914,6 +914,28 @@ test(`replay wash lands on the last preMove's from+to for every landing position
   for (let i = 0; i < positions.length; i++) {
     const from = positions[i];
     await solveLandingPuzzle(page, from);
+    // Mid-transition assertion (Tejas 2026-08-04): while the walk is
+    // in flight (data-animating="true"), NO wash should be visible.
+    // Outgoing wash must clear synchronously at transition start; new
+    // wash appears only after replayMoves lands. Also assert no square
+    // carries the .selected class — a new puzzle is a new game, all
+    // selection state must be null.
+    await expect(shelf).toHaveAttribute("data-animating", "true", { timeout: 6000 });
+    const midTransition = await page.evaluate(() => {
+      const s = document.querySelector(".puzzle-shelf");
+      return {
+        dataFrom: s?.getAttribute("data-last-from") ?? "",
+        dataTo: s?.getAttribute("data-last-to") ?? "",
+        lastFromClasses: document.querySelectorAll(".landing-square.last-from").length,
+        lastToClasses: document.querySelectorAll(".landing-square.last-to").length,
+        selectedClasses: document.querySelectorAll(".landing-square.selected").length,
+      };
+    });
+    expect(midTransition.dataFrom, `mid-transition on solve→${(i + 1) % positions.length}: data-last-from should be cleared`).toBe("");
+    expect(midTransition.dataTo, `mid-transition: data-last-to should be cleared`).toBe("");
+    expect(midTransition.lastFromClasses, `mid-transition: no .last-from squares should be present`).toBe(0);
+    expect(midTransition.lastToClasses, `mid-transition: no .last-to squares should be present`).toBe(0);
+    expect(midTransition.selectedClasses, `mid-transition: no .selected squares should be present`).toBe(0);
     const nextIndex = (i + 1) % positions.length;
     const next = positions[nextIndex];
     await expect(shelf).toHaveAttribute("data-puzzle-id", next.id, { timeout: 40000 });

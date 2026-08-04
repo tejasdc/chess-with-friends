@@ -1,22 +1,5 @@
 [
   {
-    "id": "lichess-OlMV0",
-    "title": "Mate in 1",
-    "credit": "lichess.org · OlMV0",
-    "fen": "6Q1/p5q1/2p4p/3p2k1/P1pP2P1/2P2PK1/2r5/8 w - - 0 42",
-    "sideToMove": "w",
-    "solution": {
-      "from": "g8",
-      "to": "g7"
-    },
-    "preMoves": {
-      "fen": "6Q1/p5R1/2p3qp/3p2k1/P1pP2P1/2P2PK1/2r5/8 b - - 9 41",
-      "moves": [
-        "Qxg7"
-      ]
-    }
-  },
-  {
     "id": "scholars-mate-1656",
     "title": "Scholar's mate",
     "credit": "Francis Beale, 1656",
@@ -32,6 +15,62 @@
     "solution": {
       "from": "h5",
       "to": "f7"
+    }
+  },
+  {
+    "id": "opera-house-final",
+    "title": "Opera-house mate",
+    "credit": "Morphy vs Duke Karl & Count Isouard, Paris 1858",
+    "fen": "1n2kb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2KR4 w k - 0 17",
+    "preMoves": {
+      "fen": "4kb1r/p2B1ppp/4qn2/4p1B1/4P3/1Q6/PPP2PPP/2KR4 b k - 0 15",
+      "moves": [
+        "Nxd7",
+        "Qb8+",
+        "Nxb8"
+      ]
+    },
+    "sideToMove": "w",
+    "solution": {
+      "from": "d1",
+      "to": "d8"
+    }
+  },
+  {
+    "id": "fools-mate-1836",
+    "title": "Fool's mate",
+    "credit": "Traditional; earliest published 1836",
+    "fen": "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
+    "preMoves": {
+      "fen": "rnbqkbnr/pppppppp/8/8/8/5P2/PPPPP1PP/RNBQKBNR b KQkq - 0 1",
+      "moves": [
+        "e5",
+        "g4"
+      ]
+    },
+    "sideToMove": "b",
+    "solution": {
+      "from": "d8",
+      "to": "h4"
+    }
+  },
+  {
+    "id": "legal-mate-1750",
+    "title": "Legal's mate",
+    "credit": "Kermur de Legal, c. 1750",
+    "fen": "rn1q1bnr/ppp1kB1p/3p2p1/4N3/4P3/2N5/PPPP1PPP/R1BbK2R w KQ - 1 7",
+    "preMoves": {
+      "fen": "rn1qkbnr/ppp2p1p/3p2p1/4N3/2B1P1b1/2N5/PPPP1PPP/R1BQK2R b KQkq - 0 5",
+      "moves": [
+        "Bxd1",
+        "Bxf7+",
+        "Ke7"
+      ]
+    },
+    "sideToMove": "w",
+    "solution": {
+      "from": "c3",
+      "to": "d5"
     }
   },
   {
@@ -52,22 +91,88 @@
     }
   },
   {
-    "id": "legal-mate-1750",
-    "title": "Legal's mate",
-    "credit": "Kermur de Legal, c. 1750",
-    "fen": "rn1q1bnr/ppp1kB1p/3p2p1/4N3/4P3/2N5/PPPP1PPP/R1BbK2R w KQ - 1 7",
-    "preMoves": {
-      "fen": "rn1qkbnr/ppp2p1p/3p2p1/4N3/2B1P1b1/2N5/PPPP1PPP/R1BQK2R b KQkq - 0 5",
-      "moves": [
-        "Bxd1",
-        "Bxf7+",
-        "Ke7"
-      ]
-    },
+    "id": "lichess-m4e8L",
+    "title": "Mate in 1",
+    "credit": "lichess.org · m4e8L",
+    "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B5/2NP4/PPP2PPP/R1BbK2R w KQkq - 0 8",
     "sideToMove": "w",
     "solution": {
-      "from": "c3",
-      "to": "d5"
+      "from": "c4",
+      "to": "f7"
+    },
+    "preMoves": {
+      "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B3b1/2NP4/PPP2PPP/R1BQK2R b KQkq - 0 7",
+      "moves": [
+        "Bxd1"
+      ]
+    }
+  },
+  {
+    "id": "lichess-OlMV0",
+    "title": "Mate in 1",
+    "credit": "lichess.org · OlMV0",
+    "fen": "6Q1/p5q1/2p4p/3p2k1/P1pP2P1/2P2PK1/2r5/8 w - - 0 42",
+    "sideToMove": "w",
+    "solution": {
+      "from": "g8",
+      "to": "g7"
+    },
+    "preMoves": {
+      "fen": "6Q1/p5R1/2p3qp/3p2k1/P1pP2P1/2P2PK1/2r5/8 b - - 9 41",
+      "moves": [
+        "Qxg7"
+      ]
+    }
+  },
+  {
+    "id": "lichess-suVtA",
+    "title": "Mate in 1",
+    "credit": "lichess.org · suVtA",
+    "fen": "2kr1b1r/pppb2p1/2np1pN1/3NqP1p/4P1n1/3B4/PPP3PP/R1B1QRK1 b - - 2 14",
+    "sideToMove": "b",
+    "solution": {
+      "from": "e5",
+      "to": "h2"
+    },
+    "preMoves": {
+      "fen": "2kr1b1r/pppb2p1/2np1p2/3NqP1p/4P1nN/3B4/PPP3PP/R1B1QRK1 w - - 1 14",
+      "moves": [
+        "Ng6"
+      ]
+    }
+  },
+  {
+    "id": "lichess-Td2XT",
+    "title": "Mate in 1",
+    "credit": "lichess.org · Td2XT",
+    "fen": "r5k1/1p6/4b2p/2p1b3/p1P1QpqP/1P4P1/P4P1K/3R1NR1 b - - 0 35",
+    "sideToMove": "b",
+    "solution": {
+      "from": "g4",
+      "to": "h3"
+    },
+    "preMoves": {
+      "fen": "r5k1/1p6/4b2p/2p1b3/p1P1ppqP/1P4P1/P1Q2P1K/3R1NR1 w - - 0 35",
+      "moves": [
+        "Qxe4"
+      ]
+    }
+  },
+  {
+    "id": "lichess-9KjBu",
+    "title": "Mate in 1",
+    "credit": "lichess.org · 9KjBu",
+    "fen": "1rbnkb1r/1p2pppp/p4n2/1N2N3/2B5/8/PP3PPP/R1B1K2R w KQk - 0 11",
+    "sideToMove": "w",
+    "solution": {
+      "from": "b5",
+      "to": "c7"
+    },
+    "preMoves": {
+      "fen": "1rbnkb1r/pp2pppp/5n2/1N2N3/2B5/8/PP3PPP/R1B1K2R b KQk - 0 10",
+      "moves": [
+        "a6"
+      ]
     }
   },
   {
@@ -105,71 +210,36 @@
     }
   },
   {
-    "id": "fools-mate-1836",
-    "title": "Fool's mate",
-    "credit": "Traditional; earliest published 1836",
-    "fen": "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
-    "preMoves": {
-      "fen": "rnbqkbnr/pppppppp/8/8/8/5P2/PPPPP1PP/RNBQKBNR b KQkq - 0 1",
-      "moves": [
-        "e5",
-        "g4"
-      ]
-    },
-    "sideToMove": "b",
-    "solution": {
-      "from": "d8",
-      "to": "h4"
-    }
-  },
-  {
-    "id": "lichess-Td2XT",
+    "id": "lichess-cVJhU",
     "title": "Mate in 1",
-    "credit": "lichess.org · Td2XT",
-    "fen": "r5k1/1p6/4b2p/2p1b3/p1P1QpqP/1P4P1/P4P1K/3R1NR1 b - - 0 35",
-    "sideToMove": "b",
+    "credit": "lichess.org · cVJhU",
+    "fen": "2kr1q1r/pbpp3p/1pn2p2/2bN2B1/2B5/6Q1/PPP2PPP/R4RK1 w - - 0 15",
+    "sideToMove": "w",
     "solution": {
-      "from": "g4",
-      "to": "h3"
+      "from": "g3",
+      "to": "c7"
     },
     "preMoves": {
-      "fen": "r5k1/1p6/4b2p/2p1b3/p1P1ppqP/1P4P1/P1Q2P1K/3R1NR1 w - - 0 35",
+      "fen": "2kr1q1r/pbpp2pp/1pn2P2/2bN2B1/2B5/6Q1/PPP2PPP/R4RK1 b - - 0 14",
       "moves": [
-        "Qxe4"
+        "gxf6"
       ]
     }
   },
   {
-    "id": "lichess-suVtA",
+    "id": "lichess-rFKz2",
     "title": "Mate in 1",
-    "credit": "lichess.org · suVtA",
-    "fen": "2kr1b1r/pppb2p1/2np1pN1/3NqP1p/4P1n1/3B4/PPP3PP/R1B1QRK1 b - - 2 14",
+    "credit": "lichess.org · rFKz2",
+    "fen": "Q7/5pk1/3p2p1/2p1b3/8/5q1p/R2R1P2/5QK1 b - - 0 50",
     "sideToMove": "b",
     "solution": {
-      "from": "e5",
+      "from": "h3",
       "to": "h2"
     },
     "preMoves": {
-      "fen": "2kr1b1r/pppb2p1/2np1p2/3NqP1p/4P1nN/3B4/PPP3PP/R1B1QRK1 w - - 1 14",
+      "fen": "8/P4pk1/3p2p1/2p1b3/8/5q1p/R2R1P2/5QK1 w - - 1 50",
       "moves": [
-        "Ng6"
-      ]
-    }
-  },
-  {
-    "id": "lichess-aCFms",
-    "title": "Mate in 1",
-    "credit": "lichess.org · aCFms",
-    "fen": "2rQq2k/1p3p1p/4bp2/p3p3/7P/P4P2/NPr5/1K1R2R1 w - - 4 27",
-    "sideToMove": "w",
-    "solution": {
-      "from": "d8",
-      "to": "f6"
-    },
-    "preMoves": {
-      "fen": "2rQ3k/1p3p1p/4bp2/p3p3/q6P/P4P2/NPr5/1K1R2R1 b - - 3 26",
-      "moves": [
-        "Qe8"
+        "a8=Q"
       ]
     }
   },
@@ -208,19 +278,36 @@
     }
   },
   {
-    "id": "lichess-m4e8L",
+    "id": "lichess-ynqQC",
     "title": "Mate in 1",
-    "credit": "lichess.org · m4e8L",
-    "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B5/2NP4/PPP2PPP/R1BbK2R w KQkq - 0 8",
+    "credit": "lichess.org · ynqQC",
+    "fen": "r2q1rbk/pp5p/2np2PQ/2p5/4P1p1/2PP4/PP4BP/R4RK1 w - - 1 19",
     "sideToMove": "w",
     "solution": {
-      "from": "c4",
-      "to": "f7"
+      "from": "g6",
+      "to": "g7"
     },
     "preMoves": {
-      "fen": "rn1qkb1r/pp2pp1p/5np1/2p1N3/2B3b1/2NP4/PPP2PPP/R1BQK2R b KQkq - 0 7",
+      "fen": "r2q1r1k/pp5p/2np2PQ/2pb4/4P1p1/2PP4/PP4BP/R4RK1 b - - 0 18",
       "moves": [
-        "Bxd1"
+        "Bg8"
+      ]
+    }
+  },
+  {
+    "id": "lichess-aCFms",
+    "title": "Mate in 1",
+    "credit": "lichess.org · aCFms",
+    "fen": "2rQq2k/1p3p1p/4bp2/p3p3/7P/P4P2/NPr5/1K1R2R1 w - - 4 27",
+    "sideToMove": "w",
+    "solution": {
+      "from": "d8",
+      "to": "f6"
+    },
+    "preMoves": {
+      "fen": "2rQ3k/1p3p1p/4bp2/p3p3/q6P/P4P2/NPr5/1K1R2R1 b - - 3 26",
+      "moves": [
+        "Qe8"
       ]
     }
   },
@@ -242,106 +329,19 @@
     }
   },
   {
-    "id": "lichess-9KjBu",
+    "id": "lichess-3FjeC",
     "title": "Mate in 1",
-    "credit": "lichess.org · 9KjBu",
-    "fen": "1rbnkb1r/1p2pppp/p4n2/1N2N3/2B5/8/PP3PPP/R1B1K2R w KQk - 0 11",
-    "sideToMove": "w",
-    "solution": {
-      "from": "b5",
-      "to": "c7"
-    },
-    "preMoves": {
-      "fen": "1rbnkb1r/pp2pppp/5n2/1N2N3/2B5/8/PP3PPP/R1B1K2R b KQk - 0 10",
-      "moves": [
-        "a6"
-      ]
-    }
-  },
-  {
-    "id": "lichess-ynqQC",
-    "title": "Mate in 1",
-    "credit": "lichess.org · ynqQC",
-    "fen": "r2q1rbk/pp5p/2np2PQ/2p5/4P1p1/2PP4/PP4BP/R4RK1 w - - 1 19",
-    "sideToMove": "w",
-    "solution": {
-      "from": "g6",
-      "to": "g7"
-    },
-    "preMoves": {
-      "fen": "r2q1r1k/pp5p/2np2PQ/2pb4/4P1p1/2PP4/PP4BP/R4RK1 b - - 0 18",
-      "moves": [
-        "Bg8"
-      ]
-    }
-  },
-  {
-    "id": "opera-house-final",
-    "title": "Opera-house mate",
-    "credit": "Morphy vs Duke Karl & Count Isouard, Paris 1858",
-    "fen": "1n2kb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2KR4 w k - 0 17",
-    "preMoves": {
-      "fen": "4kb1r/p2B1ppp/4qn2/4p1B1/4P3/1Q6/PPP2PPP/2KR4 b k - 0 15",
-      "moves": [
-        "Nxd7",
-        "Qb8+",
-        "Nxb8"
-      ]
-    },
-    "sideToMove": "w",
-    "solution": {
-      "from": "d1",
-      "to": "d8"
-    }
-  },
-  {
-    "id": "lichess-rFKz2",
-    "title": "Mate in 1",
-    "credit": "lichess.org · rFKz2",
-    "fen": "Q7/5pk1/3p2p1/2p1b3/8/5q1p/R2R1P2/5QK1 b - - 0 50",
+    "credit": "lichess.org · 3FjeC",
+    "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2P5/P4BPP/R2KR3 b - - 0 25",
     "sideToMove": "b",
     "solution": {
-      "from": "h3",
-      "to": "h2"
+      "from": "a5",
+      "to": "a4"
     },
     "preMoves": {
-      "fen": "8/P4pk1/3p2p1/2p1b3/8/5q1p/R2R1P2/5QK1 w - - 1 50",
+      "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2n5/PP3BPP/R2KR3 w - - 0 25",
       "moves": [
-        "a8=Q"
-      ]
-    }
-  },
-  {
-    "id": "lichess-cVJhU",
-    "title": "Mate in 1",
-    "credit": "lichess.org · cVJhU",
-    "fen": "2kr1q1r/pbpp3p/1pn2p2/2bN2B1/2B5/6Q1/PPP2PPP/R4RK1 w - - 0 15",
-    "sideToMove": "w",
-    "solution": {
-      "from": "g3",
-      "to": "c7"
-    },
-    "preMoves": {
-      "fen": "2kr1q1r/pbpp2pp/1pn2P2/2bN2B1/2B5/6Q1/PPP2PPP/R4RK1 b - - 0 14",
-      "moves": [
-        "gxf6"
-      ]
-    }
-  },
-  {
-    "id": "lichess-veeZB",
-    "title": "Mate in 1",
-    "credit": "lichess.org · veeZB",
-    "fen": "8/6pk/7p/1p2BK2/2pP1P1Q/2P5/PP4qP/8 b - - 10 39",
-    "sideToMove": "b",
-    "solution": {
-      "from": "g2",
-      "to": "g6"
-    },
-    "preMoves": {
-      "fen": "8/6pk/7p/1p2B3/2pPKP1Q/2P5/PP4qP/8 w - - 9 39",
-      "moves": [
-        "Kf5"
+        "bxc3"
       ]
     }
   },
@@ -364,19 +364,19 @@
     }
   },
   {
-    "id": "lichess-3FjeC",
+    "id": "lichess-veeZB",
     "title": "Mate in 1",
-    "credit": "lichess.org · 3FjeC",
-    "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2P5/P4BPP/R2KR3 b - - 0 25",
+    "credit": "lichess.org · veeZB",
+    "fen": "8/6pk/7p/1p2BK2/2pP1P1Q/2P5/PP4qP/8 b - - 10 39",
     "sideToMove": "b",
     "solution": {
-      "from": "a5",
-      "to": "a4"
+      "from": "g2",
+      "to": "g6"
     },
     "preMoves": {
-      "fen": "2k5/pp3p2/2p1rp1b/q7/3P2Q1/2n5/PP3BPP/R2KR3 w - - 0 25",
+      "fen": "8/6pk/7p/1p2B3/2pPKP1Q/2P5/PP4qP/8 w - - 9 39",
       "moves": [
-        "bxc3"
+        "Kf5"
       ]
     }
   },

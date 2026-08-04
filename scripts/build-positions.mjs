@@ -195,33 +195,52 @@ function squareDelta(a, b) {
   return d;
 }
 
-// FIRST-PUZZLE PIN — the front door needs to be an EASY, SPARSE,
-// INVITING mate (few pieces, obvious mate) so a new visitor sees
-// "you can play this," not a dense midgame. lichess-OlMV0 is 15
-// pieces, White plays Qg7# — adjacent-to-king queen, iconic pattern,
-// zero deep thought. Team-lead's spec. If it stops satisfying that
-// standard, swap the id here; ordering re-flows from whatever's
-// first via the greedy density walk below.
-const FIRST_PUZZLE_ID = "lichess-OlMV0";
+// FAMOUS-FIRST SHELF ORDER — supersedes the sparse-opener pin (Tejas
+// 2026-08-04). The well-attributed classics open the shelf so a new
+// visitor's first puzzle carries a real name and a real story, not
+// random-puzzle noise. Order:
+//   1. FIRST_PUZZLE_ID (Scholars' mate — Tejas-approved opener: good
+//      attribution, nice puzzle).
+//   2. Remaining classics clustered at the front, ordered by density
+//      from the opener.
+//   3. Unnamed lichess entries, ordered by transition density from the
+//      last classic.
+// This keeps transition-density flow WITHIN each group, so the walk
+// still reads as change-per-step while the identity of the shelf leads
+// with named history.
+const FIRST_PUZZLE_ID = "scholars-mate-1656";
 const firstIdx = shipped.findIndex((entry) => entry.id === FIRST_PUZZLE_ID);
 if (firstIdx < 0) throw new Error(`FIRST_PUZZLE_ID ${FIRST_PUZZLE_ID} not in shelf`);
 const first = shipped[firstIdx];
 const rest = shipped.filter((_, i) => i !== firstIdx);
-const ordered = [first];
-const pool = rest.slice();
-while (pool.length) {
-  const currentGrid = pieceGrid(ordered[ordered.length - 1].fen);
-  let bestIdx = 0;
-  let bestDelta = -1;
-  for (let i = 0; i < pool.length; i++) {
-    const d = squareDelta(currentGrid, pieceGrid(pool[i].fen));
-    if (d > bestDelta) {
-      bestDelta = d;
-      bestIdx = i;
+const isClassic = (entry) => !entry.id.startsWith("lichess-");
+const restClassics = rest.filter(isClassic);
+const restLichess = rest.filter((entry) => !isClassic(entry));
+
+// Density-ordered walk within a pool, starting from a given anchor entry.
+function densityWalk(anchor, pool) {
+  const out = [];
+  const p = pool.slice();
+  let last = anchor;
+  while (p.length) {
+    const lastGrid = pieceGrid(last.fen);
+    let bestIdx = 0;
+    let bestDelta = -1;
+    for (let i = 0; i < p.length; i++) {
+      const d = squareDelta(lastGrid, pieceGrid(p[i].fen));
+      if (d > bestDelta) { bestDelta = d; bestIdx = i; }
     }
+    const [next] = p.splice(bestIdx, 1);
+    out.push(next);
+    last = next;
   }
-  ordered.push(pool.splice(bestIdx, 1)[0]);
+  return out;
 }
+
+const classicsAfterFirst = densityWalk(first, restClassics);
+const lastClassic = classicsAfterFirst.length ? classicsAfterFirst[classicsAfterFirst.length - 1] : first;
+const lichessOrdered = densityWalk(lastClassic, restLichess);
+const ordered = [first, ...classicsAfterFirst, ...lichessOrdered];
 
 for (const entry of ordered) verifyEntry(entry);
 
