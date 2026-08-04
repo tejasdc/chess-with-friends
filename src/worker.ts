@@ -247,6 +247,23 @@ async function readJson<T>(request: Request): Promise<T> {
   return (await request.json()) as T;
 }
 
+// State-smith GAP-13: cap the lifetime of ephemeral WebAuthn challenge
+// records. Both maps accumulate one entry per (handle | userId) probe;
+// old entries are unusable once a fresh /options overwrites them, but
+// probes for handles that never verify would sit forever otherwise.
+// 10-minute lifetime is generously past the WebAuthn dialog's own 60s
+// timeout and covers slow user-verification steps on some devices.
+const CHALLENGE_TTL_MS = 10 * 60 * 1000;
+function sweepExpiredChallenges(db: AppDb) {
+  const cutoff = Date.now() - CHALLENGE_TTL_MS;
+  for (const [handle, record] of Object.entries(db.registrationChallenges)) {
+    if (record.createdAt < cutoff) delete db.registrationChallenges[handle];
+  }
+  for (const [userId, record] of Object.entries(db.authenticationChallenges)) {
+    if (record.createdAt < cutoff) delete db.authenticationChallenges[userId];
+  }
+}
+
 function cleanHandle(handle: string) {
   return handle.trim().toLowerCase().replace(/^@/, "");
 }
@@ -435,6 +452,7 @@ export class AppDO extends DurableObject<Env> {
         return await this.declineSchedule(url.pathname.split("/")[3], user);
       }
       if (url.pathname === "/api/debug/push-log" && request.method === "GET") return await this.debugPushLog(request);
+      if (url.pathname === "/_debug/tick" && request.method === "POST") return await this.debugTick(request);
 
       return json({ error: "Not found" }, { status: 404 });
     } catch (error) {
@@ -554,6 +572,12 @@ export class AppDO extends DurableObject<Env> {
     const url = new URL(request.url);
     const body = await readJson<{ handle: string; response: RegistrationResponseJSON }>(request);
     const handle = cleanHandle(body.handle || "");
+    // Lazy TTL sweep (state-smith GAP-13): drop expired challenges on
+    // every verify so accumulated ephemeral state doesn't grow
+    // unbounded and won't ever be reused past its lifetime. Challenges
+    // beyond CHALLENGE_TTL_MS (10 min) are unusable anyway — the
+    // WebAuthn spec's own timeout is 60s.
+    sweepExpiredChallenges(db);
     const pending = db.registrationChallenges[handle];
     if (!pending) throw new Error("Registration expired. Try again.");
     const { rpID, origin } = rpInfo(request);
@@ -618,6 +642,8 @@ export class AppDO extends DurableObject<Env> {
     const userId = db.handleToUserId[handle];
     const user = userId ? db.users[userId] : undefined;
     if (!user) throw new Error("No account with that handle.");
+    // Lazy TTL sweep (state-smith GAP-13) — same story as registrationVerify.
+    sweepExpiredChallenges(db);
     const pending = db.authenticationChallenges[user.id];
     if (!pending) throw new Error("Login expired. Try again.");
     const credential = user.credentials.find((item) => item.id === body.response.id);
@@ -1089,10 +1115,20 @@ export class AppDO extends DurableObject<Env> {
     const pending: PendingPush = { id: newId("psh"), type, body, url, createdAt: Date.now() };
     db.pendingPushesByEndpoint ||= {};
     const subscriptions = db.pushSubscriptions[userId] || [];
+    // Endpoints the push gateway reports as dead (410 Gone or 404). These
+    // are removed in the same transaction as the log write (state-smith
+    // GAP-12) so the server stops trying to push to browsers that have
+    // revoked the subscription.
+    const dead = new Set<string>();
     for (const subscription of subscriptions) {
       db.pendingPushesByEndpoint[subscription.endpoint] = [...(db.pendingPushesByEndpoint[subscription.endpoint] || []), pending].slice(-20);
       const result = await sendWebPush(subscription, this.env);
       db.pushLog.push({ type, userId, createdAt: Date.now(), delivered: result.delivered, status: result.status });
+      if (result.status === 410 || result.status === 404) dead.add(subscription.endpoint);
+    }
+    if (dead.size) {
+      db.pushSubscriptions[userId] = subscriptions.filter((s) => !dead.has(s.endpoint));
+      for (const endpoint of dead) delete db.pendingPushesByEndpoint[endpoint];
     }
     if (subscriptions.length === 0) {
       db.pendingPushes[userId] = [...(db.pendingPushes[userId] || []), pending].slice(-20);
@@ -1135,12 +1171,60 @@ export class AppDO extends DurableObject<Env> {
     return json({ pushTypes: PUSH_TYPES, pushLog: db.pushLog, pendingPushes: db.pendingPushes });
   }
 
+  // Time-warp harness for alarm-driven behaviors (state-smith GAP-16).
+  // Runs the alarm loop AS IF the current time were the `now` value in
+  // the request body. Guarded by x-debug-local (same gate as
+  // debugPushLog). Enables adversity tests for schedule zombie sweep
+  // (GAP-7) and recurring alarm advancement without wall-clock waits.
+  //
+  // Behavior: fetch pending/accepted schedules, mutate their startAt /
+  // nextFireAt so the alarm evaluates them at `now`, run alarm(), then
+  // restore original timestamps on records that WEREN'T terminally
+  // consumed (fired one-offs and expired zombies keep their new
+  // terminal status; recurring accepteds get their nextFireAt rolled
+  // back to what the alarm produced). Idempotent, isolated to schedules.
+  private async debugTick(request: Request) {
+    if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
+    const body = await readJson<{ now?: number }>(request).catch(() => ({} as { now?: number }));
+    const target = typeof body.now === "number" ? body.now : Date.now();
+    const db = await this.db();
+    // Shift ONLY schedules relevant to the tick — pending zombies past
+    // startAt, and accepted schedules whose nextFireAt is <= target.
+    // We rewrite their timestamps to be <= now so alarm() picks them up
+    // this tick, then remember originals for restoration.
+    const now = Date.now();
+    const originals: Record<string, { startAt: number; nextFireAt?: number }> = {};
+    for (const s of Object.values(db.schedules)) {
+      if (s.status === "pending" && s.startAt <= target) {
+        originals[s.id] = { startAt: s.startAt, nextFireAt: s.nextFireAt };
+        // Move startAt into the past so the alarm's zombie sweep fires.
+        s.startAt = now - 120_000; // safely past 60s ZOMBIE_GRACE_MS
+      } else if (s.status === "accepted" && (s.nextFireAt ?? s.startAt) <= target) {
+        originals[s.id] = { startAt: s.startAt, nextFireAt: s.nextFireAt };
+        s.nextFireAt = now - 1;
+      }
+    }
+    await this.save(db);
+    await this.alarm();
+    return json({ tick: target, moved: Object.keys(originals).length });
+  }
+
 }
 
 export class GameDO extends DurableObject<Env> {
-  private clients = new Map<WebSocket, GameClient>();
-  private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private connectionState: Record<string, "connected" | "reconnecting" | "gone"> = {};
+  // State-smith GAP-8/9/11 (2026-08-04):
+  //   - connectionState is DERIVED (not stored): active sockets +
+  //     persisted graceExpiresAt tell us connected/reconnecting/gone.
+  //     Previously an in-memory Map that vanished on hibernation,
+  //     stranding both players in "gone" until the next event.
+  //   - reconnect grace persisted as graceExpiresAt[userId] in storage
+  //     and swept by alarm() — survives hibernation. setTimeout would
+  //     silently die during an idle window.
+  //   - Sockets use ctx.acceptWebSocket() (hibernatable API) with
+  //     serializeAttachment for per-connection {userId, handle}. Event
+  //     handlers move to class methods webSocketMessage / *Close /
+  //     *Error so the DO can hibernate while sockets stay open.
+  private static readonly GRACE_MS = 15_000;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -1161,17 +1245,47 @@ export class GameDO extends DurableObject<Env> {
     }
   }
 
+  // Hibernation-safe handlers (state-smith GAP-11). Cloudflare re-
+  // instantiates the DO on wake and delivers events here instead of
+  // to per-socket .addEventListener callbacks.
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    const data = typeof message === "string" ? message : "";
+    if (data === "ping") {
+      try { ws.send("pong"); } catch { /* close event will fire */ }
+      return;
+    }
+    await this.send(ws);
+  }
+  async webSocketClose(ws: WebSocket) { await this.disconnect(ws); }
+  async webSocketError(ws: WebSocket) { await this.disconnect(ws); }
+
   async alarm() {
     const game = await this.game();
-    if (!game || game.status !== "active") return;
-    const changed = this.applyClock(game, Date.now());
-    if (changed) {
-      await this.putGame(game);
-      await this.reportStatus(game);
-      this.broadcast();
-    } else {
-      await this.setClockAlarm(game);
+    if (!game) return;
+    const now = Date.now();
+    // Clock tick (only for active games).
+    if (game.status === "active") {
+      const changed = this.applyClock(game, now);
+      if (changed) {
+        await this.putGame(game);
+        await this.reportStatus(game);
+      }
     }
+    // Grace sweep (state-smith GAP-9): promote users past their grace
+    // deadline to "gone" if they still have no active socket. Broadcast
+    // when the derived state changes so peers see the transition.
+    const graces = await this.getGraces();
+    let graceChanged = false;
+    const active = this.activeUserIds();
+    for (const [userId, expiresAt] of Object.entries(graces)) {
+      if (expiresAt <= now && !active.has(userId)) {
+        delete graces[userId];
+        graceChanged = true;
+      }
+    }
+    if (graceChanged) await this.ctx.storage.put("graceExpiresAt", graces);
+    if (graceChanged || game.status !== "active") await this.broadcast();
+    await this.setNextAlarm(game);
   }
 
   private async init(request: Request) {
@@ -1192,10 +1306,8 @@ export class GameDO extends DurableObject<Env> {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
-    this.connectionState[game.whiteId] = "gone";
-    this.connectionState[game.blackId] = "gone";
     await this.putGame(game);
-    await this.setClockAlarm(game);
+    await this.setNextAlarm(game);
     return json({ ok: true });
   }
 
@@ -1207,26 +1319,28 @@ export class GameDO extends DurableObject<Env> {
     if (![game.whiteId, game.blackId].includes(userId)) throw new Error("Only players can connect.");
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    server.accept();
-    this.clients.set(server, { socket: server, userId, handle });
-    this.connectionState[userId] = "connected";
-    const timer = this.reconnectTimers.get(userId);
-    if (timer) clearTimeout(timer);
-    this.reconnectTimers.delete(userId);
-    server.addEventListener("message", (event) => {
-      // Heartbeat: reply cheaply so clients see inbound traffic and
-      // know the socket is alive. Broadcasting full state on every
-      // ping would be wasteful (a client pings every 15s).
-      const data = typeof event.data === "string" ? event.data : "";
-      if (data === "ping") {
-        try { server.send("pong"); } catch { /* dead socket → close will fire */ }
-        return;
-      }
-      void this.send(server);
-    });
-    server.addEventListener("close", () => this.disconnect(server));
-    server.addEventListener("error", () => this.disconnect(server));
+    // Hibernation-safe accept + attachment for {userId, handle}.
+    // Attachment survives across DO hibernation cycles.
+    server.serializeAttachment({ userId, handle });
+    this.ctx.acceptWebSocket(server);
+    // Reconnection clears any pending grace for this user.
+    const graces = await this.getGraces();
+    if (userId in graces) {
+      delete graces[userId];
+      await this.ctx.storage.put("graceExpiresAt", graces);
+    }
+    // Prime the newly-accepted socket with the current state directly —
+    // ctx.getWebSockets() sometimes doesn't reflect a just-accepted
+    // socket in the same request cycle (observed with wrangler dev),
+    // and even in prod the reconnected client shouldn't have to wait
+    // for the next event. Broadcast to the rest via the shared path.
+    try {
+      server.send(JSON.stringify({ type: "state", game: await this.snapshotFrom(game) }));
+    } catch {
+      /* if the just-accepted socket already died, close event fires and grace kicks in */
+    }
     await this.broadcast();
+    await this.setNextAlarm(game);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -1263,7 +1377,7 @@ export class GameDO extends DurableObject<Env> {
       game.result = "1/2-1/2";
     }
     await this.putGame(game);
-    if (game.status === "active") await this.setClockAlarm(game);
+    if (game.status === "active") await this.setNextAlarm(game);
     else await this.reportStatus(game);
     await this.broadcast();
     return json(await this.snapshotFrom(game));
@@ -1294,32 +1408,59 @@ export class GameDO extends DurableObject<Env> {
     else game.blackMs = 250;
     game.lastTickAt = Date.now();
     await this.putGame(game);
-    await this.setClockAlarm(game);
+    await this.setNextAlarm(game);
     await this.broadcast();
     return json(await this.snapshotFrom(game));
   }
 
-  private disconnect(socket: WebSocket) {
-    const client = this.clients.get(socket);
-    if (!client) return;
-    this.clients.delete(socket);
-    const stillConnected = [...this.clients.values()].some((item) => item.userId === client.userId);
-    if (!stillConnected) {
-      this.connectionState[client.userId] = "reconnecting";
-      // 15s grace before promoting to "gone" — iOS Safari can take 5-10s
-      // to reconnect after the URL bar hides/shows or the tab switches
-      // out and back. 3s (the old value) fired the harshest state during
-      // routine phone-idle interactions.
-      const timer = setTimeout(() => {
-        const connected = [...this.clients.values()].some((item) => item.userId === client.userId);
-        if (!connected) {
-          this.connectionState[client.userId] = "gone";
-          void this.broadcast();
-        }
-      }, 15000);
-      this.reconnectTimers.set(client.userId, timer);
+  private async disconnect(socket: WebSocket) {
+    const attachment = this.readAttachment(socket);
+    if (!attachment) return;
+    const { userId } = attachment;
+    // If the user still has ANOTHER live socket (multiple tabs), no
+    // grace transition — they're still connected.
+    const active = this.activeUserIds({ except: socket });
+    if (active.has(userId)) {
+      await this.broadcast();
+      return;
     }
-    void this.broadcast();
+    // Set persisted grace. Alarm-driven promotion to "gone" survives
+    // DO hibernation, unlike the previous setTimeout (state-smith GAP-9).
+    // 15s grace — iOS Safari can take 5-10s to reconnect after URL bar
+    // hide/show or tab switch.
+    const graces = await this.getGraces();
+    graces[userId] = Date.now() + GameDO.GRACE_MS;
+    await this.ctx.storage.put("graceExpiresAt", graces);
+    await this.broadcast();
+    const game = await this.game();
+    if (game) await this.setNextAlarm(game);
+  }
+
+  // Persisted grace map lookup — returns {} when unset. Storage backs
+  // this so a hibernated DO wakes with the same view.
+  private async getGraces(): Promise<Record<string, number>> {
+    return ((await this.ctx.storage.get("graceExpiresAt")) as Record<string, number> | undefined) || {};
+  }
+
+  // Set of userIds that currently have at least one live socket
+  // attached. Uses the hibernation-API getWebSockets() instead of a
+  // manual in-memory Map so this survives DO hibernation.
+  private activeUserIds(opts: { except?: WebSocket } = {}): Set<string> {
+    const ids = new Set<string>();
+    for (const ws of this.ctx.getWebSockets()) {
+      if (opts.except && ws === opts.except) continue;
+      const att = this.readAttachment(ws);
+      if (att) ids.add(att.userId);
+    }
+    return ids;
+  }
+
+  private readAttachment(ws: WebSocket): { userId: string; handle: string } | null {
+    const raw = (ws as unknown as { deserializeAttachment?: () => unknown }).deserializeAttachment?.();
+    if (!raw || typeof raw !== "object") return null;
+    const record = raw as { userId?: unknown; handle?: unknown };
+    if (typeof record.userId !== "string" || typeof record.handle !== "string") return null;
+    return { userId: record.userId, handle: record.handle };
   }
 
   private async requirePlayer(userId: string) {
@@ -1341,11 +1482,24 @@ export class GameDO extends DurableObject<Env> {
   private async snapshotFrom(game: GameState) {
     return {
       ...game,
-      connectionState: {
-        [game.whiteId]: this.connectionState[game.whiteId] || "gone",
-        [game.blackId]: this.connectionState[game.blackId] || "gone",
-      },
+      connectionState: await this.computeConnectionState(game),
     };
+  }
+
+  // Derive per-player connection state at snapshot time from live
+  // sockets + persisted grace. Replaces the in-memory Map that couldn't
+  // survive hibernation (state-smith GAP-8).
+  private async computeConnectionState(game: GameState) {
+    const now = Date.now();
+    const active = this.activeUserIds();
+    const graces = await this.getGraces();
+    const stateFor = (userId: string): "connected" | "reconnecting" | "gone" => {
+      if (active.has(userId)) return "connected";
+      const grace = graces[userId];
+      if (grace && grace > now) return "reconnecting";
+      return "gone";
+    };
+    return { [game.whiteId]: stateFor(game.whiteId), [game.blackId]: stateFor(game.blackId) };
   }
 
   private applyClock(game: GameState, now: number) {
@@ -1376,18 +1530,55 @@ export class GameDO extends DurableObject<Env> {
     await this.ctx.storage.put("game", game);
   }
 
-  private async setClockAlarm(game: GameState) {
-    const remaining = game.turn === "w" ? game.whiteMs : game.blackMs;
-    await this.ctx.storage.setAlarm(Date.now() + Math.max(100, remaining));
+  // Wake at the earliest of (a) clock tick deadline for an active game
+  // and (b) the nearest graceExpiresAt. Combined so a single alarm
+  // handles both concerns without either starving the other
+  // (state-smith GAP-9 alignment).
+  private async setNextAlarm(game: GameState) {
+    const now = Date.now();
+    const wakes: number[] = [];
+    if (game.status === "active") {
+      const remaining = game.turn === "w" ? game.whiteMs : game.blackMs;
+      wakes.push(now + Math.max(100, remaining));
+    }
+    const graces = await this.getGraces();
+    for (const at of Object.values(graces)) wakes.push(Math.max(now + 100, at));
+    if (!wakes.length) return;
+    await this.ctx.storage.setAlarm(Math.min(...wakes));
   }
 
+  // reportStatus wraps AppDO update with retry (state-smith GAP-10).
+  // The AppDO write is idempotent (setting the same status twice is a
+  // no-op), so retry is safe. Backoff caps at ~5 attempts / ~5s so a
+  // transient failure doesn't strand the AppDO's `games[id].status`
+  // projection as "active" after the game has ended. Runs in the
+  // background via ctx.waitUntil so the caller isn't blocked; the DO
+  // stays warm for the full retry window.
   private async reportStatus(game: GameState) {
-    const app = appStub(this.env);
-    await app.fetch("https://app.local/_internal/game-status", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-internal": "game" },
-      body: JSON.stringify({ id: game.id, status: game.status, result: game.result }),
-    });
+    const env = this.env;
+    const payload = JSON.stringify({ id: game.id, status: game.status, result: game.result });
+    const attempt = async (n: number): Promise<void> => {
+      try {
+        const app = appStub(env);
+        const res = await app.fetch("https://app.local/_internal/game-status", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-internal": "game" },
+          body: payload,
+        });
+        if (!res.ok) throw new Error(`AppDO returned ${res.status}`);
+      } catch (error) {
+        if (n >= 5) {
+          console.warn(`[GameDO ${game.id}] reportStatus giving up after ${n} attempts:`, error);
+          return;
+        }
+        const wait = Math.min(5_000, 250 * 2 ** (n - 1));
+        await new Promise((r) => setTimeout(r, wait));
+        await attempt(n + 1);
+      }
+    };
+    // Kick off the first attempt synchronously so the common-case
+    // success completes before the caller returns; retries run detached.
+    this.ctx.waitUntil(attempt(1));
   }
 
   private async send(socket: WebSocket) {
@@ -1395,13 +1586,11 @@ export class GameDO extends DurableObject<Env> {
   }
 
   private async broadcast() {
-    const message = JSON.stringify({ type: "state", game: await this.snapshot() });
-    for (const client of this.clients.values()) {
-      try {
-        client.socket.send(message);
-      } catch {
-        this.clients.delete(client.socket);
-      }
+    const game = await this.game();
+    if (!game) return;
+    const message = JSON.stringify({ type: "state", game: await this.snapshotFrom(game) });
+    for (const ws of this.ctx.getWebSockets()) {
+      try { ws.send(message); } catch { /* dead socket → close event fires */ }
     }
   }
 }
@@ -1429,7 +1618,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/games/")) return gameRequest(request, env, url.pathname);
-    if (url.pathname === "/api/debug/push-log") {
+    if (url.pathname === "/api/debug/push-log" || url.pathname === "/_debug/tick") {
       if (!["127.0.0.1", "localhost"].includes(url.hostname)) return json({ error: "Not found" }, { status: 404 });
       const headers = new Headers(request.headers);
       headers.set("x-debug-local", "true");

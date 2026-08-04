@@ -1200,6 +1200,62 @@ test("challenge withdraw + decline: state machine exits and waiting-room termina
   }
 });
 
+test("schedule zombie sweep expires pending past startAt via debug tick (state-smith GAP-7/16)", async ({ browser }) => {
+  // Time-warp harness (GAP-16): POST /_debug/tick advances alarm-time
+  // without wall-clock waits. Proves GAP-7 — a pending schedule whose
+  // startAt has passed transitions to "expired" on the next alarm
+  // instead of sitting as a zombie forever.
+  test.setTimeout(60_000);
+  const aliceCtx = await browser.newContext();
+  const bobCtx = await browser.newContext();
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  try {
+    await addAuthenticator(alice);
+    await addAuthenticator(bob);
+    const suffix = Date.now().toString(36).slice(-6);
+    const aH = `zsw_a${suffix}`;
+    const bH = `zsw_b${suffix}`;
+    await register(alice, aH);
+    await register(bob, bH);
+    await addFriendByHandle(alice, bH);
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await alice.reload();
+    // Alice proposes a schedule; Bob NEVER accepts. Server accepts any
+    // startAt within 60s of now, so give it 30s.
+    const startAt = Date.now() + 30_000;
+    await alice.evaluate(async ({ friendId, startAt }) => {
+      await fetch("/api/schedules", {
+        method: "POST", credentials: "include", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ friendId, timeControl: "10|0", startAt, recurrence: { kind: "once" } }),
+      });
+    }, { friendId: await alice.evaluate(async () => {
+      const me = await (await fetch("/api/me")).json() as { friends: Array<{ id: string; handle: string }> };
+      return me.friends[0].id;
+    }), startAt });
+    // Bob sees the proposal (proves pending state before the tick).
+    await bob.reload();
+    await expect(bob.getByText(/proposed/i)).toBeVisible();
+    // Fast-forward past startAt + grace via the debug tick.
+    const tickAt = startAt + 120_000;
+    const res = await alice.evaluate(async (now) => {
+      const r = await fetch("/_debug/tick", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ now }) });
+      return r.status;
+    }, tickAt);
+    expect(res).toBe(200);
+    // Alice's schedule is now expired (filtered out of /api/me). Bob's
+    // incoming panel clears too. No zombie.
+    await alice.reload();
+    await bob.reload();
+    await expect(alice.getByText(new RegExp(`with @${bH}`))).toHaveCount(0);
+    await expect(bob.getByText(/proposed/i)).toHaveCount(0);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 test("friend request: decline + withdraw exits (state-smith GAP-4 + GAP-5)", async ({ browser }) => {
   // Missing-exit class symmetric to challenges: recipient can now
   // decline a pending friend request; sender can withdraw one. Both
