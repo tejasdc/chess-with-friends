@@ -402,12 +402,23 @@ body[data-screen="inspirations"] .shell {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* Explicit stretch — iOS Safari doesn't always default to stretch on
+     flex-column items with `flex: 1 1 0%` when the child has intrinsic
+     content (e.g. a friends list). Chromium fills the cross-axis;
+     Safari can lock the child to intrinsic-min-content width, which is
+     the "dashboard collapsed to half viewport" regression Tejas hit on
+     his phone. Belt-and-suspenders below: width:100% + align-self:stretch
+     force the fill regardless of engine. */
+  align-items: stretch;
 }
 .stage > .auth,
 .stage > .inspirations,
 .stage > .dashboard {
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  width: 100%;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
 }
@@ -1258,7 +1269,13 @@ body[data-screen="landing"] .landing-copy {
 /* --- Dashboard ---------------------------------------------------------- */
 
 .dashboard {
-  max-width: 640px;
+  /* Mobile: fills the shell's inner width via width:100% on .stage>.dashboard
+     (see the shared flex-child rule above). Desktop: capped at 720 so the
+     content column doesn't stretch across a huge viewport. Widened from
+     640 → 720 per Tejas 2026-08-04 ('narrow to begin with, we should
+     really expand it'). */
+  width: 100%;
+  max-width: 720px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;

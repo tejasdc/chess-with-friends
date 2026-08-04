@@ -922,5 +922,162 @@ test(`replay wash lands on the last preMove's from+to for every landing position
   }
 });
 
+// Per-surface layout regressions. Structural guard against the class of
+// bug Tejas hit on his phone (2026-08-04): a landing-scoped CSS change
+// silently narrowed the dashboard column to ~half viewport. Surfaces
+// without geometry tests regressed while landing tests stayed green.
+// Bar: each surface's content column fills its shell width (allowing
+// only the standard gutter), no unexpected horizontal offset, no scroll
+// where no-scroll is the rule.
+//
+// Structure: parametrized viewport × surface loop. Each surface has a
+// selector for its content root and a scroll-policy expectation. The
+// asserts run without needing any authenticated flow beyond dashboard
+// (which needs a fresh registration — cheap via virtual authenticator).
+test("per-surface layout: content columns fill shell width at 390 and 430, no offset drift", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const sizes = [
+    { name: "390x844", width: 390, height: 844 },
+    { name: "430x932", width: 430, height: 932 },
+  ];
+  // At mobile widths, shell padding: 24px clamp(16px, 4vw, 48px) 96px.
+  // 4vw at 390 = 15.6 (floored by clamp min 16); at 430 = 17.2. Content
+  // width should be within a few px of viewport - 2*16 = 358 (390) /
+  // viewport - 2*~17 = ~396 (430). The threshold is generous enough to
+  // survive minor padding tweaks but tight enough to catch a 50% collapse.
+  function gutterAt(w: number) { return Math.max(16, Math.min(48, w * 0.04)); }
+  function expectedContentWidth(w: number) { return w - 2 * gutterAt(w); }
+  const failures: string[] = [];
+
+  async function checkSurface(browser: Browser, size: typeof sizes[number], surface: {
+    label: string;
+    setup: (page: Page) => Promise<void>;
+    contentSelector: string;
+    mustNotScroll: boolean;
+    /* Ratio of expected content width the actual must meet (allows small
+       widget-specific insets like the .puzzle-shelf sitting inside .auth-
+       scene). Default 0.90 = "≥ 90% of viewport minus gutters." */
+    minRatio?: number;
+  }) {
+    const ctx = await browser.newContext({ viewport: { width: size.width, height: size.height } });
+    const page = await ctx.newPage();
+    try {
+      await surface.setup(page);
+      await page.waitForTimeout(400);
+      const g = await page.evaluate((sel) => {
+        const el = document.querySelector<HTMLElement>(sel);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {
+          x: r.x,
+          right: r.right,
+          width: r.width,
+          scrollHeight: document.documentElement.scrollHeight,
+          innerHeight: window.innerHeight,
+          bodyScreen: document.body.dataset.screen ?? "(none)",
+        };
+      }, surface.contentSelector);
+      if (!g) { failures.push(`[${surface.label} ${size.name}] selector "${surface.contentSelector}" not found`); return; }
+      const gutter = gutterAt(size.width);
+      const expected = expectedContentWidth(size.width);
+      const minWidth = expected * (surface.minRatio ?? 0.90);
+      // Width must reach the threshold. Catches the "collapsed to half" class.
+      if (g.width < minWidth) failures.push(`[${surface.label} ${size.name}] content width ${g.width.toFixed(1)} < ${minWidth.toFixed(1)} (viewport ${size.width}, expected ~${expected.toFixed(0)})`);
+      // Left edge must not drift past a full gutter's worth (catches "sits offset").
+      if (g.x > gutter * 1.5) failures.push(`[${surface.label} ${size.name}] content x=${g.x.toFixed(1)} > ${(gutter * 1.5).toFixed(1)} (offset beyond gutter)`);
+      // Right edge symmetry — trailing space also must not exceed 1.5 gutters.
+      const trailing = size.width - g.right;
+      if (trailing > gutter * 1.5) failures.push(`[${surface.label} ${size.name}] trailing space ${trailing.toFixed(1)} > ${(gutter * 1.5).toFixed(1)} (offset beyond gutter)`);
+      // No-scroll surfaces: document scroll extent must not exceed the viewport.
+      if (surface.mustNotScroll && g.scrollHeight > g.innerHeight + 1) failures.push(`[${surface.label} ${size.name}] scrollHeight ${g.scrollHeight} > innerHeight ${g.innerHeight} (no-scroll violated)`);
+    } finally {
+      await ctx.close();
+    }
+  }
+
+  // Landing (unauthenticated).
+  const landingSurface = {
+    label: "landing",
+    setup: async (page: Page) => {
+      await page.goto("/");
+      await page.waitForSelector(".puzzle-shelf[data-puzzle-id]", { timeout: 15000 });
+    },
+    contentSelector: ".auth",
+    mustNotScroll: true,
+  };
+
+  // Inspirations (unauthenticated).
+  const inspirationsSurface = {
+    label: "inspirations",
+    setup: async (page: Page) => {
+      await page.goto("/inspirations");
+      await page.waitForSelector(".insp-title", { timeout: 15000 });
+    },
+    contentSelector: ".inspirations",
+    mustNotScroll: false, // may scroll if content demands, but should not have odd offset
+  };
+
+  // Dashboard (needs registration).
+  const dashboardSurface = {
+    label: "dashboard",
+    setup: async (page: Page) => {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("WebAuthn.enable");
+      await cdp.send("WebAuthn.addVirtualAuthenticator", {
+        options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true },
+      });
+      const h = "layout_" + Date.now().toString(36).slice(-5);
+      await page.goto("/");
+      await page.getByPlaceholder("your_handle").fill(h);
+      await page.waitForTimeout(400);
+      await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
+      await page.getByText(`@${h}`).waitFor({ timeout: 15000 });
+    },
+    contentSelector: ".dashboard",
+    mustNotScroll: false,
+  };
+
+  for (const size of sizes) {
+    for (const surface of [landingSurface, inspirationsSurface, dashboardSurface]) {
+      await checkSurface(browser, size, surface);
+    }
+  }
+
+  // Game surface: reuse twoClientsInGame to reach a live board, check
+  // board-holder width and no-scroll rule at both viewports on Alice.
+  const suffix = Date.now().toString(36).slice(-6);
+  const { aliceCtx, bobCtx, alice } = await twoClientsInGame(browser, suffix);
+  try {
+    for (const size of sizes) {
+      await alice.setViewportSize(size);
+      await alice.waitForTimeout(300);
+      const g = await alice.evaluate(() => {
+        const el = document.querySelector<HTMLElement>(".game-fixed .board-holder");
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {
+          x: r.x,
+          right: r.right,
+          width: r.width,
+          scrollHeight: document.documentElement.scrollHeight,
+          innerHeight: window.innerHeight,
+        };
+      });
+      if (!g) { failures.push(`[game ${size.name}] .game-fixed .board-holder not found`); continue; }
+      const gutter = gutterAt(size.width);
+      const expected = expectedContentWidth(size.width);
+      // Board holder should reach ~90% of the shell content width.
+      if (g.width < expected * 0.90) failures.push(`[game ${size.name}] board-holder width ${g.width.toFixed(1)} < ${(expected * 0.90).toFixed(1)}`);
+      if (g.x > gutter * 1.5) failures.push(`[game ${size.name}] board-holder x=${g.x.toFixed(1)} > ${(gutter * 1.5).toFixed(1)}`);
+      if (g.scrollHeight > g.innerHeight + 1) failures.push(`[game ${size.name}] scrollHeight ${g.scrollHeight} > innerHeight ${g.innerHeight} (no-scroll violated)`);
+    }
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+
+  expect(failures, `layout regressions:\n${failures.join("\n")}`).toEqual([]);
+});
+
 // Silence unused-import warning if a future refactor drops CDPSession above.
 export type _KeepCDP = CDPSession;

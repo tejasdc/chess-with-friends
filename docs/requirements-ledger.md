@@ -128,3 +128,16 @@ issues new orders.
 - [ ] Every visual-change agent LOOKS at its own rendered output (screenshots, at
       the sizes users see, at zoom where detail matters) BEFORE presenting.
       Evidence assembled without being looked at is the named failure mode.
+- [ ] Every SURFACE (landing, dashboard, game, inspirations) carries a layout
+      regression in adversity.spec.ts asserting content-column width, offset
+      symmetry, and no-scroll-where-forbidden at 390 and 430. Added
+      2026-08-04 after a landing-scoped CSS change silently narrowed the
+      dashboard column on iOS Safari — surfaces without geometry tests
+      regress silently. Cross-surface layout leakage becomes a test failure,
+      not a Tejas screenshot.
+- [ ] One-owner discipline for layout rules: any rule that shapes a surface
+      must be scoped to `body[data-screen="<surface>"]` unless it is a
+      genuinely shared pattern (like `.made-by` or `.stage > *`). Shared
+      shell-child rules must include `min-width: 0; width: 100%;
+      align-self: stretch` on flex children so iOS Safari doesn't fall back
+      to intrinsic-min-content width.
