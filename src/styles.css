@@ -1482,6 +1482,35 @@ body[data-screen="landing"] .landing-copy {
 }
 .insp-note em { font-style: italic; color: var(--ink); }
 
+/* Rodchenko chess-table photo on /inspirations — illustration, not
+   hero. Max width caps below the copy column so it stays a supporting
+   image; the figcaption carries photographer + license + source
+   (attribution is watertight per the inspirations honesty rule). */
+.insp-figure {
+  margin: 12px 0 4px;
+  max-width: 420px;
+}
+.insp-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 2px;
+}
+.insp-figcaption {
+  margin: 8px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--stone);
+  line-height: 1.5;
+}
+.insp-figcaption a {
+  color: var(--stone);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.insp-figcaption a:hover { color: var(--ink); }
+
 .invite-fallback {
   font-family: var(--mono);
   font-size: 12px;

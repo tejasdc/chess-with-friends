@@ -1510,6 +1510,24 @@ function InspirationsPage() {
         <li>
           <strong>Alexander Rodchenko</strong> · Chess table for the workers' club, 1925.
           Two chairs and a board built as one piece of furniture — sitting IS the invitation.
+          <figure className="insp-figure">
+            <img
+              src="/rodchenko-chess-table.jpg"
+              alt="Two chairs and a chess table built as one piece of furniture — Rodchenko's Workers' Club chess set, 2021 reconstruction at Château La Gaffelière."
+              loading="lazy"
+              width={683}
+              height={582}
+            />
+            <figcaption className="insp-figcaption">
+              2021 reconstruction of the 1925 design, Château La Gaffelière, Saint-Émilion.
+              Photograph by Bapak Alex,{" "}
+              <a href="https://commons.wikimedia.org/wiki/File:Chess_table_From_the_Workers_Club.jpg" target="_blank" rel="noreferrer">
+                Wikimedia Commons
+              </a>
+              {" "}·{" "}
+              <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a>.
+            </figcaption>
+          </figure>
           <p className="insp-note">
             The Workers' Club reconceived leisure as <em>active and collective</em> rather
             than passive and solitary — chess played sitting across from someone you know,
