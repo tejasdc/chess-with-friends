@@ -1124,6 +1124,82 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
   expect(failures, `layout regressions:\n${failures.join("\n")}`).toEqual([]);
 });
 
+test("challenge withdraw + decline: state machine exits and waiting-room terminals (state-smith GAP-2/14)", async ({ browser }) => {
+  // Two exits added: WITHDRAW (sender cancels) and DECLINE (invitee says
+  // no). Both are idempotent, both surface in the WaitingRoom via the
+  // /state poll so the sender sees the outcome and gets Home. Also
+  // proves createChallenge dedupe is idempotent per (fromId, toId) —
+  // two rapid taps yield one challenge, not two pushes.
+  test.setTimeout(120_000);
+  const aliceCtx = await browser.newContext();
+  const bobCtx = await browser.newContext();
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  try {
+    await addAuthenticator(alice);
+    await addAuthenticator(bob);
+    const suffix = Date.now().toString(36).slice(-6);
+    const aH = `sma_${suffix}`;
+    const bH = `smb_${suffix}`;
+    await register(alice, aH);
+    await register(bob, bH);
+    await addFriendByHandle(alice, bH);
+    await expect(alice.getByText("Friend request sent.")).toBeVisible();
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await alice.reload();
+    await presenceHeartbeat(bob);
+    await alice.reload();
+
+    // Case A — WITHDRAW. Alice invites, lands in waiting, taps Withdraw.
+    // Terminal renders ("Invite withdrawn"), Home returns to dashboard.
+    await alice.getByRole("button", { name: `Invite @${bH}` }).click();
+    await expect(alice).toHaveURL(/\/waiting\/chl_/);
+    await alice.getByRole("button", { name: "Withdraw the invite" }).click();
+    await expect(alice.getByText("Invite withdrawn")).toBeVisible({ timeout: 6000 });
+    await alice.getByRole("button", { name: "Home" }).click();
+    await expect(alice).toHaveURL(/\/$/);
+    // Force a fresh home read (navigate's after-hook doesn't await
+    // refresh; the dashboard may render stale for a beat).
+    await alice.reload();
+    // Friend row should be back to "Invite" (no pending outbound).
+    await expect(alice.getByRole("button", { name: `Invite @${bH}` })).toBeVisible({ timeout: 5000 });
+    // Bob's incoming challenge list should be empty on next reload —
+    // withdrawn challenges are filtered out of /api/me.
+    await bob.reload();
+    await expect(bob.getByText(new RegExp(`@${aH} invited you`))).toHaveCount(0);
+
+    // Case B — DECLINE + IDEMPOTENCY. Alice invites again. Bob declines.
+    // Alice's waiting-room poll picks up the terminal and shows
+    // "@x can't right now" with a Home button.
+    await alice.getByRole("button", { name: `Invite @${bH}` }).click();
+    await expect(alice).toHaveURL(/\/waiting\/chl_/);
+    // Idempotency check: a re-tap from Home should route to the SAME
+    // waiting URL (server returns existing pending challenge, no dupe).
+    const firstWaiting = alice.url();
+    await alice.goto("/");
+    await expect(alice.getByRole("button", { name: `Waiting for @${bH} — open waiting room` })).toBeVisible({ timeout: 5000 });
+    await alice.getByRole("button", { name: `Waiting for @${bH} — open waiting room` }).click();
+    await expect(alice.url()).toBe(firstWaiting);
+    // Bob declines from the incoming panel.
+    await bob.reload();
+    await bob.getByRole("button", { name: "Decline" }).click();
+    // Alice's poll (2s cadence) picks up the terminal.
+    await expect(alice.getByText(new RegExp(`@${bH} can't right now`))).toBeVisible({ timeout: 8000 });
+    await alice.getByRole("button", { name: "Home" }).click();
+    await expect(alice).toHaveURL(/\/$/);
+    await alice.reload();
+    // Row should be back to "Invite" after decline lands.
+    await expect(alice.getByRole("button", { name: `Invite @${bH}` })).toBeVisible({ timeout: 5000 });
+    // No leftover challenge in Bob's inbox.
+    await bob.reload();
+    await expect(bob.getByText(new RegExp(`@${aH} invited you`))).toHaveCount(0);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 test("no element overlap across the visual matrix — every labeled control has its own bounding box on every surface × state × viewport", async ({ browser }) => {
   // Mandate from Tejas 2026-08-04: the schedule form shipped with the
   // Time field crushed under the Repeat dropdown at desktop widths.

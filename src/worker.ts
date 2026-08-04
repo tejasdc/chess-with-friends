@@ -73,7 +73,12 @@ interface Challenge {
   fromId: string;
   toId: string;
   timeControl: TimeControl;
-  status: "pending" | "accepted" | "declined";
+  // Terminal set per state-smith audit (docs/state-machines.md Machine 3):
+  //   pending    — inviter has sent, invitee has not acted
+  //   accepted   — invitee accepted, gameId is set
+  //   declined   — invitee said no (GAP-2 exit)
+  //   withdrawn  — inviter cancelled (GAP-2 exit)
+  status: "pending" | "accepted" | "declined" | "withdrawn";
   gameId?: string;
   createdAt: number;
 }
@@ -391,6 +396,9 @@ export class AppDO extends DurableObject<Env> {
       }
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/withdraw$/) && request.method === "POST") {
         return await this.withdrawChallenge(url.pathname.split("/")[3], user);
+      }
+      if (url.pathname.match(/^\/api\/challenges\/[^/]+\/decline$/) && request.method === "POST") {
+        return await this.declineChallenge(url.pathname.split("/")[3], user);
       }
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/state$/) && request.method === "GET") {
         return await this.challengeState(url.pathname.split("/")[3], user);
@@ -794,15 +802,17 @@ export class AppDO extends DurableObject<Env> {
     const body = await readJson<{ friendId: string; timeControl?: TimeControl }>(request);
     const target = db.users[body.friendId];
     this.assertFriends(db, user.id, body.friendId);
-    // Idempotent: if the caller already has a pending outgoing challenge
-    // to this friend, return the existing challenge instead of creating a
-    // duplicate. Backstops the client's "Invited" state against double-
-    // taps and race conditions, and prevents inbox spam on the recipient
-    // (Tejas 2026-08-04).
-    const existing = Object.values(db.challenges).find(
-      (c) => c.fromId === user.id && c.toId === target.id && c.status === "pending",
-    );
-    if (existing) return json({ challenge: existing });
+    // Idempotent per state-smith GAP-3: dedupe any pending challenge
+    // between the two users, in EITHER direction. Outbound pending →
+    // return existing. Inbound pending (target invited caller first) →
+    // reject with a specific error the client turns into "@x already
+    // invited you — accept theirs." Mirrors the friend-request dedupe
+    // pattern.
+    for (const c of Object.values(db.challenges)) {
+      if (c.status !== "pending") continue;
+      if (c.fromId === user.id && c.toId === target.id) return json({ challenge: c });
+      if (c.fromId === target.id && c.toId === user.id) throw new Error(`@${target.handle} already invited you — accept theirs instead.`);
+    }
     const challenge: Challenge = {
       id: newId("chl"),
       fromId: user.id,
@@ -821,17 +831,37 @@ export class AppDO extends DurableObject<Env> {
   private async withdrawChallenge(id: string, user: User) {
     // Sender-initiated cancel of an outstanding pending challenge. Only
     // the sender may withdraw. Idempotent — withdrawing an already-
-    // withdrawn or already-accepted challenge is not an error, the
-    // client just re-reads state. On success, the challenge is removed
-    // from the DB so both sides' /api/me feeds drop it on next read.
+    // withdrawn / declined / accepted challenge is a no-op success.
+    // Sets status = "withdrawn" (per state-smith GAP-2) rather than
+    // deleting so the WaitingRoom poll (GAP-14) can pick up the terminal
+    // and show the sender the outcome before Home. `/api/me` filters to
+    // status === "pending" so the row disappears from both dashboards.
     const db = await this.db();
     const challenge = db.challenges[id];
     if (!challenge) return json({ status: "gone" });
     if (challenge.fromId !== user.id) throw new Error("Only the inviter can withdraw.");
-    if (challenge.status !== "pending") return json({ status: challenge.status });
-    delete db.challenges[id];
-    await this.save(db);
-    return json({ status: "withdrawn" });
+    if (challenge.status === "pending") {
+      challenge.status = "withdrawn";
+      await this.save(db);
+    }
+    return json({ status: challenge.status });
+  }
+
+  private async declineChallenge(id: string, user: User) {
+    // Invitee-initiated no. Only the recipient may decline. Idempotent —
+    // declining an already-declined / withdrawn / accepted challenge is a
+    // no-op success. Sets status = "declined" (state-smith GAP-2). The
+    // inviter's WaitingRoom poll picks up the terminal via
+    // /api/challenges/:id/state and shows a Home button.
+    const db = await this.db();
+    const challenge = db.challenges[id];
+    if (!challenge) return json({ status: "gone" });
+    if (challenge.toId !== user.id) throw new Error("Only the invitee can decline.");
+    if (challenge.status === "pending") {
+      challenge.status = "declined";
+      await this.save(db);
+    }
+    return json({ status: challenge.status });
   }
 
   private async acceptChallenge(id: string, user: User) {

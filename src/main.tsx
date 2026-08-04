@@ -1314,7 +1314,7 @@ interface Challenge {
   fromHandle?: string;
   toHandle?: string;
   timeControl: TimeControl;
-  status?: "pending" | "accepted" | "declined";
+  status?: "pending" | "accepted" | "declined" | "withdrawn";
 }
 type Recurrence =
   | { kind: "once" }
@@ -2402,12 +2402,20 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
     const { game } = await api<{ game: GameMeta }>(`/api/challenges/${id}/accept`, { method: "POST", body: "{}" });
     navigate(`/game/${game.id}`);
   }
+  async function declineChallenge(id: string) {
+    await api(`/api/challenges/${id}/decline`, { method: "POST", body: "{}" });
+    await refresh();
+  }
   async function acceptSchedule(id: string) {
     await api(`/api/schedules/${id}/accept`, { method: "POST", body: "{}" });
     await refresh();
   }
 
-  const items: Array<{ key: string; label: React.ReactNode; onAccept: () => void }> = [
+  // Each row can have one primary Accept and an optional quiet Decline.
+  // Decline currently only applies to challenges (state-smith GAP-2 exit
+  // symmetry) — friend requests and schedule proposals get their own
+  // decline exits in follow-up rounds (GAP-4, GAP-6).
+  const items: Array<{ key: string; label: React.ReactNode; onAccept: () => void; onDecline?: () => void }> = [
     ...home.requests.map((request) => ({
       key: `f-${request.id}`,
       label: <><strong>@{request.fromHandle}</strong> wants to be friends</>,
@@ -2417,6 +2425,7 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
       key: `c-${challenge.id}`,
       label: <><strong>@{challenge.fromHandle}</strong> invited you to a game · {formatTimeControl(challenge.timeControl)}</>,
       onAccept: () => void acceptChallenge(challenge.id),
+      onDecline: () => void declineChallenge(challenge.id),
     })),
     ...home.schedules
       .filter((schedule) => schedule.toId === home.user.id && schedule.status === "pending")
@@ -2439,7 +2448,14 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
       {items.map((item) => (
         <div className="incoming-row" key={item.key}>
           <span>{item.label}</span>
-          <button className="primary compact" onClick={item.onAccept}>Accept</button>
+          <div className="incoming-actions">
+            {item.onDecline ? (
+              <button type="button" className="linkish incoming-decline" onClick={item.onDecline} aria-label="Decline">
+                Decline
+              </button>
+            ) : null}
+            <button className="primary compact" onClick={item.onAccept}>Accept</button>
+          </div>
         </div>
       ))}
     </section>
@@ -3067,9 +3083,16 @@ function WaitingRoom({
         if (cancelled) return;
         setChallenge(next);
         setLoadError(null);
+        // Terminal states (per state-smith GAP-14): accepted navigates to
+        // the game; declined/withdrawn stop the poll and render a
+        // terminal message with a Home action. Without this the poll
+        // would spin forever once withdraw/decline endpoints exist.
         if (next.status === "accepted" && next.gameId) {
           navigate(`/game/${next.gameId}`);
           return;
+        }
+        if (next.status === "declined" || next.status === "withdrawn") {
+          return; // terminal — no re-poll, render handles it
         }
       } catch (error) {
         if (cancelled) return;
@@ -3083,6 +3106,17 @@ function WaitingRoom({
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [challengeId]);
+
+  async function withdraw() {
+    try {
+      await api(`/api/challenges/${challengeId}/withdraw`, { method: "POST", body: "{}" });
+      // Poll picks up the new status on its next tick; hasten by
+      // updating locally too so the terminal renders immediately.
+      setChallenge((prev) => prev ? { ...prev, status: "withdrawn" } : prev);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Couldn't withdraw.", "error");
+    }
+  }
 
   const menuExtras = (closeMenu: () => void) => (
     <li>
@@ -3116,6 +3150,37 @@ function WaitingRoom({
     || "your friend";
   const invitee = home.friends.find((friend) => friend.handle === inviteeHandle);
   const inviteePresence: string = invitee?.online ? "online" : "offline";
+
+  // Terminal-message screens (GAP-14): sender sees the outcome and gets
+  // Home. Decline and withdraw share the same shape — one line + one
+  // action — and each has its own copy so the sender knows which
+  // outcome landed.
+  if (challenge.status === "declined") {
+    return (
+      <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}>
+        <section className="game-error">
+          <h2 className="section-title">@{inviteeHandle} can't right now</h2>
+          <p className="muted">Try again later, or invite someone else.</p>
+          <div className="game-actions">
+            <button className="ghost" onClick={onHome}>Home</button>
+          </div>
+        </section>
+      </Shell>
+    );
+  }
+  if (challenge.status === "withdrawn") {
+    return (
+      <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}>
+        <section className="game-error">
+          <h2 className="section-title">Invite withdrawn</h2>
+          <p className="muted">You cancelled this invite. Invite again from your friends list when you're ready.</p>
+          <div className="game-actions">
+            <button className="ghost" onClick={onHome}>Home</button>
+          </div>
+        </section>
+      </Shell>
+    );
+  }
 
   return (
     <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} menuExtras={menuExtras}>
@@ -3155,6 +3220,14 @@ function WaitingRoom({
 
         <div className="game-bottom">
           <span className="turn-status">Sit tight — they'll come when they can.</span>
+          <button
+            type="button"
+            className="linkish game-bottom-withdraw"
+            onClick={() => void withdraw()}
+            aria-label="Withdraw the invite"
+          >
+            Withdraw
+          </button>
         </div>
       </section>
     </Shell>

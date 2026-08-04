@@ -690,6 +690,19 @@ body[data-screen="landing"] .landing-copy {
   text-underline-offset: 3px;
 }
 .game-bottom-home:hover { color: var(--ink); }
+.game-bottom-withdraw {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--stone);
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.game-bottom-withdraw:hover { color: var(--vermillion); }
 /* Terminal state: bar becomes prominent — the game is over, action
    row is what the user needs (not a small quiet chip). */
 .game-bottom.game-bottom-terminal {
@@ -1424,6 +1437,21 @@ body[data-screen="landing"] .landing-copy {
 }
 .incoming-row:last-child { border-bottom: 0; }
 .incoming-row strong { font-weight: 600; }
+.incoming-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.incoming-decline {
+  color: rgba(238, 227, 196, 0.72);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.incoming-decline:hover { color: var(--paper); }
 .incoming-row .primary {
   background: var(--paper);
   color: var(--ink);
