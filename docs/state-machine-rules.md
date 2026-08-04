@@ -169,22 +169,22 @@ line is blank, the feature is not ready.
   is wrong. Even in the same DO, funnel mutations through a single
   method with the guard inside.
 - **A `useEffect` that polls forever with no exit.** Every polling loop
-  must have a stop condition (`accepted` reached, an error terminal, or
-  a component unmount). The `WaitingRoom` polling is the reference case
-  (`src/main.tsx:2900-2924`): exits on `status === "accepted"`, unmounts
-  cleanly. Once withdraw/decline exist, that loop must exit on those
-  too — see GAP-14.
+  must have a stop condition — every terminal the poll's entity can
+  reach, plus component unmount. If the entity's state machine grows a
+  new terminal, the polling loop grows a matching exit branch in the
+  same change. A loop that only exits on the happy-path terminal turns
+  every other terminal into a spinning bug.
 - **A `setTimeout` in a Durable Object.** Not durable across hibernation.
   Use `ctx.storage.setAlarm` or a stored `expiresAt` timestamp promoted
-  lazily on read. (GAP-9 in the audit is the current instance.)
+  lazily on read.
 - **A projection that isn't marked as one.** If a field exists in two
   places, the copy is a projection. Name it in a comment above the
   field, and make sure the reconciliation path (what happens when the
-  authoritative side updates) is explicit. (GAP-10.)
+  authoritative side updates) is explicit — retry, resync, or an
+  acknowledged lag budget.
 - **Adding a status value without adding the transition into it.** If
   the type union grows a new state, some event must create it. If
-  nothing does, delete the value. (`declined` on `Challenge` and
-  `Schedule` today — GAP-4, GAP-6.)
+  nothing does, delete the value.
 
 ## Cloudflare-specific notes
 
@@ -206,16 +206,55 @@ in-memory map.
 
 ## What good looks like
 
-Look at `use-invite-link` (`src/worker.ts:702-750`):
+Three named patterns in this codebase to imitate.
 
-- Single writer (`AppDO`).
-- Idempotent (same call twice returns `already-friends`, no mutation).
-- Every branch documented inline with the five cases.
-- Every terminal maps to a status the client can render.
-- The client's `InvitePanel` (`src/main.tsx:2295-2381`) has a
-  representation for each terminal.
+### 1. Idempotent handshake with named terminals
 
-That's what a lifecycle looks like when it's designed as a machine
-instead of a sequence of feature patches. The rest of this app's
-lifecycles are getting there — see `docs/state-machines.md` for the
-punch list.
+`use-invite-link` (`src/worker.ts:requestByInvite`). Five cases —
+self-link, already-friends, pending in either direction, no
+relationship, signed-out completion — all resolve to a friendship or a
+named error. Same call twice returns `already-friends` and mutates
+nothing. Every terminal maps to a status the client renders in
+`InvitePanel`.
+
+The pattern: enumerate the branches, name the terminal for each, make
+the second call safe. If a reviewer can ask "what if this fires
+twice?" and you don't have a one-line answer, the handler isn't done.
+
+### 2. Symmetric exits with terminal preservation for an observed lifecycle
+
+The challenge machine's `withdraw` and `decline` handlers. Both are
+idempotent, both are guarded on the appropriate participant, both set a
+distinct terminal status (`withdrawn` / `declined`). The client's
+polling surface reads the terminal and renders a matching outcome —
+the sender's WaitingRoom shows "Invite withdrawn"; the recipient's
+IncomingPanel row drops because the recipient never asked to see the
+outcome.
+
+The pattern: when a lifecycle has an observer (a polling surface, a
+subscription, a UI screen the actor sits on), the terminal must
+survive long enough for the observer to see it. Do not delete the row.
+Set a terminal status; let the read-side filter decide who sees it and
+for how long. This is rule #6 (every state has an exit) in service of
+the observer.
+
+### 3. Hard delete when the lifecycle has no observer
+
+The friend-request `withdraw` handler. It hard-deletes the row instead
+of setting a `withdrawn` terminal. The sender has no dedicated waiting
+surface, so nothing polls for a terminal; a persisted "withdrawn" row
+would be a ghost the recipient never asked for. Idempotent by returning
+`status: "gone"` on a missing row.
+
+The pattern: the observer decides terminal-vs-delete, not the entity.
+When there's a poll, a screen, or a UI actor sitting on the outcome, a
+terminal status is right (see pattern #2). When nothing observes,
+delete. Do not reflex to "add another terminal status" — ask what
+would read it.
+
+---
+
+These three patterns together are what a lifecycle looks like when
+it's designed as a machine instead of a sequence of feature patches.
+See `docs/state-machines.md` for the current inventory and the
+outstanding gaps.
