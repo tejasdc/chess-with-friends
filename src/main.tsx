@@ -2525,26 +2525,36 @@ function WaitingRow({
   challenge: Challenge & { toHandle?: string };
   onWithdraw: () => void;
 }) {
+  // Single-line rhythm matching the Friends-row (Tejas 2026-08-04 fix:
+  // previous nesting of a full-width button inside the game-row grid
+  // squeezed the label to ~30% and stacked the text into 3 centered
+  // lines with the arrow orphaned). Layout: [dot] [label — flex-grow,
+  // left-aligned, no wrap] [Withdraw isolated hit target] [→]. Row
+  // itself acts as a link via onClick + role/tabindex; the inner
+  // Withdraw button stops propagation so its hit target is isolated.
+  const handle = challenge.toHandle ?? "friend";
+  const open = () => navigate(`/waiting/${challenge.id}`);
   return (
-    <div className="game-row game-row-waiting accent">
+    <div
+      className="game-row game-row-waiting accent"
+      role="link"
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } }}
+      aria-label={`Open waiting room for challenge to @${handle}`}
+    >
+      <span className="presence offline" aria-hidden="true" />
+      <span className="row-mono waiting-row-label">Waiting for @{handle}</span>
       <button
         type="button"
-        className="game-row-body"
-        onClick={() => navigate(`/waiting/${challenge.id}`)}
-        aria-label={`Open waiting room for challenge to @${challenge.toHandle ?? ""}`}
-      >
-        <span className="presence offline" aria-hidden="true" />
-        <span className="row-mono">Waiting for @{challenge.toHandle ?? "friend"}</span>
-        <span className="row-arrow" aria-hidden="true">→</span>
-      </button>
-      <button
-        type="button"
-        className="game-row-action linkish"
+        className="linkish waiting-row-withdraw"
         onClick={(event) => { event.stopPropagation(); onWithdraw(); }}
-        aria-label="Withdraw invite"
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }}
+        aria-label={`Withdraw invite to @${handle}`}
       >
         Withdraw
       </button>
+      <span className="row-arrow" aria-hidden="true">→</span>
     </div>
   );
 }

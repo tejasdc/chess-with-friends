@@ -158,6 +158,23 @@ issues new orders.
       asserts NO two visible labeled controls (input/select/button/textarea/
       label) have intersecting bounding boxes at any viewport. Must be green
       before every deploy. Catches states nobody thought to eyeball.
+- [ ] DATA-DEPENDENT STATES ARE MATRIX CELLS (Tejas 2026-08-04, founding
+      incident: the WaitingRow shipped mangled — "Waiting for @raz"
+      wrapped into three centered lines with the arrow orphaned and
+      Withdraw marooned mid-row — because the matrix covered UI states
+      like disclosure/menu open but no cell existed for the DATA state
+      "dashboard with pending outgoing challenge". A state that only
+      exists when data exists is a state nobody looks at unless the
+      matrix creates the data.
+      The rule: every state a user can be in must have a matrix cell.
+      Data-dependent states seed the data via the API and screenshot
+      the resulting UI (dashboard with outgoing/incoming challenge,
+      live game, accepted schedule, incoming/outgoing friend request,
+      zero friends, many friends, past games expanded, waiting room,
+      game live/selected/terminal). The matrix creates the pair of
+      users, the pending challenge, the accepted schedule — whatever
+      the state needs. A state with no cell is a state nobody has
+      ever looked at.
 - [ ] Every visual-change agent LOOKS at its own rendered output (screenshots, at
       the sizes users see, at zoom where detail matters) BEFORE presenting.
       Evidence assembled without being looked at is the named failure mode.

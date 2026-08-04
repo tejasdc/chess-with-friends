@@ -1846,6 +1846,45 @@ body[data-screen="landing"] .landing-copy {
 }
 .games-live .game-row .row-status { font-weight: 500; }
 
+/* Waiting row (pending outgoing challenge). OVERRIDES the base
+   .game-row grid template (60px 1fr 20px) which was designed for
+   [time][status][arrow] on real GameRow; the waiting row has different
+   children ([dot][label][Withdraw][arrow]) and would squeeze the label
+   into ~30% under that grid, wrapping "Waiting for @handle" onto three
+   centered lines. Flex row instead — presence dot inline at the left,
+   label left-aligned and no-wrap, Withdraw pinned toward the right
+   with the arrow at the very end. Matches the Friends-row rhythm. */
+.game-row.game-row-waiting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  outline-offset: -2px;
+}
+.game-row-waiting .presence { flex: 0 0 auto; }
+.game-row-waiting .waiting-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.game-row-waiting .waiting-row-withdraw {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--stone);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.game-row-waiting .waiting-row-withdraw:hover { color: var(--vermillion); }
+.game-row-waiting .row-arrow { flex: 0 0 auto; }
+.game-row.game-row-waiting.accent .row-status::after { display: none; }
+
 /* Past games — collapsed by default. Toggle is a full-width button that
    reads as heading; count sits mid-line, caret at the right. */
 .games-past { margin-top: 8px; }
