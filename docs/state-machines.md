@@ -5,6 +5,32 @@ guards, or single writers must land here in the same commit as the code that
 introduces it. This file is what every future agent reads to know the shape
 of the system before touching it.*
 
+## Status log
+
+GAP-N identifiers are stable — do not renumber. Commit messages and test
+names cite them (`state-smith GAP-N`). New gaps found in the audit are
+appended at the next unused number.
+
+- **c7bc407** (2026-08-04) — initial audit committed.
+- **7878939** (post c7bc407) — GAP-2 (challenge withdraw + decline
+  endpoints), GAP-3 (create-challenge dedupe in either direction), GAP-14
+  (WaitingRoom terminals for withdrawn / declined) closed. Also closes
+  GAP-1 on the surface: the Friends row now projects `sentChallenges` /
+  `challenges` / accepted `schedules` and renders `Invited` / `Accept` /
+  `Scheduled` in place of the unconditional `Invite` button, and the
+  Dashboard's `In play` section carries a `WaitingRow` per outgoing
+  pending challenge with a Withdraw action.
+- **9b084a2** (2026-08-05) — GAP-4 (friend-request decline), GAP-5
+  (friend-request withdraw as hard delete), GAP-6 (schedule decline),
+  GAP-7 (schedule zombie sweep to `expired` with 60s grace), GAP-15
+  (sentRequests label clarified to `Friend request sent to @x`) closed.
+
+TIER B remaining: GAP-8 through GAP-13 (Durable-Object hygiene — persisted
+`connectionState`, alarm-based reconnect grace, projection retry from
+`GameDO` to `AppDO`, hibernatable WebSockets, dead-endpoint GC on `410
+Gone`, auth-challenge TTL). GAP-16 (new — time-warp test harness for
+alarm-driven behaviors) is flagged below.
+
 ## Why this doc exists
 
 The app grew feature by feature. Every feature that carried a lifecycle got a
@@ -185,8 +211,19 @@ Two entities, one shared lifecycle. `Friendship` is the terminal state;
   call. Idempotent (see `requestByInvite`, `src/worker.ts:702-750`).
 - `accept-request` — recipient posts `/api/friends/:id/accept`. Status
   → `accepted`, Friendship row created.
-- `decline-request` — **NO ENDPOINT EXISTS** (GAP-4).
-- `withdraw-request` — **NO ENDPOINT EXISTS** (GAP-5).
+- `decline-request` — recipient posts `/api/friends/:id/decline`
+  (`declineFriendRequest`, `src/worker.ts:842`). Guards: `toId ===
+  user.id`, `status === "pending"`. Idempotent — decline of an
+  already-declined / accepted / withdrawn request returns the current
+  status without error. Status → `declined`.
+- `withdraw-request` — sender posts `DELETE
+  /api/friends/requests/:id` (`withdrawFriendRequest`,
+  `src/worker.ts:861`). Guard: `fromId === user.id`. **Hard delete** of
+  the row rather than a `withdrawn` terminal, chosen because a sender
+  who took the request back has no dedicated waiting surface to display
+  the outcome on (contrast the challenge machine, where the WaitingRoom
+  needs a terminal to render). Idempotent: missing row returns
+  `status: "gone"`, non-pending returns the current status.
 
 ### Transitions
 
@@ -199,13 +236,16 @@ stateDiagram-v2
   request_outbound_pending --> friends: use-invite-link (either direction)
   request_inbound_pending --> friends: accept-request
   request_inbound_pending --> friends: use-invite-link (either direction)
-  request_outbound_pending --> declined: decline-request [MISSING]
-  request_outbound_pending --> strangers: withdraw-request [MISSING]
+  request_inbound_pending --> declined: decline-request
+  request_outbound_pending --> strangers: withdraw-request (hard delete)
   friends --> [*]: (no unfriend in v1)
 ```
 
-Note: the entity-level `declined` state exists in the type
-(`src/worker.ts:61`) but is unreachable — see GAP-4.
+The entity-level `declined` state (`src/worker.ts:61`) is now reachable
+via `decline-request`. The sender does not observe a per-request
+`declined` — from the sender's side, `sentRequests` simply stops
+returning the row (declined requests are filtered out of `sentRequests`
+in `me()`).
 
 ### Writer
 `AppDO`. Reads: `/api/me` returns `friends`, `requests` (inbound pending),
@@ -216,18 +256,20 @@ Note: the entity-level `declined` state exists in the type
 - `strangers` — no row in Friends. Add-a-friend disclosure is where a user
   starts one.
 - `request-inbound-pending` — row in `IncomingPanel` labeled `@x wants to
-  be friends` with Accept. Present.
-- `request-outbound-pending` — bullet in the Friends section header,
-  labeled `Request sent to @x`. Present but read-only (no withdraw). See
-  `src/main.tsx:2740-2746`.
+  be friends` with primary Accept and a quiet Decline text link.
+- `request-outbound-pending` — bullet in `FriendsSection`, labeled
+  `Friend request sent to @x` (GAP-15) with a quiet Withdraw link
+  (vermillion on hover). See the `withdrawFriendRequest` handler at
+  `src/main.tsx:2833`.
 - `friends` — row in the Friends list.
 
 ### Closure
 - `strangers` — exitable via request-by-handle or invite link.
-- `request-inbound-pending` — exitable via accept only. GAP-4 (no decline).
-- `request-outbound-pending` — exitable only when the recipient accepts.
-  GAP-5 (no withdraw). If the recipient never acts, the request sits
-  forever.
+- `request-inbound-pending` — exitable via accept OR decline. Both paths
+  live.
+- `request-outbound-pending` — exitable via recipient accept OR sender
+  withdraw. Both paths live. If neither party acts, the request sits, but
+  either side can end it.
 - `friends` — terminal for v1 (no unfriend).
 
 ---
@@ -242,35 +284,44 @@ Friends row doesn't project it.
 - `pending` — challenge created by inviter, not yet acted on.
 - `accepted` — recipient accepted; `gameId` is set; a Game exists and is
   `active`.
-- `declined` — status value in the type (`src/worker.ts:76`), unreachable.
+- `declined` — recipient explicitly said no.
+- `withdrawn` — inviter cancelled.
 
 ### Events
 
-- `create-challenge` — `POST /api/challenges` with a friendId. Server
-  creates a `Challenge` and enqueues a `challenge` push. Guard: users are
-  friends (`assertFriends`). **NO GUARD against a pre-existing pending
-  challenge in either direction** (GAP-3).
-- `accept-challenge` — recipient posts `/api/challenges/:id/accept`. Server
-  creates the Game (`createGame` → `GameDO.init`), sets challenge
-  `status="accepted"`, sets `gameId`, and enqueues a `challenge_accepted`
-  push to the inviter.
-- `withdraw-challenge` — **NO ENDPOINT EXISTS** (GAP-2). Ledger promises
-  "challenges persist on the server until answered OR WITHDRAWN"; the
-  withdraw path was never built.
-- `decline-challenge` — **NO ENDPOINT EXISTS** (GAP-2).
-- `expire` — **DOES NOT EXIST**. Requirements say challenges have no TTL
-  and that is the intended design; but combined with the missing withdraw,
-  a challenge in `pending` has no exit other than accept.
+- `create-challenge` — `POST /api/challenges` with a friendId. Guards:
+  users are friends (`assertFriends`); no pending challenge exists in
+  either direction (dedupe added in commit 7878939 — outbound duplicate
+  returns the existing pending row; inbound duplicate errors so the UI
+  can steer the user to accept the pending inbound one instead). Fires a
+  `challenge` push only when a fresh row is created.
+- `accept-challenge` — recipient posts `/api/challenges/:id/accept`.
+  Server creates the Game (`createGame` → `GameDO.init`), sets challenge
+  `status="accepted"`, sets `gameId`, and enqueues a
+  `challenge_accepted` push to the inviter.
+- `withdraw-challenge` — inviter posts
+  `POST /api/challenges/:id/withdraw` (`withdrawChallenge`,
+  `src/worker.ts:911`). Guard: `fromId === user.id`, `status ===
+  "pending"`. Idempotent. Sets `status = "withdrawn"`.
+- `decline-challenge` — recipient posts
+  `POST /api/challenges/:id/decline` (`declineChallenge`,
+  `src/worker.ts:930`). Guard: `toId === user.id`, `status ===
+  "pending"`. Idempotent. Sets `status = "declined"`.
+- `expire` — deliberately not implemented. Challenges persist until one
+  of the four transitions fires (accept / decline / withdraw). This is
+  the intended design per the ledger.
 
 ### Transitions
 
 ```mermaid
 stateDiagram-v2
-  [*] --> pending: create-challenge
+  [*] --> pending: create-challenge (dedupe: no pending in either direction)
   pending --> accepted: accept-challenge
-  pending --> declined: decline-challenge [MISSING]
-  pending --> withdrawn: withdraw-challenge [MISSING]
+  pending --> declined: decline-challenge
+  pending --> withdrawn: withdraw-challenge
   accepted --> [*]
+  declined --> [*]
+  withdrawn --> [*]
 ```
 
 ### Writer
@@ -278,36 +329,43 @@ stateDiagram-v2
 `sentChallenges` (outbound pending). `/api/challenges/:id/state` returns a
 single challenge for either party — this is the WaitingRoom's poll target.
 
-### Representation (audit)
+### Representation
 
-- **Inviter's home, before accept** — `home.sentChallenges` contains the
-  pending challenge. It is **not projected to the Friends row**. The row
-  renders against `friend.online` only; the Invite button is always active
-  (`src/main.tsx:2748-2773`). This is the reported bug.
-- **Inviter's home, after tapping Invite once** — sender is redirected to
-  `/waiting/:id`. If they go Home from there, the pending challenge exists
-  on the server, no dashboard surface acknowledges it.
-- **Inviter's Waiting Room** — polls `/api/challenges/:id/state` every 2s;
-  transitions to `/game/:gameId` when the status flips to `accepted`. This
-  IS a representation of `pending` from the inviter's side, but only when
-  the inviter stays on the URL.
+- **Inviter's home** — `home.sentChallenges` filtered to `status ===
+  "pending"` is projected to two surfaces. First, the Friends row for
+  the invitee renders a ghost `Invited` button that opens the waiting
+  room (`src/main.tsx:2978-2991`). Second, the Dashboard's `In play`
+  section carries a `WaitingRow` per pending outbound challenge with a
+  Withdraw action (`src/main.tsx:2514, 2521`).
+- **Inviter's Waiting Room** — polls `/api/challenges/:id/state` every
+  2s. Terminals:
+  - `status === "accepted"` → navigate to `/game/:gameId`.
+  - `status === "declined"` or `"withdrawn"` → stop the poll and render
+    a terminal message with a Home action
+    (`src/main.tsx:3127, 3204`).
 - **Recipient's home** — `home.challenges` renders in `IncomingPanel` as
-  `@x invited you to a game · 10 min` with Accept. Present.
-- **Recipient's home, if inviter withdraws** — no representation because
-  no withdraw event exists.
+  `@x invited you to a game · 10 min` with primary Accept and a quiet
+  Decline text link (`declineChallenge` handler, `src/main.tsx:2409`).
+  The Friends row for the inviter also gets an inline Accept button
+  (`src/main.tsx:2967-2976`) so the recipient can accept without
+  scrolling to the IncomingPanel.
+- **Recipient's home, if inviter withdraws** — the challenge is no
+  longer in `home.challenges` (server filters non-pending out of the
+  invited-user list), so the row simply disappears on next refresh.
+  Acceptable because the recipient never took action.
 - **After accept** — inviter's push `challenge_accepted` links to the
-  game; both parties end up in `/game/:id`. Accepted challenges disappear
-  from both lists.
+  game; both parties end up in `/game/:id`. Accepted challenges
+  disappear from both lists.
 
 ### Closure
-- `pending` — exit only via accept. No withdraw, no decline, no expiry.
-  A friend who declines by ignoring leaves the sender in the WaitingRoom
-  polling forever.
+- `pending` — three exits: accept, decline, withdraw. All idempotent.
+- `accepted` / `declined` / `withdrawn` — terminals.
 
-### The bug in one line
-The Friends row does not read `home.sentChallenges`, so `pending` has no
-representation on the home surface for the inviter. Every state must have
-a representation on every surface where the entity is user-relevant.
+### The originally reported bug
+Closed in commit 7878939. The Friends row now reads `home.sentChallenges`
+and renders `Invited` in place of `Invite` when an outbound pending
+challenge exists to that friend, and the Dashboard's `In play` section
+surfaces a `WaitingRow` with a Withdraw action for the sender.
 
 ---
 
@@ -325,7 +383,9 @@ event. More states, more gaps.
   schedules DO NOT enter `fired` — they stay `accepted` and roll `nextFireAt`
   forward.
 - `cancelled` — either party ended the series (or the pending schedule).
-- `declined` — value in the type (`src/worker.ts:105`), unreachable.
+- `declined` — recipient said no while status was pending.
+- `expired` — pending schedule whose `startAt + grace` passed without an
+  accept. Alarm-driven terminal.
 
 ### Events
 
@@ -336,14 +396,27 @@ event. More states, more gaps.
   next alarm rearms.
 - `cancel-schedule` — `POST /api/schedules/:id/cancel`. Either party.
   Idempotent (a second cancel is a no-op). Status → `cancelled`.
-- `alarm-fire` — `AppDO.alarm()` runs on the next `nextFireAt`. For each
-  accepted schedule with `nextFireAt <= now`: create a fresh Game, enqueue
-  `scheduled_start` push to both parties. One-off → status `fired`.
-  Recurring → advance `nextFireAt` by one interval, skip past occurrences
-  without piling up games.
-- `decline-schedule` — **NO ENDPOINT EXISTS** (GAP-6).
-- `expire-pending` — **DOES NOT EXIST**. If Alice proposes 8pm and Bob
-  never accepts, the schedule sits `pending` past 8pm forever (GAP-8).
+- `decline-schedule` — recipient posts `POST /api/schedules/:id/decline`
+  (`declineSchedule`, near `cancelSchedule` in `src/worker.ts`). Guards:
+  `toId === user.id`, `status === "pending"`. Idempotent. Sets `status =
+  "declined"` and calls `setNextScheduleAlarm()` to rearm the sweep.
+- `alarm-fire` — `AppDO.alarm()` runs on the next scheduled time. Two
+  passes per wake:
+  1. **Zombie sweep** (`src/worker.ts:454-466`): every `status ===
+     "pending"` schedule with `startAt + 60_000ms <= now` is transitioned
+     to `expired`. The 60s grace matches the create-endpoint tolerance
+     so an accept landing seconds before `startAt` isn't racy with the
+     sweep.
+  2. **Fire loop**: every `status === "accepted"` schedule with
+     `nextFireAt <= now` creates one fresh Game and enqueues
+     `scheduled_start` pushes to both parties. One-off → `fired`.
+     Recurring → advance `nextFireAt` by one interval, skipping past
+     occurrences so a missed week doesn't fire a stack of catch-up
+     games.
+- `startAt-passed` — the zombie-sweep half of `alarm-fire` above.
+- Alarm rearming: `setNextScheduleAlarm()` now considers two wake
+  targets and takes the earlier: (a) accepted schedules' `nextFireAt`,
+  (b) pending schedules' `startAt + grace`. See `src/worker.ts:1108`.
 
 ### Transitions
 
@@ -352,13 +425,15 @@ stateDiagram-v2
   [*] --> pending: propose-schedule
   pending --> accepted: accept-schedule
   pending --> cancelled: cancel-schedule
-  pending --> declined: decline-schedule [MISSING]
-  pending --> expired: startAt-passed [MISSING]
+  pending --> declined: decline-schedule
+  pending --> expired: startAt-passed (alarm-driven)
   accepted --> fired: alarm-fire (once)
   accepted --> accepted: alarm-fire (recurring, advance nextFireAt)
   accepted --> cancelled: cancel-schedule
   fired --> [*]
   cancelled --> [*]
+  declined --> [*]
+  expired --> [*]
 ```
 
 ### Writer
@@ -368,27 +443,31 @@ stateDiagram-v2
 ### Representation
 
 - `pending` — recipient sees an `IncomingPanel` row (`schedule.toId ===
-  user.id && status === "pending"`); sender sees an outgoing schedule
-  bullet in `PlaySection` with status "waiting". Both present.
-- `accepted` — bullet in `PlaySection` with `formatScheduleWhen(...)` and
-  status "confirmed". Recurring accepted schedules show an "End series"
-  action. Present.
-- `fired` — one-off only. Bullet remains, `Open` link to the created game.
-  Present.
-- `cancelled` — filtered out of `me()` by the recipient side (see
-  `me()`'s schedules filter — actually it's `status !== "declined"`, so
-  cancelled schedules stay visible; verify against `src/worker.ts:639`.
-  As of this audit, cancelled ARE included in the list because the filter
-  is `!== "declined"` only). Client shows status "cancelled" (see
+  user.id && status === "pending"`) with primary Accept and a quiet
+  Decline text link; sender sees an outgoing schedule bullet in
+  `PlaySection` with status "waiting".
+- `accepted` — bullet in `PlaySection` with `formatScheduleWhen(...)`
+  and status "confirmed". Recurring accepted schedules show an "End
+  series" action. The Friends row for the paired friend also renders a
+  disabled `Scheduled` button so the same-friend surface reflects the
+  standing agreement (`src/main.tsx:2992-3005`).
+- `fired` — one-off only. Bullet remains, `Open` link to the created
+  game.
+- `cancelled` — bullet remains with status "cancelled" (see
   `scheduleStatus`). Acceptable but not great — cancelled schedules
   accumulate.
-- `declined` — unreachable.
+- `declined` — filtered out of `me()` (`src/worker.ts:692`: `status
+  !== "declined" && status !== "expired"`). Both parties simply stop
+  seeing the row.
+- `expired` — same filter as `declined`. Both parties stop seeing the
+  row on the next refresh.
 
 ### Closure
-- `pending` — exit via accept, cancel. No decline (GAP-6). No expiry after
-  `startAt` (GAP-8) — becomes a zombie.
+- `pending` — four exits: accept, cancel (either party), decline
+  (recipient), and the alarm-driven expiry after `startAt + 60s`. No
+  zombie state.
 - `accepted` — one-off exits to `fired` on alarm; recurring exits to
-  `cancelled` when either party ends the series. Both good.
+  `cancelled` when either party ends the series.
 
 ---
 
@@ -591,77 +670,65 @@ recovery copy (`src/main.tsx:2241-2280`). Absent when `enabled`.
 
 ## Gaps — ranked by user impact
 
-### GAP-1 (P0): Challenge `pending` has no representation on the Friends row
-**Where:** `src/main.tsx:2748-2773` (`FriendsSection` friend row).
-**What:** Row reads `friend.online` only. The Invite button is always
-active. `home.sentChallenges` is not consulted per-friend.
-**User impact:** The reported bug. The inviter has no sense of "invitation
-outstanding to Bob", can spam Invite, and each tap fires another push
-(compounded by GAP-3 below).
-**Fix (minimal):** Compute `outbound = home.sentChallenges.find(c =>
-c.toId === friend.id)` in the row. If present, render a row that says
-"Invited @bob · waiting" with an Open action that navigates to
-`/waiting/${outbound.id}` and a Withdraw action (see GAP-2). Suppress the
-Invite button while outbound is pending.
+### GAP-1 (P0, CLOSED — commit 7878939): Challenge `pending` had no representation on the Friends row
+**Was:** `src/main.tsx` friend row read `friend.online` only. Invite
+button always active. `home.sentChallenges` not consulted.
+**Now:** `FriendsRow` computes `outgoing = home.sentChallenges.find(c
+=> c.status === "pending" && c.toId === friend.id)` at
+`src/main.tsx:2978`. When present, the row renders a ghost `Invited`
+button linking to the waiting room in place of the primary Invite
+button. The Dashboard's `In play` section carries a `WaitingRow`
+(`src/main.tsx:2521`) per outgoing pending challenge with a Withdraw
+action. Same row shape also projects `Accept` for incoming pending and
+`Scheduled` for accepted schedules.
 
-### GAP-2 (P0): Challenge `pending` has no exit other than accept
-**Where:** `src/worker.ts` — no `/withdraw`, no `/decline`, no expiry.
-Ledger claims withdrawal exists.
-**User impact:** Accidental invite lives forever. Recipient has to accept
-or ignore. Sender can never say "never mind".
-**Fix:** Add `POST /api/challenges/:id/withdraw` (guard: `fromId ===
-user.id`, `status === "pending"`) → `status = "withdrawn"`. Add `POST
-/api/challenges/:id/decline` (guard: `toId === user.id`, `status ===
-"pending"`) → `status = "declined"`. Both are idempotent: repeating them
-is a no-op success. Update the `Challenge` type union accordingly. In the
-WaitingRoom, when the poll returns `status === "declined"` or
-`"withdrawn"`, transition to a terminal-message screen with a Home action.
+### GAP-2 (P0, CLOSED — commit 7878939): Challenge `pending` had no exit other than accept
+**Was:** No `/withdraw`, no `/decline`. Ledger claimed withdrawal existed.
+**Now:** `POST /api/challenges/:id/withdraw` (`withdrawChallenge`,
+`src/worker.ts:911`) and `POST /api/challenges/:id/decline`
+(`declineChallenge`, `src/worker.ts:930`) both live, both idempotent,
+both guarded on the appropriate participant. `Challenge.status` union
+grew a `withdrawn` value.
 
-### GAP-3 (P0): `create-challenge` is not idempotent per (fromId, toId)
-**Where:** `src/worker.ts:789-807` (`createChallenge`).
-**What:** No dedupe. Second tap creates a second `Challenge` and enqueues
-a second push.
-**User impact:** Same as GAP-1 — spammable.
-**Fix:** Before creating, check for an existing pending challenge in either
-direction between (user.id, target.id). If pending outbound exists, return
-that one (no new push). If pending inbound exists (target invited user
-first), return an error the client can turn into "@x already invited you
-— accept theirs instead". This mirrors the friend-request dedupe already
-present at `createFriendRequest` (`src/worker.ts:755-760`).
+### GAP-3 (P0, CLOSED — commit 7878939): `create-challenge` was not idempotent per (fromId, toId)
+**Was:** No dedupe. Second tap created a second row and fired a second
+push.
+**Now:** `createChallenge` dedupes in either direction. Outbound
+duplicate returns the existing pending row without firing a new push;
+inbound duplicate errors so the client can steer the user to accept the
+pending inbound challenge instead. Mirrors the friend-request dedupe
+pattern.
 
-### GAP-4 (P1): FriendRequest `pending` has no decline
-**Where:** `src/worker.ts:61` declares `declined`; no endpoint sets it.
-**User impact:** Recipient can only accept or ignore. Sender's
-`sentRequests` never clears if the recipient doesn't want to be friends.
-**Fix:** Add `POST /api/friends/:id/decline` (guard: `toId === user.id`,
-`status === "pending"`). Recipient's `IncomingPanel` row gets a small
-Dismiss action.
+### GAP-4 (P1, CLOSED — commit 9b084a2): FriendRequest `pending` had no decline
+**Now:** `POST /api/friends/:id/decline` (`declineFriendRequest`,
+`src/worker.ts:842`). Guards: `toId === user.id`, `status === "pending"`.
+Idempotent. Client: quiet Decline text link in the `IncomingPanel`
+friend-request row.
 
-### GAP-5 (P1): FriendRequest `pending` has no withdrawal
-**Where:** `src/worker.ts`.
-**User impact:** Sender who mistypes a handle or changes their mind has
-no way out.
-**Fix:** Add `DELETE /api/friends/requests/:id` (guard: `fromId ===
-user.id`, `status === "pending"`) → mark declined (or delete the row).
-Sender's Friends section header adds a tiny Withdraw action next to the
-`Request sent to @x` bullet.
+### GAP-5 (P1, CLOSED — commit 9b084a2): FriendRequest `pending` had no withdrawal
+**Now:** `DELETE /api/friends/requests/:id` (`withdrawFriendRequest`,
+`src/worker.ts:861`). Guard: `fromId === user.id`. Chosen as a hard
+delete rather than a `withdrawn` terminal — no dedicated sender waiting
+surface exists, so the record does not need to survive (contrast the
+challenge machine, where the WaitingRoom needs a terminal to render).
+Idempotent: missing row returns `status: "gone"`. Client: quiet Withdraw
+link next to the `Friend request sent to @x` bullet in
+`FriendsSection`.
 
-### GAP-6 (P2): Schedule `declined` state is unreachable
-**Where:** `src/worker.ts:105` declares `declined`; no endpoint sets it.
-**Fix:** Either add `POST /api/schedules/:id/decline` (guard: `toId ===
-user.id`, `status === "pending"`) or delete `declined` from the type.
-Preference: add the endpoint; the recipient of an unwanted proposal needs
-a way to say no beyond ignoring.
+### GAP-6 (P2, CLOSED — commit 9b084a2): Schedule `declined` state was unreachable
+**Now:** `POST /api/schedules/:id/decline` (`declineSchedule`).
+Idempotent. Rearms `setNextScheduleAlarm()`. `me()` filter tightened
+from `!== "declined"` to `!== "declined" && !== "expired"` so declined
+proposals drop off both dashboards.
 
-### GAP-7 (P2): Schedule pending past `startAt` becomes a zombie
-**Where:** `AppDO.alarm()` only touches `status === "accepted"`.
-**What:** If B never accepts and `startAt` passes, the schedule sits
-`pending` forever. It clutters both parties' lists and can never fire.
-**Fix:** In `alarm()`, sweep `status === "pending"` schedules where
-`startAt < now - grace`. Options: mark them `expired` (new terminal), or
-delete them. Prefer `expired` so the record survives for the requester's
-mental model. Requires rearming the alarm to catch these too — pending
-schedules should contribute their `startAt` to the next-alarm calculation.
+### GAP-7 (P2, CLOSED — commit 9b084a2): Schedule pending past `startAt` was a zombie
+**Now:** `AppDO.alarm()` sweeps `status === "pending"` schedules where
+`startAt + 60_000ms <= now` and transitions them to `expired` (new
+terminal). Preserves the record briefly for the requester's mental
+model; the `me()` filter drops it on next refresh.
+`setNextScheduleAlarm()` now takes the earliest of accepted
+`nextFireAt` and pending `startAt + grace` so the sweep fires promptly
+(`src/worker.ts:1108`).
 
 ### GAP-8 (P2): GameDO `connectionState` is not persisted
 **Where:** `src/worker.ts:979` (`private connectionState: Record<...> =
@@ -731,37 +798,56 @@ should have a TTL sweep.
 **Fix:** Alarm-driven sweep, or lazy delete in `verify` for anything past
 some age.
 
-### GAP-14 (P3): WaitingRoom has no branch for a declined / withdrawn
-challenge
-**Where:** `src/main.tsx:2900-2924`.
-**What:** The poll blindly re-polls unless `status === "accepted"`. Once
-GAP-2 lands (declined / withdrawn become reachable), the poll will spin
-forever.
-**Fix:** In the poll response handler, on `status === "declined"` show a
-terminal message ("@x can't right now"), on `status === "withdrawn"` show
-a self-recovery message ("You cancelled this invite"), both with a Home
-action. Do this in the same change as GAP-2 so the state machine and its
-representation ship together.
+### GAP-14 (P3, CLOSED — commit 7878939): WaitingRoom had no branch for declined / withdrawn
+**Now:** Poll handler at `src/main.tsx:3127` transitions to a terminal
+screen on `status === "declined"` or `"withdrawn"`; withdrawn variant
+shows an "Invite withdrawn" panel (`src/main.tsx:3204`). Poll exits
+cleanly in both branches; no forever-spin.
 
-### GAP-15 (P4): The name of the entity in `sentRequests` UI is wrong
-**Where:** `src/main.tsx:2740-2746`.
-**What:** `home.sentRequests` bullet says "Request sent to @x". That's a
-`FriendRequest`, not a challenge — the label is correct. Noting here only
-so the future agent doesn't confuse the two entities: `sentRequests` is
-friend requests; `sentChallenges` is game invitations.
+### GAP-15 (P4, CLOSED — commit 9b084a2): `sentRequests` bullet label was ambiguous
+**Now:** Label reads `Friend request sent to @x` and an inline comment
+at `src/main.tsx:2856` cites this gap and the distinction between
+`sentRequests` (friend requests) and `sentChallenges` (game
+invitations).
+
+### GAP-16 (P3, NEW): No time-warp harness for alarm-driven behaviors
+**Where:** `AppDO.alarm()` handles two lifecycles now — schedule fire
+(GAP-7 sweep + fire loop) and the recurring-schedule advance. Both are
+tested by code review only; there is no test that fast-forwards the
+DO's clock to prove the transitions actually run.
+**User impact:** A regression in the zombie sweep would silently leave
+pending schedules dead in both dashboards; a regression in
+`nextFireAt` advance would either double-fire or never fire again. No
+CI signal.
+**Fix:** Add a debug-local `POST /_debug/tick` on the AppDO that takes
+a `now` parameter and drives one alarm pass against it (guarded by
+the same `x-debug-local: true` header as `debugPushLog` at
+`src/worker.ts:975`). Then add adversity regressions that create a
+pending schedule with `startAt` in the past and tick, expecting
+`status === "expired"`; and that create a recurring accepted schedule,
+tick, expect a new game plus `nextFireAt` advanced by exactly one
+interval.
 
 ---
 
-## What to fix first
+## What's next
 
-If exactly one change lands, GAP-1 alone closes the reported bug: the
-Friends row reads `home.sentChallenges`, projects the pending-invitation
-state, and offers Open + Withdraw. That change wants GAP-2 (a withdraw
-endpoint to call) and GAP-3 (server-side dedupe so the second tap is
-harmless while the client catches up) in the same round. Together those
-three are the minimum that makes the invitation lifecycle observable and
-reversible from the surface where the user starts and ends up.
+TIER A (GAP-1 through GAP-7 + GAP-14/15) is closed. Every lifecycle
+that was user-facing has its states reachable and its exits wired.
 
-Everything below GAP-3 is real but the app functions without it.
-`stateful-shapes` (the skill of the same name in this workspace) is a
-useful complementary read when picking up any of the P2s.
+TIER B is Durable-Object hygiene: GAP-8 (persist `connectionState`),
+GAP-9 (replace `setTimeout` reconnect grace with an alarm or lazy
+promotion), GAP-10 (retry `reportStatus` from `GameDO` to `AppDO`),
+GAP-11 (migrate to hibernatable WebSockets), GAP-12 (drop dead
+subscriptions on `410 Gone`), GAP-13 (TTL sweep on auth challenges).
+These matter under real load and after DO hibernation; they don't
+degrade normal play. GAP-8 and GAP-9 travel together — the fix is a
+single pattern (persist state + promote lazily at snapshot time),
+so they should ship as one round.
+
+GAP-16 (time-warp harness) is orthogonal — it closes the coverage gap
+for GAP-7's zombie sweep and for recurring-schedule advance. Worth doing
+before touching the alarm code again.
+
+The `stateful-shapes` skill in this workspace is the complementary read
+for anyone picking up TIER B.
