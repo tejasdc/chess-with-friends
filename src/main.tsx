@@ -2566,6 +2566,11 @@ function PlaySection({
             <span className="field-label">Friend</span>
             <FriendSelect friends={home.friends} value={friendId} onChange={setFriendId} />
           </label>
+          {/* Day + Time + Repeat share one flex-wrap row so they lay out
+              cleanly at every width — 3 per row on desktop, 2 or 1 as the
+              container narrows. Fixed-column grid was the bug Tejas hit
+              2026-08-04: at wide widths the 3rd field crushed under the
+              previous one and Propose orphaned to the right. */}
           <div className="field-row">
             <label className="field">
               <span className="field-label">Day</span>
@@ -2579,15 +2584,15 @@ function PlaySection({
               <span className="field-label">Time</span>
               <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
             </label>
+            <label className="field">
+              <span className="field-label">Repeat</span>
+              <select value={repeat} onChange={(event) => setRepeat(event.target.value as "once" | "weekly" | "daily")}>
+                <option value="once">Once</option>
+                <option value="weekly">Weekly on {WEEKDAY_LONG[new Date(dayTimeToMillis(day, time)).getDay()]}</option>
+                <option value="daily">Daily</option>
+              </select>
+            </label>
           </div>
-          <label className="field">
-            <span className="field-label">Repeat</span>
-            <select value={repeat} onChange={(event) => setRepeat(event.target.value as "once" | "weekly" | "daily")}>
-              <option value="once">Once</option>
-              <option value="weekly">Weekly on {WEEKDAY_LONG[new Date(dayTimeToMillis(day, time)).getDay()]}</option>
-              <option value="daily">Daily</option>
-            </select>
-          </label>
           <div className="play-action">
             <button className="primary" onClick={propose} disabled={!friendId}>Propose</button>
           </div>

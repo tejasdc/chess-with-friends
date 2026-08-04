@@ -1467,16 +1467,24 @@ body[data-screen="landing"] .landing-copy {
   border-bottom-color: var(--ink);
 }
 
+/* Schedule form. Simple flex column: Friend row, then Day/Time/Repeat
+   in a flex-wrap sub-row (each field flexes 1 1 130px so it wraps
+   cleanly on narrow widths; three-across at ≥720). Propose sits below
+   right-aligned. The previous grid-template-columns: 1fr 140px auto
+   was designed for 3 children and broke silently when Repeat was
+   added — the 4th child fell into row 2 as an orphan and the visible
+   field-row got crushed to 140px. Flex-wrap makes overlap impossible
+   at any container width (Tejas 2026-08-04). */
 .play-form {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
-@media (min-width: 620px) {
-  .play-form { grid-template-columns: 1fr 140px auto; align-items: end; }
-  .play-form .play-action { grid-column: 3 / 4; }
+.play-action {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
-.play-action { display: flex; gap: 8px; }
 
 .pending {
   list-style: none;
@@ -1641,14 +1649,20 @@ body[data-screen="landing"] .landing-copy {
   color: var(--stone);
 }
 
-/* Scheduling picker — two-column row for day + time. Falls back to
-   stacked columns below 380px so nothing crowds. */
+/* Scheduling picker row — Day + Time + Repeat share this container.
+   Flex-wrap with a per-field flex-basis so the trio lays out cleanly at
+   every container width: three-across at ≥720, two-across in the ~500
+   band, single-column below. No overlap possible because flex-wrap. */
 .field-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
+  align-items: stretch;
 }
-@media (max-width: 380px) { .field-row { grid-template-columns: 1fr; } }
+.field-row > .field {
+  flex: 1 1 130px;
+  min-width: 0;
+}
 
 /* Inspirations — sub-paragraph nested under a list item for the
    Workers' Club context. Slightly muted from the primary line so the

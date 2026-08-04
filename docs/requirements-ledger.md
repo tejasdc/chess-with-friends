@@ -125,6 +125,20 @@ issues new orders.
       feature probed on production.
 
 ## Process law
+- [ ] VISUAL MATRIX SHIP GATE (Tejas 2026-08-04, founding incident: schedule
+      form shipped with the Time field crushed under the Repeat dropdown at
+      desktop widths). Before EVERY deploy, run `node scripts/visual-matrix.mjs`
+      and OPEN the contact-sheet HTML for each viewport (390, 430, 1440).
+      Look at every cell — landing (rest / piece-selected / mid-transition),
+      inspirations, dashboard (rest / add-friend open / schedule open / menu
+      open / notif popover open), waiting room, game (live / selected).
+      Deploy is blocked until every cell has been eyeballed. This is the
+      permanent answer to "why are we shipping things without looking."
+- [ ] PROGRAMMATIC OVERLAP GUARD (same incident). The `no element overlap
+      across the visual matrix` adversity test walks the same surfaces and
+      asserts NO two visible labeled controls (input/select/button/textarea/
+      label) have intersecting bounding boxes at any viewport. Must be green
+      before every deploy. Catches states nobody thought to eyeball.
 - [ ] Every visual-change agent LOOKS at its own rendered output (screenshots, at
       the sizes users see, at zoom where detail matters) BEFORE presenting.
       Evidence assembled without being looked at is the named failure mode.

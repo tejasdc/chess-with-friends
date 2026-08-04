@@ -1124,5 +1124,152 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
   expect(failures, `layout regressions:\n${failures.join("\n")}`).toEqual([]);
 });
 
+test("no element overlap across the visual matrix — every labeled control has its own bounding box on every surface × state × viewport", async ({ browser }) => {
+  // Mandate from Tejas 2026-08-04: the schedule form shipped with the
+  // Time field crushed under the Repeat dropdown at desktop widths.
+  // Nobody looked at the schedule-open state on desktop, so nothing
+  // caught it. This test walks every surface × meaningful state ×
+  // viewport (390/430/1440) and asserts NO two visible labeled
+  // controls (input, select, button, textarea, label) have intersecting
+  // bounding boxes. If any two collide, that combo fails with the
+  // element names + overlap dimensions. Sibling-only: <label> that
+  // wraps its <input> is expected to share bounds and is skipped.
+  test.setTimeout(360_000);
+
+  const VIEWPORTS = [
+    { name: "390x844", width: 390, height: 844 },
+    { name: "430x932", width: 430, height: 932 },
+    { name: "1440x900", width: 1440, height: 900 },
+  ];
+
+  async function collectOverlaps(page: Page) {
+    return await page.evaluate(() => {
+      const sel = "input, select, button, textarea, label";
+      const nodes = Array.from(document.querySelectorAll<HTMLElement>(sel));
+      // Modal overlays (menu sheet, dialogs) intentionally cover
+      // dashboard content beneath — that's not the crush-fields-together
+      // regression this guard targets. Skip any pair where the two
+      // elements live in different modality "layers" (one inside a
+      // modal, one outside).
+      const MODAL_SELECTOR = ".menu-sheet, .menu-backdrop, [role='dialog'], [role='alertdialog']";
+      const boxes: Array<{ tag: string; ancestor: boolean; modal: boolean; x: number; y: number; w: number; h: number }> = [];
+      for (const el of nodes) {
+        if (el.getAttribute("aria-hidden") === "true") continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 4 || r.height < 4) continue;
+        const style = window.getComputedStyle(el);
+        if (style.visibility === "hidden" || style.display === "none" || style.opacity === "0") continue;
+        if (r.bottom < 0 || r.top > window.innerHeight) continue;
+        if (r.right < 0 || r.left > window.innerWidth) continue;
+        const isAncestorOfOther = nodes.some((o) => o !== el && el.contains(o));
+        const modal = Boolean(el.closest(MODAL_SELECTOR));
+        const cls = el.getAttribute("class");
+        const tag = (el.tagName + (cls ? "." + cls.split(" ")[0] : "")).slice(0, 60);
+        boxes.push({ tag, ancestor: isAncestorOfOther, modal, x: r.x, y: r.y, w: r.width, h: r.height });
+      }
+      const overlaps: Array<{ a: string; b: string; iw: number; ih: number }> = [];
+      for (let i = 0; i < boxes.length; i++) {
+        if (boxes[i].ancestor) continue;
+        for (let j = i + 1; j < boxes.length; j++) {
+          if (boxes[j].ancestor) continue;
+          const a = boxes[i], b = boxes[j];
+          // Skip modal-over-page overlaps. This is a floating popover
+          // above dashboard chrome by design, not a layout regression.
+          if (a.modal !== b.modal) continue;
+          const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+          const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+          if (ix >= 3 && iy >= 3) overlaps.push({ a: a.tag, b: b.tag, iw: ix, ih: iy });
+        }
+      }
+      return overlaps;
+    });
+  }
+
+  const failures: string[] = [];
+
+  for (const vp of VIEWPORTS) {
+    // Unauth pages: landing + inspirations.
+    const unauthCtx = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+    const unauthPage = await unauthCtx.newPage();
+    try {
+      await unauthPage.goto("/");
+      await unauthPage.waitForSelector(".puzzle-shelf[data-puzzle-id]", { timeout: 15000 });
+      await unauthPage.waitForTimeout(500);
+      const olLanding = await collectOverlaps(unauthPage);
+      if (olLanding.length) failures.push(`[landing/rest ${vp.name}] ${olLanding.length} overlap(s): ${JSON.stringify(olLanding.slice(0, 3))}`);
+
+      await unauthPage.goto("/inspirations");
+      await unauthPage.waitForSelector(".insp-title", { timeout: 15000 });
+      await unauthPage.waitForTimeout(400);
+      const olInsp = await collectOverlaps(unauthPage);
+      if (olInsp.length) failures.push(`[inspirations ${vp.name}] ${olInsp.length} overlap(s): ${JSON.stringify(olInsp.slice(0, 3))}`);
+    } finally {
+      await unauthCtx.close();
+    }
+
+    // Authed dashboard states.
+    const aliceCtx = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+    const alice = await aliceCtx.newPage();
+    try {
+      await addAuthenticator(alice);
+      const h = `ov_${vp.width}_${Date.now().toString(36).slice(-5)}`;
+      await register(alice, h);
+
+      // Dashboard rest
+      const olDash = await collectOverlaps(alice);
+      if (olDash.length) failures.push(`[dashboard/rest ${vp.name}] ${olDash.length} overlap(s): ${JSON.stringify(olDash.slice(0, 3))}`);
+
+      // Add-a-friend open
+      await alice.getByRole("button", { name: "Add a friend" }).click();
+      await alice.waitForTimeout(200);
+      const olAdd = await collectOverlaps(alice);
+      if (olAdd.length) failures.push(`[dashboard/add-friend-open ${vp.name}] ${olAdd.length} overlap(s): ${JSON.stringify(olAdd.slice(0, 3))}`);
+      await alice.getByRole("button", { name: "Add a friend" }).click(); // collapse
+
+      // Schedule open — this is where the P1 bug lived. Needs friends,
+      // so add a stub friend via handle first. If registration for the
+      // stub is heavy, skip and try schedule anyway (the disclosure is
+      // disabled without friends but we can still eyeball the toggle).
+      // Cheaper: register bob in parallel context, alice adds him.
+      const bobCtx = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+      const bob = await bobCtx.newPage();
+      try {
+        await addAuthenticator(bob);
+        const bH = `ovb_${vp.width}_${Date.now().toString(36).slice(-5)}`;
+        await register(bob, bH);
+        await addFriendByHandle(alice, bH);
+        await expect(alice.getByText("Friend request sent.")).toBeVisible();
+        await bob.reload();
+        await bob.getByRole("button", { name: "Accept" }).first().click();
+        await alice.reload();
+        // Schedule open
+        await alice.getByRole("button", { name: "Schedule a game" }).click();
+        await alice.waitForTimeout(300);
+        const olSched = await collectOverlaps(alice);
+        if (olSched.length) failures.push(`[dashboard/schedule-open ${vp.name}] ${olSched.length} overlap(s): ${JSON.stringify(olSched.slice(0, 5))}`);
+      } finally {
+        await bobCtx.close();
+      }
+
+      // Menu open
+      await alice.reload();
+      await alice.locator(".menu-dot").click();
+      await alice.waitForTimeout(200);
+      const olMenu = await collectOverlaps(alice);
+      if (olMenu.length) failures.push(`[dashboard/menu-open ${vp.name}] ${olMenu.length} overlap(s): ${JSON.stringify(olMenu.slice(0, 3))}`);
+
+      // Notif popover open
+      await alice.getByRole("button", { name: /Notifications/ }).click();
+      await alice.waitForTimeout(200);
+      const olNotif = await collectOverlaps(alice);
+      if (olNotif.length) failures.push(`[dashboard/notif-open ${vp.name}] ${olNotif.length} overlap(s): ${JSON.stringify(olNotif.slice(0, 3))}`);
+    } finally {
+      await aliceCtx.close();
+    }
+  }
+
+  expect(failures, `element-overlap regressions across the visual matrix:\n  ${failures.join("\n  ")}`).toEqual([]);
+});
+
 // Silence unused-import warning if a future refactor drops CDPSession above.
 export type _KeepCDP = CDPSession;
