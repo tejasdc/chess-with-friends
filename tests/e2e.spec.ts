@@ -225,8 +225,10 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await fakePushSubscribe(alice.page);
   await fakePushSubscribe(bob.page);
 
+  // Add-a-friend collapsed disclosure at the friends section footer.
+  await alice.page.getByRole("button", { name: "Add a friend" }).click();
   await alice.page.getByPlaceholder("friend_handle").fill(bob.handle);
-  await alice.page.getByRole("button", { name: "Add" }).click();
+  await alice.page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(alice.page.getByText("Friend request sent.")).toBeVisible();
   await waitForPush(bob.page, "friend_request");
   await shot(alice.page, "03-handle-friend-request-sent");

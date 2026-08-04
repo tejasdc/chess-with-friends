@@ -1459,37 +1459,9 @@ function App() {
       messageKind={messageKind}
       setMessage={setMessage}
       onSignedOut={() => setHome(null)}
-      menuExtras={dashboardMenuExtras(home, setMessage)}
     >
       <Dashboard home={home} inviteToken={inviteMatch?.[1]} refresh={refresh} setMessage={setMessage} />
     </Shell>
-  );
-}
-
-// Copy invite link — moved from dashboard furniture to the ⋯ menu. It's
-// an occasional action; every friend already has a "reach me" surface
-// via the friends list itself.
-function dashboardMenuExtras(home: HomeData, setMessage: SetMessage) {
-  const invite = `${window.location.origin}${home.inviteUrl}`;
-  return (closeMenu: () => void) => (
-    <li>
-      <button
-        className="menu-item"
-        onClick={async () => {
-          closeMenu();
-          try {
-            await navigator.clipboard.writeText(invite);
-            setMessage("Invite link copied.");
-          } catch {
-            // Clipboard permission blocked — fall back to a toast with
-            // the link so the user can select-and-copy manually.
-            setMessage(invite);
-          }
-        }}
-      >
-        Copy invite link
-      </button>
-    </li>
   );
 }
 
@@ -1572,7 +1544,11 @@ function Shell({
 }
 
 // Bottom sheet menu — one pattern, one position (⋯ top-right on every
-// screen). Lists Sign out, install state, notification state, Inspirations.
+// screen). Order (top → bottom): Notifications (interactive, opens the
+// confidence-promise popover), Installed (info), Inspirations, then
+// Sign out at the very bottom (destructive-ish; kept out of the top
+// thumb-tap zone). Copy-invite-link lives on the Add-a-friend
+// disclosure in the friends section, not here.
 function MenuSheet({
   home,
   onClose,
@@ -1586,6 +1562,7 @@ function MenuSheet({
 }) {
   const [notifState, setNotifState] = useState<"unknown" | "granted" | "denied" | "default" | "unsupported">("unknown");
   const [installed, setInstalled] = useState<boolean>(() => detectInstalled());
+  const [notifInfoOpen, setNotifInfoOpen] = useState(false);
   useEffect(() => {
     if (!("Notification" in window)) { setNotifState("unsupported"); return; }
     setNotifState(Notification.permission as "granted" | "denied" | "default");
@@ -1595,34 +1572,34 @@ function MenuSheet({
     return () => media.removeEventListener?.("change", update);
   }, []);
 
+  const notifValueLabel =
+    notifState === "granted" ? "on"
+      : notifState === "denied" ? "blocked"
+      : notifState === "unsupported" ? "unsupported"
+      : "not yet";
+
   return (
     <>
       <div className="menu-backdrop" onClick={onClose} />
       <div className="menu-sheet" role="dialog" aria-label="App menu">
         <ul className="menu-list">
           {extras ? extras(onClose) : null}
-          {home ? (
-            <li>
-              <button className="menu-item" onClick={() => { onClose(); void signOut(onSignedOut || (() => undefined)); }}>
-                Sign out
-              </button>
-            </li>
-          ) : null}
+          <li>
+            <button
+              type="button"
+              className="menu-state-button"
+              aria-expanded={notifInfoOpen}
+              onClick={() => setNotifInfoOpen((v) => !v)}
+            >
+              <span className="menu-state-label">Notifications</span>
+              <span className="menu-state-value">{notifValueLabel}</span>
+            </button>
+            {notifInfoOpen ? <NotificationInfo state={notifState} installed={installed} /> : null}
+          </li>
           <li>
             <div className="menu-state">
               <span className="menu-state-label">Installed</span>
               <span className="menu-state-value">{installed ? "yes" : "not yet"}</span>
-            </div>
-          </li>
-          <li>
-            <div className="menu-state">
-              <span className="menu-state-label">Notifications</span>
-              <span className="menu-state-value">
-                {notifState === "granted" ? "on"
-                  : notifState === "denied" ? "blocked"
-                  : notifState === "unsupported" ? "unsupported"
-                  : "not yet"}
-              </span>
             </div>
           </li>
           <li>
@@ -1633,32 +1610,69 @@ function MenuSheet({
               Inspirations
             </button>
           </li>
+          {home ? (
+            <li className="menu-signout">
+              <button className="menu-item" onClick={() => { onClose(); void signOut(onSignedOut || (() => undefined)); }}>
+                Sign out
+              </button>
+            </li>
+          ) : null}
         </ul>
       </div>
     </>
   );
 }
 
-// Attribution page — Rodchenko / Hartwig / Villalba + palette credit.
-// Simple in-world layout; back link at top; ⋯ menu still available in
-// the Shell topbar for consistency.
+// Notification info popover — opens inline under the Notifications row
+// in the ⋯ menu. Two parts: (1) platform how-to for the CURRENT state
+// (granted / default / denied / unsupported / installed-but-off), and
+// (2) the confidence promise — the four notifications this app sends,
+// spelled out. Tejas's word: "people must feel safe enabling."
+function NotificationInfo({ state, installed }: { state: "unknown" | "granted" | "denied" | "default" | "unsupported"; installed: boolean }) {
+  const howTo =
+    state === "granted"
+      ? "Notifications are on. You'll get pushes for the four events below and nothing else."
+      : state === "denied"
+        ? "Notifications are blocked. Delete this app from your Home Screen and add it back to enable them again."
+        : state === "unsupported"
+          ? "This browser doesn't support notifications. Install the app to your Home Screen for pushes."
+          : !installed
+            ? "Install the app to your Home Screen first, then open it and enable notifications."
+            : "Enable notifications so you know when a friend invites you or a scheduled game starts.";
+  return (
+    <div className="menu-notif-info" role="region" aria-label="Notification policy">
+      <p className="menu-notif-howto">{howTo}</p>
+      <p className="menu-notif-promise">No spam. Only these notifications:</p>
+      <ul className="menu-notif-list">
+        <li>friend request</li>
+        <li>game invite</li>
+        <li>invite accepted</li>
+        <li>scheduled game starting</li>
+      </ul>
+    </div>
+  );
+}
+
+// Attribution page. Plain prose. No designer voice.
 function InspirationsPage() {
   return (
     <div className="inspirations">
       <button className="link" onClick={() => navigate("/")}>← back</button>
       <h1 className="insp-title">Inspirations</h1>
       <p className="insp-body">
-        This app's visual world sits on top of chess design history and one
-        painting.
+        Most apps are engagement machines. Playing a simple game with a friend
+        means walking through a casino to reach them. This app is built to
+        avoid that.
       </p>
       <ul className="insp-list">
         <li>
-          <strong>Alexander Rodchenko</strong> · Chess table for the workers' club, 1925.
-          Two chairs and a board built as one piece of furniture — sitting IS the invitation.
+          <strong>Alexander Rodchenko</strong> · Chess table for the USSR
+          Workers' Club, 1925. Two chairs and a board built as one piece of
+          furniture.
           <figure className="insp-figure">
             <img
               src="/rodchenko-chess-table.jpg"
-              alt="Two chairs and a chess table built as one piece of furniture — Rodchenko's Workers' Club chess set, 2021 reconstruction at Château La Gaffelière."
+              alt="Rodchenko's chess table for the USSR Workers' Club, 1925 design. Two chairs and a chess table built as one piece of furniture. Photograph of a 2021 reconstruction at Château La Gaffelière."
               loading="lazy"
               width={683}
               height={582}
@@ -1674,20 +1688,18 @@ function InspirationsPage() {
             </figcaption>
           </figure>
           <p className="insp-note">
-            The Workers' Club reconceived leisure as <em>active and collective</em> rather
-            than passive and solitary — chess played sitting across from someone you know,
-            not scrolled alone. It's the philosophy this app inherits.
+            The Workers' Club reconceived leisure as active and collective
+            rather than passive and solitary.
           </p>
         </li>
         <li>
-          <strong>Josef Hartwig</strong> · Bauhaus chess set, 1924. Pieces as pure geometry;
-          the shape encodes the movement.
+          <strong>Virgilio Villalba</strong> · Untitled, 1955. The palette on
+          this page comes from this painting: celadon, cream, teak, navy.
         </li>
         <li>
-          <strong>Virgilio Villalba</strong> · Untitled, 1955. Muted celadon field, deep
-          incision, one cream chip. The composition this register borrows from.
+          Puzzle positions from{" "}
+          <a href="https://lichess.org/database">lichess.org/database</a>, CC0.
         </li>
-        <li>Puzzle positions from <a href="https://lichess.org/database">lichess.org/database</a>, CC0.</li>
       </ul>
       <MadeByTejas />
     </div>
@@ -2328,17 +2340,15 @@ function InvitePanel({
     status === "already-friends" ? <>You and <strong>@{friend.handle}</strong> are already friends.</> :
     status === "accepted"        ? <>You and <strong>@{friend.handle}</strong> are now friends.</> :
                                     <>You and <strong>@{friend.handle}</strong> are now friends.</>;
-  // Check current presence so we only offer Invite when they're online.
-  const isOnline = home.friends.some((entry) => entry.id === friend.id && entry.online);
+  // Offer Invite regardless of presence — the challenge push IS the
+  // come-online request (see FriendsSection.invite button rationale).
   return (
     <section className="invite">
       <p>{line}</p>
       <div className="invite-actions">
-        {isOnline ? (
-          <button className="primary" onClick={() => void invite(friend.id, friend.handle)}>
-            Invite @{friend.handle} to a game
-          </button>
-        ) : null}
+        <button className="primary" onClick={() => void invite(friend.id, friend.handle)}>
+          Invite @{friend.handle} to a game
+        </button>
         <button className="ghost" onClick={dismiss}>Home</button>
       </div>
     </section>
@@ -2716,13 +2726,17 @@ function FriendsSection({
                   aria-label={friend.online ? "online" : "offline"}
                 />
                 <span className="friend-handle">@{friend.handle}</span>
+                {/* Invite is active regardless of presence — the challenge push
+                    IS the come-online request. Offline state shows via the
+                    status dot only. Challenges persist on the server until
+                    answered or withdrawn (no TTL), so an offline friend gets
+                    the invite in their incoming list on their next open. */}
                 <button
                   className="primary compact friend-invite"
                   onClick={() => void invite(friend)}
-                  disabled={!friend.online}
-                  aria-label={friend.online ? `Invite @${friend.handle}` : `@${friend.handle} is offline`}
+                  aria-label={`Invite @${friend.handle}`}
                 >
-                  {friend.online ? "Invite" : "Offline"}
+                  Invite
                 </button>
               </li>
             ))}
@@ -2734,26 +2748,88 @@ function FriendsSection({
           ) : null}
         </>
       ) : (
-        <p className="muted">No friends yet. Add one below, or share your invite link from the ⋯ menu.</p>
+        <p className="muted">No friends yet. Add one below.</p>
       )}
 
-      <div className="add-friend">
-        <input
-          value={handle}
-          onChange={(event) => setHandle(event.target.value)}
-          placeholder="friend_handle"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-        />
-        <button className="primary" onClick={requestFriend} disabled={!handle}>Add</button>
-      </div>
+      {/* Add-a-friend + copy-invite-link both live behind a disclosure at
+          the bottom of the friends section, mirroring the Schedule
+          disclosure below. The pair is "reach out for the first time";
+          the friends list itself is "reach out again". Copy-invite-link
+          moved OUT of the ⋯ menu (didn't belong there — it's a friends
+          action, not a settings action). */}
+      <AddFriendSection
+        handle={handle}
+        setHandle={setHandle}
+        requestFriend={requestFriend}
+        inviteUrl={home.inviteUrl}
+        setMessage={setMessage}
+      />
 
       {/* Schedule entry point — one button at the BOTTOM of the friends
           section (Tejas's decision). Tapping expands the day + time
           picker. Visible enough to be discovered, out of the way when
           the user isn't scheduling. */}
       <PlaySection home={home} refresh={refresh} setMessage={setMessage} />
+    </section>
+  );
+}
+
+function AddFriendSection({
+  handle,
+  setHandle,
+  requestFriend,
+  inviteUrl,
+  setMessage,
+}: {
+  handle: string;
+  setHandle: (value: string) => void;
+  requestFriend: () => Promise<void>;
+  inviteUrl: string;
+  setMessage: SetMessage;
+}) {
+  const [open, setOpen] = useState(false);
+
+  async function copyInvite() {
+    const invite = `${window.location.origin}${inviteUrl}`;
+    try {
+      await navigator.clipboard.writeText(invite);
+      setMessage("Invite link copied.");
+    } catch {
+      // Clipboard permission blocked — fall back to a toast with the
+      // full link so the user can select-and-copy manually.
+      setMessage(invite);
+    }
+  }
+
+  return (
+    <section className="add-friend-section">
+      <button
+        type="button"
+        className="section-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="section-title">Add a friend</span>
+        <span className="section-toggle-caret" aria-hidden="true">{open ? "−" : "+"}</span>
+      </button>
+      {open ? (
+        <div className="add-friend-form">
+          <div className="add-friend">
+            <input
+              value={handle}
+              onChange={(event) => setHandle(event.target.value)}
+              placeholder="friend_handle"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <button className="primary" onClick={() => void requestFriend()} disabled={!handle}>Add</button>
+          </div>
+          <button type="button" className="ghost add-friend-copy" onClick={() => void copyInvite()}>
+            Copy invite link
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

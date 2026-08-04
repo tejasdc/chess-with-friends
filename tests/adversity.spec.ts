@@ -80,6 +80,19 @@ async function register(page: Page, handle: string) {
   await expect(page.getByText(`@${handle}`)).toBeVisible();
 }
 
+// Send a friend request through the Add-a-friend disclosure (collapsed by
+// default on the dashboard, per Tejas 2026-08-04). Opens the disclosure,
+// fills the handle, clicks Add, waits for the confirmation toast. Idempotent
+// on the "already open" case since the section-toggle button toggles.
+async function addFriendByHandle(page: Page, handle: string) {
+  const toggle = page.getByRole("button", { name: "Add a friend" });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await page.getByPlaceholder("friend_handle").fill(handle);
+  // exact:true avoids matching the "Add a friend" disclosure button that
+  // is already expanded (accessible name contains "Add").
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+}
+
 async function twoClientsInGame(browser: Browser, suffix: string, opts: { instrumentSockets?: boolean } = {}) {
   const aliceCtx = await browser.newContext();
   const bobCtx = await browser.newContext();
@@ -98,16 +111,16 @@ async function twoClientsInGame(browser: Browser, suffix: string, opts: { instru
   await register(alice, aH);
   await register(bob, bH);
 
-  await alice.getByPlaceholder("friend_handle").fill(bH);
-  await alice.getByRole("button", { name: "Add" }).click();
+  await addFriendByHandle(alice, bH);
   await expect(alice.getByText("Friend request sent.")).toBeVisible();
   await bob.reload();
   await bob.getByRole("button", { name: "Accept" }).first().click();
   await expect(bob.getByText(`@${aH}`)).toBeVisible();
 
   await alice.reload();
-  // Presence heartbeat takes a moment to register the peer as online —
-  // the Invite button unlocks once bob's presence is fresh.
+  // Presence heartbeat is no longer required for the Invite button — it's
+  // active regardless of presence — but the flow still needs a moment for
+  // Alice's home refresh to reflect the accepted friendship.
   await presenceHeartbeat(bob);
   await alice.reload();
   await alice.getByRole("button", { name: `Invite @${bH}` }).click();
@@ -339,8 +352,7 @@ test("sending a challenge takes the sender to the waiting room; accept transitio
   try {
     await register(alice, aH);
     await register(bob, bH);
-    await alice.getByPlaceholder("friend_handle").fill(bH);
-    await alice.getByRole("button", { name: "Add" }).click();
+    await addFriendByHandle(alice, bH);
     await expect(alice.getByText("Friend request sent.")).toBeVisible();
     await bob.reload();
     await bob.getByRole("button", { name: "Accept" }).first().click();
@@ -483,8 +495,7 @@ test("recurring schedule creates a game on each firing and can be ended by eithe
   try {
     await register(alice, aH);
     await register(bob, bH);
-    await alice.getByPlaceholder("friend_handle").fill(bH);
-    await alice.getByRole("button", { name: "Add" }).click();
+    await addFriendByHandle(alice, bH);
     await bob.reload();
     await bob.getByRole("button", { name: "Accept" }).first().click();
     await expect(bob.getByText(`@${aH}`)).toBeVisible();
@@ -769,8 +780,7 @@ test("invite link is standing consent — five cases all resolve to friendship, 
     // via handle search first (creates pending request from Carol→Alice),
     // THEN Alice hits Carol's invite link. The pending request should
     // resolve into a friendship (status:"accepted"), not a duplicate.
-    await carol.page.getByPlaceholder("friend_handle").fill(alice.handle);
-    await carol.page.getByRole("button", { name: "Add" }).click();
+    await addFriendByHandle(carol.page, alice.handle);
     await expect(carol.page.getByText("Friend request sent.")).toBeVisible();
     const accepted = await invitePost(alice.page, carol.inviteToken);
     expect(accepted.body.status).toBe("accepted");
@@ -789,6 +799,61 @@ test("invite link is standing consent — five cases all resolve to friendship, 
     await alice.ctx.close();
     await bob.ctx.close();
     await carol.ctx.close();
+  }
+});
+
+test("offline friend can be invited — button stays active, challenge persists, appears on Bob's next open", async ({ browser }) => {
+  // Tejas correction of the earlier presence-gated Invite: every friend
+  // row gets an active Invite button REGARDLESS of presence. The
+  // challenge push IS the come-online request. Bar: Alice invites Bob
+  // while Bob has no live page (all pages closed → no heartbeat → server
+  // presence stale); Bob reopens; challenge is visible in his incoming
+  // list; accepting launches a real game.
+  test.setTimeout(120_000);
+  const aliceCtx = await browser.newContext();
+  const bobCtx = await browser.newContext();
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  try {
+    await addAuthenticator(alice);
+    await addAuthenticator(bob);
+    const suffix = Date.now().toString(36).slice(-6);
+    const aH = `offa_${suffix}`;
+    const bH = `offb_${suffix}`;
+    await register(alice, aH);
+    await register(bob, bH);
+    await addFriendByHandle(alice, bH);
+    await expect(alice.getByText("Friend request sent.")).toBeVisible();
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await expect(bob.getByText(`@${aH}`)).toBeVisible();
+
+    // Bob goes offline — close his page so no heartbeat POSTs land. The
+    // context stays alive so the passkey survives for his reopen.
+    await bob.close();
+
+    // Alice's Invite button is available even though Bob is offline.
+    await alice.reload();
+    const invite = alice.getByRole("button", { name: `Invite @${bH}` });
+    await expect(invite).toBeVisible();
+    await expect(invite).toBeEnabled();
+    await invite.click();
+    await expect(alice).toHaveURL(/\/waiting\/chl_/);
+
+    // Bob reopens (same context = same session cookie = same passkey).
+    // Incoming list shows the pending challenge; accepting launches the game.
+    const bob2 = await bobCtx.newPage();
+    await bob2.goto("/");
+    const acceptChallenge = bob2.getByRole("button", { name: "Accept" }).first();
+    await expect(acceptChallenge).toBeVisible({ timeout: 15000 });
+    await acceptChallenge.click();
+    await expect(bob2).toHaveURL(/\/game\/gam_/, { timeout: 15000 });
+    // Alice's waiting-room poll transitions her into the game once
+    // Bob accepts (2s poll cadence).
+    await expect(alice).toHaveURL(/\/game\/gam_/, { timeout: 12000 });
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
   }
 });
 

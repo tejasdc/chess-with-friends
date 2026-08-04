@@ -19,7 +19,11 @@ issues new orders.
       by Tejas 2026-08-04; NEVER game). Pinned to bottom on every page that has
       it. Landing footer also carries the inspirations link.
 - [ ] No ⋯ menu on the landing. ⋯ top-right on dashboard + game; menu holds
-      sign out, install/notification state, invite link, inspirations.
+      (top→bottom): notifications (interactive, opens the confidence-promise
+      popover with the four notification types), installed state, inspirations,
+      sign out. Invite-link is NOT in the menu (moved to the Add-a-friend
+      disclosure per Tejas 2026-08-04 — copy-invite is a friends action, not
+      a settings action).
 - [ ] Name is "two chairs" (lowercase): wordmark, <title>, manifest name/short_name,
       APP_NAME var (passkey rpName).
 - [ ] Icon: Rodchenko elevation TRACE in app tokens (map A: cream/teak/navy),
@@ -46,10 +50,17 @@ issues new orders.
 
 ## Dashboard
 - [ ] Live/in-play games at TOP, prominent. Past games = separate collapsed section.
-- [ ] Friends list IS the action surface: online first with Invite; offline rows
-      signal by dot + disabled state; ~8 rows then "More friends" disclosure.
-- [ ] ONE "Schedule a game" button at the BOTTOM of the friends section (no
-      standalone schedule section, no per-friend schedule).
+- [ ] Friends list IS the action surface: online first, then offline. EVERY
+      friend row gets an ACTIVE Invite button regardless of presence — the
+      challenge push IS the come-online request (Tejas 2026-08-04 correcting
+      the earlier online-only spec). Offline state shows via the status dot
+      only. ~8 rows then "More friends" disclosure. Challenges persist on the
+      server until answered or withdrawn (no TTL).
+- [ ] ONE "Schedule a game" disclosure at the BOTTOM of the friends section
+      (no standalone schedule section, no per-friend schedule). Paired with
+      an "Add a friend" disclosure at the same footer position; expanding
+      Add-a-friend reveals the handle input + Add button + Copy-invite-link
+      action (invite-link OUT of the ⋯ menu).
 - [ ] Schedule = day + time picker (never "start in minutes"). Recurring:
       once / weekly / daily; accept ONCE; push each occurrence; End series from
       either side.
@@ -92,11 +103,18 @@ issues new orders.
       accept transitions live in place; challenge_accepted push to inviter.
 
 ## Inspirations / attribution
-- [ ] Fuller entries restored; museum/exhibition provenance lines REMOVED; the
-      Workers' Club active-and-collective sentence present; Hartwig entry present;
-      real attribution only (no self-references, no "photo by Tejas"; famous
-      constructivist pieces are Lavrentyev/Vasnetsova 1976, NOT Rodchenko — say so
-      if pieces are referenced).
+- [ ] Plain declarative prose only — no AI-slop tells (em-dash chains, clever
+      appositives, "X IS Y" constructions, portfolio-caption tone, designer
+      voice). Read-aloud test: if it sounds like a designer explaining a joke,
+      cut it. Museum/exhibition provenance lines REMOVED. The Workers' Club
+      "active and collective rather than passive and solitary" sentence
+      present verbatim, full stop after — no "not scrolled alone" clause.
+      Hartwig entry REMOVED (Tejas final 2026-08-04; shipped pieces are
+      standard Staunton). Rodchenko entry keeps photo + 1925 Workers' Club
+      table description; Villalba entry cites palette; Lichess CC0 line;
+      made-by. No self-references, no "photo by Tejas"; if the famous
+      constructivist pieces are referenced, say they're Lavrentyev/Vasnetsova
+      1976, NOT Rodchenko.
 
 ## Infra
 - [ ] twochairs.club canonical; chess.tejas.nyc serves duplicate (NO 301).
