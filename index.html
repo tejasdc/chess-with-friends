@@ -16,7 +16,23 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
     />
-    <title>two chairs</title>
+    <!--
+      Document title vs in-app wordmark split (Tejas 2026-08-04): the
+      URL twochairs.club already carries the name; the <title> and share
+      metadata should describe WHAT this is. So the tab title / hover
+      text / share card title says "chess with friends", while the
+      in-app wordmark and the home-screen install label (manifest name)
+      stay "two chairs".
+    -->
+    <title>chess with friends</title>
+    <meta name="description" content="No infinite pool of opponents. A game happens when two friends sit down." />
+    <meta property="og:title" content="chess with friends" />
+    <meta property="og:description" content="No infinite pool of opponents. A game happens when two friends sit down." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://twochairs.club/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="chess with friends" />
+    <meta name="twitter:description" content="No infinite pool of opponents. A game happens when two friends sit down." />
   </head>
   <body>
     <div id="root"></div>

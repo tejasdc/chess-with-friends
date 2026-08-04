@@ -1307,7 +1307,15 @@ type SetMessage = (value: string, kind?: ToastKind) => void;
 
 interface Friend { id: string; handle: string; online: boolean }
 interface FriendRequest { id: string; fromHandle?: string; toHandle?: string }
-interface Challenge { id: string; fromHandle?: string; toHandle?: string; timeControl: TimeControl }
+interface Challenge {
+  id: string;
+  fromId?: string;
+  toId?: string;
+  fromHandle?: string;
+  toHandle?: string;
+  timeControl: TimeControl;
+  status?: "pending" | "accepted" | "declined";
+}
 type Recurrence =
   | { kind: "once" }
   | { kind: "weekly"; weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6 }
@@ -2132,7 +2140,12 @@ function Dashboard({
           (4) friends list, (5) PAST games collapsed. Passive material
           sinks; the user's current obligations rise. */}
       <IncomingPanel home={home} refresh={refresh} />
-      <LiveGamesSection games={home.games} />
+      <LiveGamesSection
+        games={home.games}
+        waiting={home.sentChallenges.filter((c) => c.status === "pending")}
+        refresh={refresh}
+        setMessage={setMessage}
+      />
       {/* PlaySection (Schedule) now lives INSIDE FriendsSection as a
           bottom-of-list button — Tejas's decision. Kept as its own
           component so the schedule form logic is unchanged. */}
@@ -2437,9 +2450,34 @@ function IncomingPanel({ home, refresh }: { home: HomeData; refresh: () => void 
 // accepted invitation is unmissable; past games get their own collapsed
 // section far below. Never mixed — mixing them buries the one thing the
 // user was told about into the noise of games they already know about.
-function LiveGamesSection({ games }: { games: GameMeta[] }) {
+//
+// "In play" also carries WAITING rows — pending outgoing challenges the
+// user is waiting on. Tejas 2026-08-04: a pending outgoing invite must
+// have a dashboard presence; without it the sender goes Home, then has
+// no way back to /waiting except browser-back. Live games render first
+// (they're actionable in the strongest sense), waiting rows second
+// (they're the pending version of the same thing).
+function LiveGamesSection({
+  games,
+  waiting,
+  refresh,
+  setMessage,
+}: {
+  games: GameMeta[];
+  waiting: Array<Challenge & { toHandle?: string; toId?: string }>;
+  refresh: () => void;
+  setMessage: SetMessage;
+}) {
   const active = games.filter((game) => game.status === "active");
-  if (!active.length) return null;
+  if (!active.length && !waiting.length) return null;
+  async function withdraw(id: string) {
+    try {
+      await api(`/api/challenges/${id}/withdraw`, { method: "POST", body: "{}" });
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Couldn't withdraw.", "error");
+    }
+  }
   return (
     <section className="games games-live">
       <h2 className="section-title">In play</h2>
@@ -2447,8 +2485,42 @@ function LiveGamesSection({ games }: { games: GameMeta[] }) {
         {active.map((game) => (
           <GameRow key={game.id} game={game} accent />
         ))}
+        {waiting.map((challenge) => (
+          <WaitingRow key={challenge.id} challenge={challenge} onWithdraw={() => void withdraw(challenge.id)} />
+        ))}
       </div>
     </section>
+  );
+}
+
+function WaitingRow({
+  challenge,
+  onWithdraw,
+}: {
+  challenge: Challenge & { toHandle?: string };
+  onWithdraw: () => void;
+}) {
+  return (
+    <div className="game-row game-row-waiting accent">
+      <button
+        type="button"
+        className="game-row-body"
+        onClick={() => navigate(`/waiting/${challenge.id}`)}
+        aria-label={`Open waiting room for challenge to @${challenge.toHandle ?? ""}`}
+      >
+        <span className="presence offline" aria-hidden="true" />
+        <span className="row-mono">Waiting for @{challenge.toHandle ?? "friend"}</span>
+        <span className="row-arrow" aria-hidden="true">→</span>
+      </button>
+      <button
+        type="button"
+        className="game-row-action linkish"
+        onClick={(event) => { event.stopPropagation(); onWithdraw(); }}
+        aria-label="Withdraw invite"
+      >
+        Withdraw
+      </button>
+    </div>
   );
 }
 
@@ -2724,6 +2796,15 @@ function FriendsSection({
     }
   }
 
+  async function acceptChallenge(challengeId: string) {
+    try {
+      const { game } = await api<{ game: GameMeta }>(`/api/challenges/${challengeId}/accept`, { method: "POST", body: "{}" });
+      navigate(`/game/${game.id}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Couldn't accept.", "error");
+    }
+  }
+
   // Online first, then offline; each group alphabetized so the order
   // stays stable across refreshes.
   const sortedFriends = [...home.friends].sort((a, b) => {
@@ -2756,18 +2837,12 @@ function FriendsSection({
                   aria-label={friend.online ? "online" : "offline"}
                 />
                 <span className="friend-handle">@{friend.handle}</span>
-                {/* Invite is active regardless of presence — the challenge push
-                    IS the come-online request. Offline state shows via the
-                    status dot only. Challenges persist on the server until
-                    answered or withdrawn (no TTL), so an offline friend gets
-                    the invite in their incoming list on their next open. */}
-                <button
-                  className="primary compact friend-invite"
-                  onClick={() => void invite(friend)}
-                  aria-label={`Invite @${friend.handle}`}
-                >
-                  Invite
-                </button>
+                <FriendRowAction
+                  friend={friend}
+                  home={home}
+                  onInvite={() => void invite(friend)}
+                  onAcceptChallenge={(id) => void acceptChallenge(id)}
+                />
               </li>
             ))}
           </ul>
@@ -2801,6 +2876,92 @@ function FriendsSection({
           the user isn't scheduling. */}
       <PlaySection home={home} refresh={refresh} setMessage={setMessage} />
     </section>
+  );
+}
+
+// Friend-row action button — state-aware (Tejas 2026-08-04: after
+// inviting @alex the row still showed "Invite" and let him spam
+// duplicates; the button must reflect the relationship's current state).
+// Derivation reads home data directly rather than modeling the state
+// machine here — state-smith is authoring docs/state-machines.md and
+// this can be re-expressed in that vocabulary later without a data
+// change. Precedence when multiple states could apply: in-progress
+// game > incoming challenge > outgoing challenge > scheduled > Invite.
+function FriendRowAction({
+  friend,
+  home,
+  onInvite,
+  onAcceptChallenge,
+}: {
+  friend: Friend;
+  home: HomeData;
+  onInvite: () => void;
+  onAcceptChallenge: (challengeId: string) => void;
+}) {
+  const activeGame = home.games.find(
+    (g) => g.status === "active" && (g.whiteId === friend.id || g.blackId === friend.id),
+  );
+  if (activeGame) {
+    return (
+      <button
+        className="ghost compact friend-invite"
+        onClick={() => navigate(`/game/${activeGame.id}`)}
+        aria-label={`Resume game with @${friend.handle}`}
+      >
+        Resume
+      </button>
+    );
+  }
+  const incoming = home.challenges.find(
+    (c) => c.status === "pending" && c.fromId === friend.id,
+  );
+  if (incoming) {
+    return (
+      <button
+        className="primary compact friend-invite"
+        onClick={() => onAcceptChallenge(incoming.id)}
+        aria-label={`Accept challenge from @${friend.handle}`}
+      >
+        Accept
+      </button>
+    );
+  }
+  const outgoing = home.sentChallenges.find(
+    (c) => c.status === "pending" && c.toId === friend.id,
+  );
+  if (outgoing) {
+    return (
+      <button
+        className="ghost compact friend-invite"
+        onClick={() => navigate(`/waiting/${outgoing.id}`)}
+        aria-label={`Waiting for @${friend.handle} — open waiting room`}
+      >
+        Invited
+      </button>
+    );
+  }
+  const scheduled = home.schedules.find(
+    (s) => s.status === "accepted" && (s.fromId === friend.id || s.toId === friend.id),
+  );
+  if (scheduled) {
+    return (
+      <button
+        className="ghost compact friend-invite"
+        disabled
+        aria-label={`Game scheduled with @${friend.handle}`}
+      >
+        Scheduled
+      </button>
+    );
+  }
+  return (
+    <button
+      className="primary compact friend-invite"
+      onClick={onInvite}
+      aria-label={`Invite @${friend.handle}`}
+    >
+      Invite
+    </button>
   );
 }
 

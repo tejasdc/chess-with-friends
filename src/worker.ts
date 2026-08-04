@@ -389,6 +389,9 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/accept$/) && request.method === "POST") {
         return await this.acceptChallenge(url.pathname.split("/")[3], user);
       }
+      if (url.pathname.match(/^\/api\/challenges\/[^/]+\/withdraw$/) && request.method === "POST") {
+        return await this.withdrawChallenge(url.pathname.split("/")[3], user);
+      }
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/state$/) && request.method === "GET") {
         return await this.challengeState(url.pathname.split("/")[3], user);
       }
@@ -791,6 +794,15 @@ export class AppDO extends DurableObject<Env> {
     const body = await readJson<{ friendId: string; timeControl?: TimeControl }>(request);
     const target = db.users[body.friendId];
     this.assertFriends(db, user.id, body.friendId);
+    // Idempotent: if the caller already has a pending outgoing challenge
+    // to this friend, return the existing challenge instead of creating a
+    // duplicate. Backstops the client's "Invited" state against double-
+    // taps and race conditions, and prevents inbox spam on the recipient
+    // (Tejas 2026-08-04).
+    const existing = Object.values(db.challenges).find(
+      (c) => c.fromId === user.id && c.toId === target.id && c.status === "pending",
+    );
+    if (existing) return json({ challenge: existing });
     const challenge: Challenge = {
       id: newId("chl"),
       fromId: user.id,
@@ -804,6 +816,22 @@ export class AppDO extends DurableObject<Env> {
     await this.enqueuePush(db, target.id, "challenge", `@${user.handle} invited you to a game`, "/");
     await this.save(db);
     return json({ challenge });
+  }
+
+  private async withdrawChallenge(id: string, user: User) {
+    // Sender-initiated cancel of an outstanding pending challenge. Only
+    // the sender may withdraw. Idempotent — withdrawing an already-
+    // withdrawn or already-accepted challenge is not an error, the
+    // client just re-reads state. On success, the challenge is removed
+    // from the DB so both sides' /api/me feeds drop it on next read.
+    const db = await this.db();
+    const challenge = db.challenges[id];
+    if (!challenge) return json({ status: "gone" });
+    if (challenge.fromId !== user.id) throw new Error("Only the inviter can withdraw.");
+    if (challenge.status !== "pending") return json({ status: challenge.status });
+    delete db.challenges[id];
+    await this.save(db);
+    return json({ status: "withdrawn" });
   }
 
   private async acceptChallenge(id: string, user: User) {

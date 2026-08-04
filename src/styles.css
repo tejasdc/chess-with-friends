@@ -372,16 +372,23 @@ body[data-screen="game"] .topbar {
 /* Landing and Inspirations follow Tejas's general no-scroll law: if the
    page doesn't NEED to scroll, don't add scroll. Same shell-cap pattern
    as the game screen, tuned to their content shape. Footer pins to the
-   bottom of the viewport via flex; content above fills the rest. */
+   bottom of the viewport via flex; content above fills the rest.
+   Height uses svh (SMALLEST viewport height — always accounts for
+   mobile Safari's URL bar + toolbar) instead of dvh (dynamic — reports
+   the retracted-URL-bar height, which overflows on the initial-load
+   state when the URL bar is visible). Tejas 2026-08-04 hit this on
+   /inspirations: 100dvh at 844px passed headless but overflowed on
+   his real iPhone because usable height there was ~690. svh is the
+   guarantee. */
 body[data-screen="landing"],
 body[data-screen="inspirations"] {
   overflow: hidden;
-  height: 100dvh;
+  height: 100svh;
 }
 body[data-screen="landing"] .shell,
 body[data-screen="inspirations"] .shell {
-  height: 100dvh;
-  min-height: 100dvh;
+  height: 100svh;
+  min-height: 100svh;
   padding-top: 12px;
   padding-bottom: 8px;
   gap: 12px;
@@ -1692,7 +1699,13 @@ body[data-screen="landing"] .landing-copy {
 .insp-figure img {
   display: block;
   max-width: 100%;
-  max-height: min(280px, 34dvh);
+  /* svh so the image cap accounts for mobile Safari's URL bar. Coefficient
+     tuned against the iPhone 17 Pro simulator (real WebKit, real chrome):
+     shell padding + prose + caption + made-by consume ~510px on the
+     device, leaving ~180px for the image at svh≈724. Team-lead 2026-08-04:
+     "shrink the image further before touching the prose — the words are
+     the page." */
+  max-height: min(180px, 22svh);
   width: auto;
   height: auto;
   border-radius: 2px;
@@ -1719,7 +1732,7 @@ body[data-screen="landing"] .landing-copy {
 @media (max-height: 700px) {
   /* Tight vertical viewport (short desktop windows, some phones in
      landscape) — squeeze the image further before touching prose. */
-  .insp-figure img { max-height: 32dvh; }
+  .insp-figure img { max-height: 28svh; }
   .insp-title { font-size: 24px; margin: 2px 0 4px; }
 }
 
@@ -1739,7 +1752,7 @@ body[data-screen="landing"] .landing-copy {
   }
   .insp-prose { flex: 1 1 0; max-width: 520px; }
   .insp-figure { flex: 1 1 0; max-width: 480px; }
-  .insp-figure img { max-height: 60dvh; }
+  .insp-figure img { max-height: 60svh; }
   .insp-title { font-size: 32px; }
 }
 

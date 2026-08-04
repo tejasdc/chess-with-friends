@@ -24,8 +24,15 @@ issues new orders.
       sign out. Invite-link is NOT in the menu (moved to the Add-a-friend
       disclosure per Tejas 2026-08-04 — copy-invite is a friends action, not
       a settings action).
-- [ ] Name is "two chairs" (lowercase): wordmark, <title>, manifest name/short_name,
-      APP_NAME var (passkey rpName).
+- [ ] Naming split (Tejas 2026-08-04): the URL already carries the name;
+      the <title> should say what the app IS.
+      • APP identity "two chairs" (lowercase) — in-app wordmark, manifest
+        name/short_name (home-screen install label), APP_NAME env var
+        (passkey rpName).
+      • DOCUMENT title / share metadata "chess with friends" — index.html
+        <title>, og:title, twitter:title, meta description.
+      • og:description carries the approved copy line ("No infinite pool
+        of opponents. A game happens when two friends sit down.").
 - [ ] Icon: Rodchenko elevation TRACE in app tokens (map A: cream/teak/navy),
       bent-tube arc CONNECTED (continuous stroke), verified at zoom.
 
@@ -128,12 +135,24 @@ issues new orders.
 - [ ] VISUAL MATRIX SHIP GATE (Tejas 2026-08-04, founding incident: schedule
       form shipped with the Time field crushed under the Repeat dropdown at
       desktop widths). Before EVERY deploy, run `node scripts/visual-matrix.mjs`
-      and OPEN the contact-sheet HTML for each viewport (390, 430, 1440).
-      Look at every cell — landing (rest / piece-selected / mid-transition),
-      inspirations, dashboard (rest / add-friend open / schedule open / menu
-      open / notif popover open), waiting room, game (live / selected).
-      Deploy is blocked until every cell has been eyeballed. This is the
-      permanent answer to "why are we shipping things without looking."
+      and OPEN the contact-sheet HTML for each viewport (390, 430, 1440)
+      AND the iOS Simulator contact sheet. Look at every cell — landing
+      (rest / piece-selected / mid-transition), inspirations, dashboard
+      (rest / add-friend open / schedule open / menu open / notif popover
+      open), waiting room, game (live / selected). Deploy is blocked until
+      every cell has been eyeballed. This is the permanent answer to
+      "why are we shipping things without looking."
+- [ ] SIMULATOR-AS-TRUTH (added 2026-08-04 after Tejas hit an inspirations
+      overflow the headless viewports could not see). Headless viewports
+      report the full 844/932/900 usable height; mobile Safari's URL bar +
+      toolbar consume ~120-190px on device, so `100dvh` math that passes
+      headless overflows on the real phone. The visual matrix's MOBILE
+      cells MUST be captured on the iOS Simulator (real WebKit, browser
+      chrome present) via `xcrun simctl openurl` + `xcrun simctl io
+      screenshot`, in addition to the headless capture. Headless stays
+      for fast programmatic guards (overlap, geometry) and desktop; the
+      simulator is the truth pass for phone surfaces. Any no-scroll
+      surface must be verified with browser chrome present.
 - [ ] PROGRAMMATIC OVERLAP GUARD (same incident). The `no element overlap
       across the visual matrix` adversity test walks the same surfaces and
       asserts NO two visible labeled controls (input/select/button/textarea/

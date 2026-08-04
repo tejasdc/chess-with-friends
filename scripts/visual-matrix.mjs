@@ -26,9 +26,25 @@ import { chromium } from "playwright";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 
 const BASE = "http://localhost:8787";
 const OUT_ROOT = "tmp/visual-matrix";
+
+// iOS Simulator UDIDs — booted device is used as the truth pass for
+// mobile cells (real WebKit, real browser chrome). Ledger 2026-08-04:
+// "any no-scroll surface must be verified with browser chrome present,
+// not just nominal viewport." Simulator surfaces expose bugs headless
+// Chromium cannot see (URL bar squeezes usable height by ~120-190px on
+// mobile Safari; iOS Safari flex behavior differs on intrinsic-min-
+// content). Only URL-reachable states are captured on simulator —
+// deeper interactive states remain headless.
+const SIMULATOR_UDIDS = [
+  "3C3CF59F-CC82-47B0-A139-0F14D6AF6165", // iPhone 17 Pro
+];
 
 const VIEWPORTS = [
   { name: "390x844", width: 390, height: 844 },
@@ -377,6 +393,86 @@ ${cells}
 </body></html>`;
 }
 
+// iOS Simulator capture — mandate 2026-08-04. Boots the target device
+// (if not already booted), points mobile Safari at each URL-reachable
+// surface, and grabs the device screenshot (browser chrome included).
+// Only URL states are captured; deeper interactive states stay headless.
+async function runSimulator() {
+  const dir = join(OUT_ROOT, "simulator");
+  if (existsSync(dir)) await rm(dir, { recursive: true });
+  await mkdir(dir, { recursive: true });
+  const results = [];
+  const URL_STATES = [
+    { key: "landing-rest",    label: "landing / rest",   path: "/" },
+    { key: "inspirations",    label: "inspirations",     path: "/inspirations" },
+  ];
+  for (const udid of SIMULATOR_UDIDS) {
+    // Boot if not booted (idempotent — simctl returns error if already booted).
+    try { await execFileP("xcrun", ["simctl", "boot", udid]); } catch { /* already booted */ }
+    // Give the device a beat to settle if we just booted.
+    await new Promise((r) => setTimeout(r, 800));
+    for (const st of URL_STATES) {
+      const url = `${BASE}${st.path}`;
+      try {
+        await execFileP("xcrun", ["simctl", "openurl", udid, url]);
+        // Safari needs a moment to load. Landing needs the shelf mount
+        // + measure; give it real time.
+        await new Promise((r) => setTimeout(r, 3500));
+        const path = join(dir, `${st.key}-${udid.slice(0, 8)}.png`);
+        await execFileP("xcrun", ["simctl", "io", udid, "screenshot", path]);
+        results.push({ udid, ...st, path, ok: true });
+        console.log(`  [ok] simulator ${udid.slice(0, 8)} · ${st.label}`);
+      } catch (e) {
+        results.push({ udid, ...st, error: String(e).slice(0, 300), ok: false });
+        console.log(`  [FAIL] simulator ${udid.slice(0, 8)} · ${st.label}: ${String(e).slice(0, 200)}`);
+      }
+    }
+  }
+  // HTML contact sheet for simulator shots.
+  const html = renderSimulatorSheet(results);
+  await writeFile(join(dir, "contact-sheet.html"), html);
+  return results;
+}
+
+function renderSimulatorSheet(results) {
+  const cells = results.map((r) => {
+    const status = r.ok ? "ok" : "fail";
+    return `
+      <figure class="cell cell-${status}">
+        <div class="thumb"><img src="${r.path.split("/").pop()}" alt="${r.label}"></div>
+        <figcaption>
+          <span class="label">${r.label}</span>
+          <span class="meta">simulator ${r.udid.slice(0, 8)} · real WebKit + browser chrome</span>
+        </figcaption>
+      </figure>
+    `;
+  }).join("\n");
+  return `<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<title>Visual matrix · iOS Simulator (real WebKit)</title>
+<style>
+  body { margin: 0; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f4efe4; color: #2b2233; }
+  h1 { font-family: ui-monospace, monospace; font-weight: 500; font-size: 18px; margin: 0 0 8px; }
+  .sub { color: #6b6472; margin-bottom: 24px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+  .cell { margin: 0; background: #fff; border: 1px solid #d0c8b8; }
+  .cell-fail { border-color: #b23a3a; }
+  .thumb { background: #ede6d5; }
+  .thumb img { display: block; width: 100%; height: auto; }
+  figcaption { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .label { color: #2b2233; }
+  .meta { color: #6b6472; font-size: 11px; }
+</style>
+</head><body>
+<h1>Visual matrix · iOS Simulator (real WebKit)</h1>
+<p class="sub">Mobile Safari truth pass. Captures URL-reachable states with browser chrome present — the class of bug headless Chromium cannot see.</p>
+<div class="grid">
+${cells}
+</div>
+</body></html>`;
+}
+
 async function main() {
   await preflight();
   await mkdir(OUT_ROOT, { recursive: true });
@@ -389,8 +485,17 @@ async function main() {
   } finally {
     await browser.close();
   }
+  // Simulator pass — mandatory for mobile truth. Runs after headless
+  // so it doesn't block the fast programmatic guards.
+  console.log(`\n[matrix] simulator (real WebKit)`);
+  try {
+    await runSimulator();
+  } catch (e) {
+    console.log(`  [warn] simulator pass failed: ${String(e).slice(0, 200)}`);
+  }
   console.log(`\n[matrix] done. Contact sheets:`);
   for (const v of VIEWPORTS) console.log(`  file://${process.cwd()}/${OUT_ROOT}/${v.name}/contact-sheet.html`);
+  console.log(`  file://${process.cwd()}/${OUT_ROOT}/simulator/contact-sheet.html`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
