@@ -1200,6 +1200,76 @@ test("challenge withdraw + decline: state machine exits and waiting-room termina
   }
 });
 
+test("past-grace: alarm-driven promotion to gone + reconnect restores + no lost moves (state-smith GAP-8/9)", async ({ browser }) => {
+  // The exact regression Tier B could introduce (team-lead callback):
+  // the ONLY mechanism promoting a player to "gone" is now alarm-driven,
+  // replacing setTimeout. If the alarm math is wrong, a disconnected
+  // player stays in "reconnecting" forever. Sequence:
+  //   1. Two clients in an active game.
+  //   2. Kill bob's socket → alice sees bob as reconnecting (grace active).
+  //   3. Time-warp: POST /api/games/:id/debug/expire-grace advances
+  //      every graceExpiresAt into the past and runs alarm(). This is
+  //      the code path the DO would run naturally at the 15s wall-clock
+  //      mark — we exercise it in seconds via the harness.
+  //   4. Alice's connection-state snapshot must flip to "gone".
+  //   5. Bob reconnects (fresh page in his context, socket re-opens).
+  //   6. Alice sees bob back as "connected".
+  //   7. Alice makes a move while bob is gone; bob receives it on
+  //      reconnect (no lost moves — /state resync fires).
+  test.setTimeout(60_000);
+  const suffix = Date.now().toString(36).slice(-6);
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    // Warm up — Alice plays white.
+    await move(alice, "e2", "e4");
+    await expect(bob.locator('[data-square="e4"] .piece')).toBeVisible({ timeout: 5000 });
+    await move(bob, "e7", "e5");
+    await expect(alice.locator('[data-square="e5"] .piece')).toBeVisible({ timeout: 5000 });
+
+    // Kill bob's socket — server sees the close event and sets
+    // graceExpiresAt[bobId] = now + 15s. In wrangler dev the close
+    // event can take a beat to propagate; the DO wakes on the close
+    // event whether or not another request lands, but we give the
+    // event loop a moment before we ask for a fresh snapshot.
+    await killAllSockets(bob);
+    await alice.waitForTimeout(500);
+    // Time-warp past grace directly — /debug/expire-grace sets every
+    // graceExpiresAt into the past and runs alarm(). The alarm sweep
+    // promotes any user without an active socket to "gone" and
+    // broadcasts. Combines the close-processed and grace-past-due
+    // steps into a single deterministic call so we don't race the
+    // wrangler-dev close pump.
+    const expireResult = await alice.evaluate(async (id) => {
+      const r = await fetch(`/api/games/${id}/debug/expire-grace`, {
+        method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}",
+      });
+      return { status: r.status, body: await r.json() };
+    }, gameId);
+    expect(expireResult.status).toBe(200);
+    // Alice's UI receives the broadcast and flips to "opponent offline".
+    await expect(alice.getByRole("status", { name: "opponent offline" })).toBeVisible({ timeout: 8000 });
+
+    // Alice makes a move while bob is fully gone.
+    await move(alice, "g1", "f3");
+
+    // Bob reconnects (his context's page is intact — his client-side
+    // reconnect logic re-opens the socket).
+    await bob.reload();
+    // Wait for socket to re-establish and state to sync.
+    await expect(bob.locator('[data-square="f3"] .piece')).toBeVisible({ timeout: 10_000 });
+    // Alice sees bob back as connected.
+    await expect(alice.getByRole("status", { name: "opponent connected" })).toBeVisible({ timeout: 10_000 });
+    // No lost moves — bob's board reflects the full move history: Nf3 present,
+    // g1 empty (piece moved), e4/e5 intact.
+    await expect(bob.locator('[data-square="g1"] .piece')).toHaveCount(0);
+    await expect(bob.locator('[data-square="e4"] .piece')).toBeVisible();
+    await expect(bob.locator('[data-square="e5"] .piece')).toBeVisible();
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 test("schedule zombie sweep expires pending past startAt via debug tick (state-smith GAP-7/16)", async ({ browser }) => {
   // Time-warp harness (GAP-16): POST /_debug/tick advances alarm-time
   // without wall-clock waits. Proves GAP-7 — a pending schedule whose

@@ -1239,6 +1239,7 @@ export class GameDO extends DurableObject<Env> {
       if (url.pathname === "/move" && request.method === "POST") return await this.move(request);
       if (url.pathname === "/resign" && request.method === "POST") return await this.resign(request);
       if (url.pathname === "/debug/expire" && request.method === "POST") return await this.debugExpire(request);
+      if (url.pathname === "/debug/expire-grace" && request.method === "POST") return await this.debugExpireGrace(request);
       return json({ error: "Not found" }, { status: 404 });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "Game request failed" }, { status: 400 });
@@ -1346,6 +1347,22 @@ export class GameDO extends DurableObject<Env> {
 
   private async stateResponse() {
     return json(await this.snapshot());
+  }
+
+  // Time-warp harness for the grace path (GAP-16 extension). Shifts
+  // every graceExpiresAt entry into the past and immediately runs
+  // alarm(), so an adversity test can prove alarm-driven promotion to
+  // "gone" without waiting the full 15s wall-clock grace. Guarded by
+  // x-debug-local: true — same gate as AppDO.debugTick / debugPushLog.
+  // Idempotent, isolated to grace state (game clocks untouched).
+  private async debugExpireGrace(request: Request) {
+    if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
+    const graces = await this.getGraces();
+    const past = Date.now() - 1_000;
+    for (const userId of Object.keys(graces)) graces[userId] = past;
+    await this.ctx.storage.put("graceExpiresAt", graces);
+    await this.alarm();
+    return json({ expired: Object.keys(graces).length });
   }
 
   private async move(request: Request) {
