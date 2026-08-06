@@ -303,8 +303,11 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await openGame(bob.page, mateGame);
   await shot(alice.page, "06-challenge-game-started");
   await move(alice.page, "f2", "f3");
+  await expect(bob.page.locator('[data-square="f3"] .piece')).toBeVisible({ timeout: 5000 });
   await move(bob.page, "e7", "e5");
+  await expect(alice.page.locator('[data-square="e5"] .piece')).toBeVisible({ timeout: 5000 });
   await move(alice.page, "g2", "g4");
+  await expect(bob.page.locator('[data-square="g4"] .piece')).toBeVisible({ timeout: 5000 });
   await move(bob.page, "d8", "h4");
   await expect(alice.page.getByText("checkmate")).toBeVisible();
   await shot(alice.page, "07-checkmate-terminal");
