@@ -1464,26 +1464,27 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async deliverPush(intent: PushDeliveryIntent) {
-    const db = await this.db();
-    const subscriptions = db.pushSubscriptions[intent.userId] || [];
+    const snapshot = await this.db();
+    const subscriptions = snapshot.pushSubscriptions[intent.userId] || [];
     const dead = new Set<string>();
+    const logs: Array<{ type: PushType; userId: string; createdAt: number; delivered: boolean; status?: number }> = [];
     for (const subscription of subscriptions) {
-      const queued = db.pendingPushesByEndpoint[subscription.endpoint]?.some((pending) => pending.id === intent.pushId);
-      if (!queued) continue;
+      const type = snapshot.pendingPushesByEndpoint[subscription.endpoint]?.find((pending) => pending.id === intent.pushId)?.type;
+      if (!type) continue;
       const result = await sendWebPush(subscription, this.env);
-      const type = db.pendingPushesByEndpoint[subscription.endpoint]?.find((pending) => pending.id === intent.pushId)?.type;
-      if (type) db.pushLog.push({ type, userId: intent.userId, createdAt: Date.now(), delivered: result.delivered, status: result.status });
+      logs.push({ type, userId: intent.userId, createdAt: Date.now(), delivered: result.delivered, status: result.status });
       if (result.status === 410 || result.status === 404) dead.add(subscription.endpoint);
     }
+    if (subscriptions.length === 0) {
+      const type = snapshot.pendingPushes[intent.userId]?.find((pending) => pending.id === intent.pushId)?.type;
+      if (type) logs.push({ type, userId: intent.userId, createdAt: Date.now(), delivered: false });
+    }
+    const db = await this.db();
     if (dead.size) {
       db.pushSubscriptions[intent.userId] = subscriptions.filter((s) => !dead.has(s.endpoint));
       for (const endpoint of dead) delete db.pendingPushesByEndpoint[endpoint];
     }
-    if (subscriptions.length === 0) {
-      const type = db.pendingPushes[intent.userId]?.find((pending) => pending.id === intent.pushId)?.type;
-      if (type) db.pushLog.push({ type, userId: intent.userId, createdAt: Date.now(), delivered: false });
-    }
-    db.pushLog = db.pushLog.slice(-100);
+    db.pushLog = [...db.pushLog, ...logs].slice(-100);
     await this.save(db);
   }
 
