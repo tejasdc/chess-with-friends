@@ -72,6 +72,21 @@ async function addAuthenticator(page) {
   return cdp;
 }
 
+async function installSocketTracker(page) {
+  await page.addInitScript(() => {
+    const Original = window.WebSocket;
+    const bag = [];
+    window.__sockets = bag;
+    class Tracked extends Original {
+      constructor(url, protocols) {
+        super(url, protocols);
+        bag.push(this);
+      }
+    }
+    window.WebSocket = Tracked;
+  });
+}
+
 async function register(page, handle) {
   await page.goto(`${BASE}/`);
   await page.getByPlaceholder("your_handle").fill(handle);
@@ -275,6 +290,7 @@ async function ensureLiveGame(ctx) {
   // Ensure alice+bob are in an active game together. Prereq: an
   // outgoing challenge exists; then bob accepts via API. If a game is
   // already active between them, this is a no-op.
+  if (ctx.liveGameId) return ctx.liveGameId;
   await ensureOutgoingChallenge(ctx);
   const bob = ctx.bob.page;
   await bob.evaluate(async () => {
@@ -285,6 +301,11 @@ async function ensureLiveGame(ctx) {
       }
     }
   });
+  const me = await ctx.alice.page.evaluate(async () => (await fetch("/api/me")).json());
+  const game = (me.games || []).find((g) => g.status === "active");
+  if (!game) throw new Error("live game was not created");
+  ctx.liveGameId = game.id;
+  return ctx.liveGameId;
 }
 
 async function stateDashboardLiveGame(page, ctx) {
@@ -295,13 +316,10 @@ async function stateDashboardLiveGame(page, ctx) {
 }
 
 async function stateGameLive(page, ctx) {
-  await ensureLiveGame(ctx);
+  const gameId = await ensureLiveGame(ctx);
   const alice = ctx.alice.page;
-  const me = await alice.evaluate(async () => (await fetch("/api/me")).json());
-  const game = (me.games || []).find((g) => g.status === "active");
-  if (!game) return;
-  await alice.goto(`${BASE}/game/${game.id}`);
-  await alice.waitForSelector(".board", { timeout: 8000 });
+  await alice.goto(`${BASE}/game/${gameId}`);
+  await alice.waitForSelector(".game-fixed", { timeout: 15000 });
   await alice.waitForTimeout(400);
 }
 
@@ -310,6 +328,119 @@ async function stateGameSelected(page, ctx) {
   const own = page.locator(`.board:not(.board-static) .square[data-square="e2"]`);
   if (await own.count()) await own.first().click().catch(() => {});
   await page.waitForTimeout(200);
+}
+
+async function liveGameId(ctx) {
+  return await ensureLiveGame(ctx);
+}
+
+async function openLiveGame(page, ctx) {
+  const gameId = await liveGameId(ctx);
+  if (!page.url().endsWith(`/game/${gameId}`)) await page.goto(`${BASE}/game/${gameId}`);
+  await page.waitForSelector(".game-fixed", { timeout: 15000 });
+  await page.waitForTimeout(400);
+  return gameId;
+}
+
+async function sendVoice(page, message) {
+  await page.evaluate((payload) => {
+    const sockets = (window.__sockets || []).filter((socket) => socket.readyState === WebSocket.OPEN);
+    if (!sockets.length) throw new Error("no open game socket");
+    sockets[sockets.length - 1].send(JSON.stringify(payload));
+  }, message);
+}
+
+async function gameSnapshot(page, gameId) {
+  return await page.evaluate(async (id) => (await (await fetch(`/api/games/${id}/state`)).json()), gameId);
+}
+
+async function waitCallState(page, gameId, state) {
+  await page.waitForFunction(
+    async ({ id, expected }) => {
+      const game = await (await fetch(`/api/games/${id}/state`)).json();
+      return game.callSession?.state === expected;
+    },
+    { id: gameId, expected: state },
+    { timeout: 8000 },
+  );
+  return (await gameSnapshot(page, gameId)).callSession;
+}
+
+async function ensureRequestingCall(ctx) {
+  const gameId = await openLiveGame(ctx.alice.page, ctx);
+  if (!ctx.bob.page.url().endsWith(`/game/${gameId}`)) await ctx.bob.page.goto(`${BASE}/game/${gameId}`);
+  await ctx.bob.page.waitForSelector(".game-fixed", { timeout: 15000 });
+  const current = (await gameSnapshot(ctx.alice.page, gameId)).callSession;
+  if (current && current.state !== "ended") return { gameId, session: current };
+  await sendVoice(ctx.alice.page, { type: "call-initiate" });
+  const session = await waitCallState(ctx.alice.page, gameId, "requesting");
+  return { gameId, session };
+}
+
+async function ensureConnectedCall(ctx) {
+  const { gameId, session } = await ensureRequestingCall(ctx);
+  if (session.state === "connected") return { gameId, session };
+  if (session.state === "requesting") await sendVoice(ctx.bob.page, { type: "call-accept", callSessionId: session.id });
+  await waitCallState(ctx.alice.page, gameId, "connecting").catch(() => undefined);
+  await sendVoice(ctx.alice.page, { type: "peer-ice-connected", callSessionId: session.id });
+  const connected = await waitCallState(ctx.alice.page, gameId, "connected");
+  return { gameId, session: connected };
+}
+
+async function stateGameCallIdle(page, ctx) {
+  await openLiveGame(page, ctx);
+}
+
+async function stateGameCallRequestingCaller(page, ctx) {
+  await ensureRequestingCall(ctx);
+  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='requesting']");
+}
+
+async function stateGameCallRequestingRecipient(page, ctx) {
+  await ensureRequestingCall(ctx);
+  await ctx.bob.page.waitForSelector(".voice-bar[data-call-state='requesting']");
+  return ctx.bob.page;
+}
+
+async function stateGameCallConnected(page, ctx) {
+  await ensureConnectedCall(ctx);
+  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='connected']");
+}
+
+async function stateGameCallConnectedMuted(page, ctx) {
+  await ensureConnectedCall(ctx);
+  await ctx.alice.page.locator(".voice-bar").getByRole("button", { name: "MUTE" }).click();
+  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='connected']");
+}
+
+async function stateGameCallConnectedPeerMuted(page, ctx) {
+  const { gameId, session } = await ensureConnectedCall(ctx);
+  await sendVoice(ctx.alice.page, { type: "call-mute", callSessionId: session.id, muted: false });
+  await sendVoice(ctx.bob.page, { type: "call-mute", callSessionId: session.id, muted: true });
+  await ctx.alice.page.waitForFunction(() => Boolean(document.querySelector(".peer-muted-pill")), null, { timeout: 8000 });
+  await gameSnapshot(ctx.alice.page, gameId);
+}
+
+async function stateGameCallReconnecting(page, ctx) {
+  const { session } = await ensureConnectedCall(ctx);
+  await sendVoice(ctx.alice.page, { type: "peer-ice-disconnected", callSessionId: session.id });
+  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='reconnecting']");
+}
+
+async function stateGameCallPostGameStillActive(page, ctx) {
+  const { gameId, session } = await ensureConnectedCall(ctx);
+  await sendVoice(ctx.alice.page, { type: "peer-ice-connected", callSessionId: session.id });
+  await ctx.bob.page.evaluate(async (id) => {
+    await fetch(`/api/games/${id}/resign`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  }, gameId);
+  await ctx.alice.page.waitForSelector(".game-bottom-terminal", { timeout: 8000 });
+  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='connected']");
+}
+
+async function stateGameCallEndedPill(page, ctx) {
+  const { session } = await ensureConnectedCall(ctx);
+  await sendVoice(ctx.alice.page, { type: "call-hangup", callSessionId: session.id });
+  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='ended']");
 }
 
 async function stateDashboardAcceptedSchedule(page, ctx) {
@@ -396,6 +527,8 @@ async function makeContext(browser) {
   const bob = await bobCtx.newPage();
   const charlie = await charlieCtx.newPage();
   const zero = await zeroCtx.newPage();
+  await installSocketTracker(alice);
+  await installSocketTracker(bob);
   await addAuthenticator(alice);
   await addAuthenticator(bob);
   await addAuthenticator(charlie);
@@ -471,6 +604,15 @@ const CELLS = [
   { group: "alice",  key: "dashboard-live-game",          label: "dashboard / live game (Resume + in-play row)",            run: stateDashboardLiveGame },
   { group: "alice",  key: "game-live",                    label: "game / live",                                             run: stateGameLive },
   { group: "alice",  key: "game-selected",                label: "game / selected",                                         run: stateGameSelected },
+  { group: "alice",  key: "game-call-idle",               label: "game / call idle",                                        run: stateGameCallIdle },
+  { group: "alice",  key: "game-call-requesting-caller",  label: "game / call requesting caller",                          run: stateGameCallRequestingCaller },
+  { group: "alice",  key: "game-call-requesting-recipient",label: "game / call requesting recipient",                       run: stateGameCallRequestingRecipient },
+  { group: "alice",  key: "game-call-connected",          label: "game / call connected",                                   run: stateGameCallConnected },
+  { group: "alice",  key: "game-call-connected-muted",    label: "game / call connected muted",                             run: stateGameCallConnectedMuted },
+  { group: "alice",  key: "game-call-connected-peer-muted",label: "game / call connected peer muted",                       run: stateGameCallConnectedPeerMuted },
+  { group: "alice",  key: "game-call-reconnecting",       label: "game / call reconnecting",                                run: stateGameCallReconnecting },
+  { group: "alice",  key: "game-call-post-game-still-active", label: "game / call post-game still active",                  run: stateGameCallPostGameStillActive },
+  { group: "alice",  key: "game-call-ended-pill",         label: "game / call ended pill",                                  run: stateGameCallEndedPill },
   { group: "alice",  key: "dashboard-accepted-schedule",  label: "dashboard / accepted schedule (Scheduled)",               run: stateDashboardAcceptedSchedule },
   { group: "alice",  key: "dashboard-friend-req-incoming",label: "dashboard / incoming friend request",                     run: stateDashboardIncomingFriendRequest },
   { group: "alice",  key: "dashboard-friend-req-outgoing",label: "dashboard / outgoing friend request",                     run: stateDashboardOutgoingFriendRequest },
