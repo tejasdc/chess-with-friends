@@ -334,6 +334,20 @@ depends on information the writer doesn't have, that state
 doesn't belong in this machine. Either move the writer, or move
 the state to the surface as a projection.
 
+**Corollary — client-side UI intermediates are allowed and are
+NOT server states.** A short-lived UI-only state that shapes an
+affordance without changing what the server knows (e.g., the
+"end-armed" step of Machine 8's mute-primary two-tap End) lives
+inside the client component. It has its own tiny machine —
+`idle → armed → (commit | cancel | interrupted)` — but that
+machine does not touch the server-side lifecycle. Two markers
+that keep this honest: (a) intervening events from the server
+must reset the UI intermediate, so it can never disagree with
+the server for more than one round trip; (b) the server accepts
+the underlying event (hangup, in this example) even without the
+intermediate ever having existed. The UI machine protects the
+user, not the server contract.
+
 ### 5. Prime the just-written handle rather than re-reading the set
 
 The `GameDO` `socket` handler accepts a new WebSocket via
