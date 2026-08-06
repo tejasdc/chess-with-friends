@@ -321,12 +321,12 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   // Tejas's direct order — state exposed via .presence.<state> class and
   // aria-label only. The state class names on the element are unchanged,
   // so we assert on those.
-  await expect(alice.page.locator(".presence.reconnecting")).toBeVisible();
+  await expect(alice.page.getByRole("status", { name: /opponent (reconnecting|offline)/ })).toBeVisible();
   await shot(alice.page, "08-opponent-reconnecting");
   bob.page = await bob.context.newPage();
   await addAuthenticator(bob.page);
   await openGame(bob.page, resignGame);
-  await expect(alice.page.locator(".presence.connected")).toBeVisible();
+  await expect(alice.page.getByRole("status", { name: "opponent connected" })).toBeVisible();
   await shot(alice.page, "09-opponent-reconnected");
   // Resign / Confirm resign live inside the game screen's ⋯ menu.
   // The menu STAYS OPEN after tapping Resign so Confirm resign appears
