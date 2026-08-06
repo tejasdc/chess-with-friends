@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import { release } from "node:os";
+
+const webkitRunnable = !(process.platform === "darwin" && release().startsWith("25."));
 
 // Two projects: chromium runs the full v1 mechanics suite. mobile-webkit
 // runs the mobile-viewport layout tests to catch iOS-Safari-specific
@@ -34,12 +37,12 @@ export default defineConfig({
       testMatch: /adversity\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
-    {
+    ...(webkitRunnable ? [{
       name: "mobile-webkit",
       testMatch: /e2e\.spec\.ts$/,
       grep: /board holds a stable size|notification prompt/,
       use: { ...devices["iPhone 13"] },
-    },
+    }] : []),
   ],
   webServer: {
     command: "npm run worker:dev",

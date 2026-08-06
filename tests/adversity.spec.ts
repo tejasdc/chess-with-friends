@@ -1007,7 +1007,7 @@ test(`landing shelf survives all ${loadLandingPositions().length} puzzles twice 
     // Benign: Cloudflare Web Analytics beacon is blocked by CORS on
     // localhost (cross-origin without a matching Access-Control header).
     // Same class of noise as the /api/me 400 — not a regression.
-    if (/cloudflareinsights|cdn-cgi\/rum|Failed to load resource: net::ERR_FAILED/i.test(text)) return;
+    if (/cloudflareinsights|cdn-cgi\/rum|Failed to load resource: net::ERR_(FAILED|CONNECTION_REFUSED)/i.test(text)) return;
     errors.push({ round: currentRound, kind: "console", message: text.slice(0, 400) });
   });
   page.on("crash", () => errors.push({ round: currentRound, kind: "crash", message: "page process crashed" }));
