@@ -66,6 +66,55 @@ test("notification prompt disappears after permission is granted and stays gone 
   await context.close();
 });
 
+test("pending push is POST-only and removed only after explicit ack", async ({ browser }) => {
+  const suffix = Date.now().toString(36).slice(-6);
+  const alice = await client(browser, `push_a_${suffix}`);
+  const bob = await client(browser, `push_b_${suffix}`);
+  try {
+    await register(alice.page, alice.handle);
+    await register(bob.page, bob.handle);
+    await fakePushSubscribe(bob.page);
+
+    await alice.page.getByRole("button", { name: "Add a friend" }).click();
+    await alice.page.getByPlaceholder("friend_handle").fill(bob.handle);
+    await alice.page.getByRole("button", { name: "Add", exact: true }).click();
+
+    const first = await peekPendingPush(bob.page);
+    const second = await peekPendingPush(bob.page);
+    expect(first?.type).toBe("friend_request");
+    expect(second?.id).toBe(first?.id);
+
+    const getStatus = await bob.page.evaluate(async () => {
+      return (await fetch("/api/push/pending", { method: "GET", credentials: "include" })).status;
+    });
+    expect(getStatus).not.toBe(200);
+
+    await ackPendingPush(bob.page, first!.id);
+    const afterAck = await peekPendingPush(bob.page);
+    expect(afterAck).toBeNull();
+  } finally {
+    await alice.context.close();
+    await bob.context.close();
+  }
+});
+
+test("auth options probes are rate limited per handle", async ({ page }) => {
+  await page.goto("/");
+  const handle = `probe_${Date.now().toString(36).slice(-6)}`;
+  const statuses: number[] = [];
+  for (let i = 0; i < 14; i++) {
+    statuses.push(await page.evaluate(async (h) => {
+      const response = await fetch("/api/auth/register/options", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ handle: h }),
+      });
+      return response.status;
+    }, handle));
+  }
+  expect(statuses.some((status) => status === 400)).toBe(true);
+});
+
 // Regression guard for the "board grows unboundedly on scroll" bug that
 // hit iOS Safari (chess.tejas.nyc, 2026-08-03). Root cause was implicit
 // auto-track grids in the .shell > .stage > .game > .board-column chain
@@ -393,22 +442,31 @@ async function fakePushSubscribe(page: Page) {
 }
 
 async function pendingPush(page: Page): Promise<{ type?: string } | null> {
-  return page.evaluate(async (): Promise<{ id?: string; type?: string } | null> => {
+  const pending = await peekPendingPush(page);
+  if (pending?.id) await ackPendingPush(page, pending.id);
+  return pending;
+}
+
+async function peekPendingPush(page: Page): Promise<{ id: string; type?: string } | null> {
+  return page.evaluate(async (): Promise<{ id: string; type?: string } | null> => {
     const endpoint = window.localStorage.getItem("testPushEndpoint") || "";
     const response = await fetch("/api/push/pending", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ endpoint }),
     });
-    const pending = await response.json() as { id?: string; type?: string } | null;
-    if (pending?.id) {
-      await fetch("/api/push/pending", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ endpoint, ackId: pending.id }),
-      });
-    }
-    return pending;
+    return response.json() as Promise<{ id: string; type?: string } | null>;
+  });
+}
+
+async function ackPendingPush(page: Page, id: string) {
+  await page.evaluate(async (ackId) => {
+    const endpoint = window.localStorage.getItem("testPushEndpoint") || "";
+    await fetch("/api/push/pending", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ endpoint, ackId }),
+    });
   });
 }
 

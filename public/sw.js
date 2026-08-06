@@ -1,7 +1,7 @@
 // Bumped v2 → v3: added challenge_accepted push type. Clients on the
 // old cache key will pick up the new assets on next update.
 const CACHE_NAME = "chess-with-friends-v3";
-const PUSH_TYPES = new Set(["friend_request", "challenge", "challenge_accepted", "scheduled_start"]);
+const PUSH_TYPES = new Set(["friend_request", "challenge", "challenge_accepted", "scheduled_start", "call_invite"]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -17,7 +17,11 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    const names = await caches.keys();
+    await Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)));
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener("fetch", (event) => {
@@ -68,15 +72,30 @@ async function showPolicyNotification(event) {
     payload.type === "friend_request" ? "Friend request" :
     payload.type === "challenge" ? "Game challenge" :
     payload.type === "challenge_accepted" ? "Your game is ready" :
+    payload.type === "call_invite" ? "Your friend wants to talk" :
     "Your game is starting"
   );
 
   await self.registration.showNotification(title, {
     icon: "/apple-touch-icon.png",
     badge: "/icon.svg",
-    tag: payload.type,
+    tag: payload.id || `${payload.type}:${payload.createdAt || Date.now()}`,
     data: { url: payload.url || "/" },
   });
+
+  if (payload.id) {
+    try {
+      const subscription = await self.registration.pushManager.getSubscription();
+      await fetch("/api/push/pending", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription?.endpoint || "", ackId: payload.id }),
+      });
+    } catch {
+      // The item remains queued server-side if the ack cannot be recorded.
+    }
+  }
 }
 
 self.addEventListener("notificationclick", (event) => {

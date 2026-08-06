@@ -15,7 +15,7 @@ for (const [label, viewport] of [
   const ctx = await browser.newContext({ viewport });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => console.error("[pageerror]", e.message));
-  await page.goto("https://chess.tejas.nyc/", { waitUntil: "networkidle" });
+  await page.goto("https://twochairs.club/", { waitUntil: "networkidle" });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(600);
   await page.waitForSelector(".auth-scene .board", { timeout: 8000 });

@@ -9,7 +9,7 @@ try {
   for (const [name, w, h] of [["prod-mobile-auth", 390, 844], ["prod-desktop-auth", 1200, 900]]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h } });
     const page = await ctx.newPage();
-    await page.goto("https://chess.tejas.nyc/");
+    await page.goto("https://twochairs.club/");
     await page.waitForLoadState("networkidle");
     await page.screenshot({ path: `${out}/${name}.png`, fullPage: false });
     console.log("shot", name);

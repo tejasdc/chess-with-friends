@@ -127,12 +127,15 @@ or unreachable so an implementing agent can close them one at a time.
 | Push permission and subscription | browser (permission), `AppDO.pushSubscriptions[userId]` (up to 5) | browser + DO |
 | Client `home` | derived from `/api/me` and `/api/presence/heartbeat` | React state, refreshed every 10s and after any action |
 
-Cloudflare Durable Objects serialize request execution per DO. Within an
-`AppDO` handler, or within a `GameDO` handler, there is no interleaving. That
-is what lets us treat each DO as a lock-free single-writer without
-transactional bookkeeping. It also means every rule below that says "the DO
-is the writer" is enforceable — HTTP callers cannot mutate the DO's state
-except through the routes the DO exposes.
+Cloudflare Durable Objects serialize writes through one object instance, so
+`AppDO` and each `GameDO` remain the only writers for their machines. That
+single-writer guarantee does not mean a handler can mutate in-memory state,
+await arbitrary external I/O, and assume no other event can observe old durable
+storage during the await. Durable state must be persisted before remote side
+effects such as Web Push delivery or cross-DO initialization; retries and
+read-model reconciliation treat those post-save effects as replayable. HTTP
+callers still cannot mutate state except through the DO routes, but handler
+code must keep durable transitions and external effects in that order.
 
 ## Machine inventory
 

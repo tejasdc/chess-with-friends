@@ -312,6 +312,70 @@ test("rapid double-click on the same square does not desync", async ({ browser }
   }
 });
 
+test("stale move that discovers timeout reconciles AppDO game projection", async ({ browser }) => {
+  const suffix = Date.now().toString(36).slice(-6);
+  const { aliceCtx, bobCtx, alice, gameId } = await twoClientsInGame(browser, suffix);
+  try {
+    const moveResult = await alice.evaluate(async (id) => {
+      await fetch(`/api/games/${id}/debug/expire`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ms: 0 }),
+      });
+      const response = await fetch(`/api/games/${id}/move`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "x-client-op-id": `timeout-${id}` },
+        body: JSON.stringify({ from: "e2", to: "e4" }),
+      });
+      const body = await response.json() as { status: string };
+      return { status: response.status, body };
+    }, gameId);
+    expect(moveResult.status).toBe(200);
+    expect(moveResult.body.status).toBe("timeout");
+
+    await expect
+      .poll(async () => {
+        return alice.evaluate(async (id) => {
+          const home = await (await fetch("/api/me", { credentials: "include" })).json() as { games: Array<{ id: string; status: string }> };
+          return home.games.find((game) => game.id === id)?.status;
+        }, gameId);
+      }, { timeout: 5_000 })
+      .toBe("timeout");
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("move replay with same client op id returns the committed result once", async ({ browser }) => {
+  const suffix = Date.now().toString(36).slice(-6);
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix);
+  try {
+    const replay = await alice.evaluate(async (id) => {
+      type MoveBody = { moves: Array<{ from: string; to: string }> };
+      const headers = { "content-type": "application/json", "x-client-op-id": `move-${id}-e2e4` };
+      const body = JSON.stringify({ from: "e2", to: "e4" });
+      const first = await fetch(`/api/games/${id}/move`, { method: "POST", credentials: "include", headers, body });
+      const firstBody = await first.json() as MoveBody;
+      const second = await fetch(`/api/games/${id}/move`, { method: "POST", credentials: "include", headers, body });
+      const secondBody = await second.json() as MoveBody;
+      return { first: { status: first.status, body: firstBody }, second: { status: second.status, body: secondBody } };
+    }, gameId);
+    expect(replay.first.status).toBe(200);
+    expect(replay.second.status).toBe(200);
+    expect(replay.first.body.moves).toHaveLength(1);
+    expect(replay.second.body.moves).toHaveLength(1);
+    expect(replay.second.body.moves[0].from).toBe("e2");
+    expect(replay.second.body.moves[0].to).toBe("e4");
+    await expect(bob.locator('[data-square="e4"] .piece')).toBeVisible({ timeout: 5000 });
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 test("move roundtrip stays under the perf budget on a throttled CPU", async ({ browser }) => {
   const suffix = Date.now().toString(36).slice(-6);
   const { aliceCtx, bobCtx, alice, bob } = await twoClientsInGame(browser, suffix);
@@ -372,6 +436,51 @@ test("sending a challenge takes the sender to the waiting room; accept transitio
     // Alice transitions in-place to the game via the waiting-room poll.
     await expect(alice).toHaveURL(/\/game\/gam_/, { timeout: 5000 });
     await expect(alice.locator(".board")).toBeVisible();
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("challenge accept replay with same client op id returns the existing game", async ({ browser }) => {
+  const suffix = Date.now().toString(36).slice(-6);
+  const aliceCtx = await browser.newContext();
+  const bobCtx = await browser.newContext();
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  await addAuthenticator(alice);
+  await addAuthenticator(bob);
+  const aH = `acc_a${suffix}`;
+  const bH = `acc_b${suffix}`;
+  try {
+    await register(alice, aH);
+    await register(bob, bH);
+    await addFriendByHandle(alice, bH);
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await alice.reload();
+    await presenceHeartbeat(bob);
+    await alice.reload();
+    await alice.getByRole("button", { name: `Invite @${bH}` }).click();
+    await expect(alice).toHaveURL(/\/waiting\/chl_/);
+    const challengeId = alice.url().split("/waiting/")[1];
+
+    const replay = await bob.evaluate(async (id) => {
+      type AcceptBody = { game: { id: string } };
+      const headers = { "content-type": "application/json", "x-client-op-id": `accept-${id}` };
+      const first = await fetch(`/api/challenges/${id}/accept`, { method: "POST", credentials: "include", headers, body: "{}" });
+      const firstBody = await first.json() as AcceptBody;
+      const second = await fetch(`/api/challenges/${id}/accept`, { method: "POST", credentials: "include", headers, body: "{}" });
+      const secondBody = await second.json() as AcceptBody;
+      return { first: { status: first.status, body: firstBody }, second: { status: second.status, body: secondBody } };
+    }, challengeId);
+
+    expect(replay.first.status).toBe(200);
+    expect(replay.second.status).toBe(200);
+    expect(replay.first.body.game.id).toMatch(/^gam_/);
+    expect(replay.second.body.game.id).toBe(replay.first.body.game.id);
+    const home = await bob.evaluate(async () => (await (await fetch("/api/me", { credentials: "include" })).json()) as { games: Array<{ id: string }> });
+    expect(home.games.filter((game) => game.id === replay.first.body.game.id)).toHaveLength(1);
   } finally {
     await aliceCtx.close();
     await bobCtx.close();

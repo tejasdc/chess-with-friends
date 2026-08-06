@@ -71,7 +71,7 @@ issues new orders.
 - [ ] Schedule = day + time picker (never "start in minutes"). Recurring:
       once / weekly / daily; accept ONCE; push each occurrence; End series from
       either side.
-- [ ] Copy-invite-link lives in ⋯ menu only.
+- [ ] Copy-invite-link lives in the Add-a-friend disclosure only.
 - [ ] Incoming challenge = prominent band with Accept.
 - [ ] Human copy everywhere: "@x invited you to a game · 10 min". Pipe notation
       ("10|0") NEVER user-facing.
@@ -124,9 +124,17 @@ issues new orders.
       1976, NOT Rodchenko.
 
 ## Infra
-- [ ] twochairs.club canonical; chess.tejas.nyc serves duplicate (NO 301).
-- [ ] Origin-aware analytics beacon (twochairs.club → its own token).
+- [ ] twochairs.club is the single canonical domain. chess.tejas.nyc and
+      www.chess.tejas.nyc redirect with 301 to the matching twochairs.club
+      path + query; no duplicate app origin.
+- [ ] Cloudflare Web Analytics uses the twochairs.club beacon token only.
 - [ ] HTML no-cache; hashed assets immutable (deploys reach phones on plain reload).
+- [ ] Structured server mutation logs: JSON lines shaped `{ level, event,
+      actor, entity: { kind, id }, outcome, latency_ms, error? }` at write
+      sites, readable in Cloudflare Workers observability.
+- [ ] Client error reporting: `window.onerror` and unhandled promise rejection
+      post to `/api/_client_error`; AppDO keeps the last 500 records, readable
+      only from the local debug endpoint.
 - [ ] Full test gate green: mechanics + adversity (+ webkit project where runnable).
 - [ ] Every deploy verified live: health, beacon, asset hashes, and the specific
       feature probed on production.

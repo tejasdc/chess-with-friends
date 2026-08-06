@@ -1393,17 +1393,58 @@ const whiteGlyphs = filledGlyphs;
 const blackGlyphs = filledGlyphs;
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  const method = (init.method || "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD" && !headers.has("x-client-op-id")) {
+    headers.set("x-client-op-id", crypto.randomUUID?.() || `${Date.now()}:${Math.random()}`);
+  }
   const response = await fetch(path, {
     // Explicit — modern browsers default to same-origin, but Safari's
     // service-worker fetch interception has bit us before. Being explicit
     // guarantees the session cookie rides on every /api call.
     credentials: "same-origin",
     ...init,
-    headers: { "content-type": "application/json", ...(init.headers || {}) },
+    headers,
   });
   const data = (await response.json().catch(() => ({}))) as { error?: string };
   if (!response.ok) throw new Error(data.error || "Request failed.");
   return data as T;
+}
+
+declare global {
+  interface Window {
+    __cwfUserId?: string;
+    __cwfClientErrorsInstalled?: boolean;
+  }
+}
+
+function installClientErrorHooks() {
+  if (window.__cwfClientErrorsInstalled) return;
+  window.__cwfClientErrorsInstalled = true;
+  const report = (message: string, stack?: string) => {
+    const payload = {
+      url: window.location.href,
+      message,
+      stack,
+      userAgent: navigator.userAgent,
+      userId: window.__cwfUserId,
+    };
+    fetch("/api/_client_error", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    }).catch(() => undefined);
+  };
+  window.addEventListener("error", (event) => {
+    report(event.message || "Unhandled client error", event.error?.stack);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    report(reason instanceof Error ? reason.message : String(reason || "Unhandled promise rejection"), reason instanceof Error ? reason.stack : undefined);
+  });
 }
 
 function App() {
@@ -1431,7 +1472,7 @@ function App() {
   const inviteMatch = path.match(/^\/invite\/([^/]+)/);
   const waitingMatch = path.match(/^\/waiting\/([^/]+)/);
 
-  async function refresh() {
+  const refresh = React.useCallback(async () => {
     try {
       const data = await api<HomeData>("/api/me");
       setHome(data);
@@ -1440,9 +1481,10 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
+    installClientErrorHooks();
     void refresh();
     const timer = window.setInterval(() => {
       void api<HomeData>("/api/presence/heartbeat", { method: "POST", body: "{}" })
@@ -1451,7 +1493,11 @@ function App() {
     }, 10000);
     if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
     return () => window.clearInterval(timer);
-  }, []);
+  }, [refresh]);
+
+  useEffect(() => {
+    window.__cwfUserId = home?.user.id;
+  }, [home?.user.id]);
 
   const isInspirations = path === "/inspirations";
 
@@ -2322,8 +2368,18 @@ function InvitePanel({
     | { kind: "error"; message: string }
   >({ kind: "working" });
 
+  const refreshRef = React.useRef(refresh);
+  const postedTokenRef = React.useRef("");
+
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
+
   useEffect(() => {
     let cancelled = false;
+    if (postedTokenRef.current === token) return () => { cancelled = true; };
+    postedTokenRef.current = token;
+    setState({ kind: "working" });
     (async () => {
       try {
         const result = await api<{ status: "created" | "accepted" | "already-friends"; friend: { id: string; handle: string } }>(
@@ -2334,14 +2390,14 @@ function InvitePanel({
         setState({ kind: "ok", status: result.status, friend: result.friend });
         // Refresh home so the new friendship + any accepted requests
         // reconcile into the dashboard behind the panel.
-        void refresh();
+        void refreshRef.current();
       } catch (error) {
         if (cancelled) return;
         setState({ kind: "error", message: error instanceof Error ? error.message : "Invite failed." });
       }
     })();
     return () => { cancelled = true; };
-  }, [token, refresh]);
+  }, [token]);
 
   async function invite(friendId: string, handle: string) {
     try {
