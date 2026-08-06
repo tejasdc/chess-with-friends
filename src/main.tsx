@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Chess, type Color, type Move as ChessMove, type PieceSymbol, type Square } from "chess.js";
+import { Mic, MicOff } from "lucide-react";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -1293,6 +1294,20 @@ function seededWalkChoice(a: string, b: string) {
 
 type TimeControl = "10|0" | "5|0";
 type GameStatus = "active" | "checkmate" | "resigned" | "timeout" | "draw";
+type CallSessionState = "requesting" | "connecting" | "connected" | "reconnecting" | "ended";
+type CallEndReason = `hung-up-by-${string}` | "peer-gone-timeout" | "no-answer-timeout" | "failed";
+
+interface CallSession {
+  id: string;
+  initiatorId: string;
+  state: CallSessionState;
+  startedAt: number;
+  acceptedAt?: number;
+  graceExpiresAt?: number;
+  endedAt?: number;
+  endReason?: CallEndReason;
+  muted: Record<string, boolean>;
+}
 
 // Pipe notation stays code-only — humans read minutes. Every surface that
 // renders a TimeControl to the user MUST call this. Sweep script in CI
@@ -1375,7 +1390,25 @@ interface GameState {
   winnerId?: string;
   loserId?: string;
   connectionState: Record<string, "connected" | "reconnecting" | "gone">;
+  callSession: CallSession | null;
 }
+
+type VoiceOutboundMessage =
+  | { type: "call-initiate" }
+  | { type: "call-accept"; callSessionId: string }
+  | { type: "call-hangup"; callSessionId: string }
+  | { type: "call-mute"; callSessionId: string; muted: boolean }
+  | { type: "peer-ice-connected"; callSessionId: string }
+  | { type: "peer-ice-restart"; callSessionId: string }
+  | { type: "peer-ice-disconnected"; callSessionId: string }
+  | { type: "call-offer"; callSessionId: string; sdp: RTCSessionDescriptionInit }
+  | { type: "call-answer"; callSessionId: string; sdp: RTCSessionDescriptionInit }
+  | { type: "call-ice-candidate"; callSessionId: string; candidate: RTCIceCandidateInit };
+
+type VoiceSignalMessage =
+  | { type: "call-offer"; callSessionId: string; sdp: RTCSessionDescriptionInit; fromUserId?: string }
+  | { type: "call-answer"; callSessionId: string; sdp: RTCSessionDescriptionInit; fromUserId?: string }
+  | { type: "call-ice-candidate"; callSessionId: string; candidate: RTCIceCandidateInit; fromUserId?: string };
 
 const files = [...FILES];
 const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
@@ -1487,7 +1520,11 @@ function App() {
     installClientErrorHooks();
     void refresh();
     const timer = window.setInterval(() => {
-      void api<HomeData>("/api/presence/heartbeat", { method: "POST", body: "{}" })
+      const match = window.location.pathname.match(/^\/game\/([^/]+)/);
+      void api<HomeData>("/api/presence/heartbeat", {
+        method: "POST",
+        body: JSON.stringify(match ? { foregroundGameId: match[1] } : {}),
+      })
         .then(setHome)
         .catch(() => undefined);
     }, 10000);
@@ -1535,6 +1572,7 @@ function Shell({
   messageKind,
   setMessage,
   onSignedOut,
+  onNavigateHome,
   menuExtras,
   hideMenu,
 }: {
@@ -1544,6 +1582,7 @@ function Shell({
   messageKind?: ToastKind;
   setMessage?: SetMessage;
   onSignedOut?: () => void;
+  onNavigateHome?: () => void;
   /* Optional menu items to inject above the universal Sign out / state /
      Inspirations items. Used by GameScreen to expose Home + Resign inside
      the same ⋯ menu (team-lead: one menu pattern, one position). */
@@ -1567,7 +1606,7 @@ function Shell({
   return (
     <main className="shell">
       <header className="topbar">
-        <button className="wordmark" onClick={() => navigate("/")}>two chairs</button>
+        <button className="wordmark" onClick={() => onNavigateHome ? onNavigateHome() : navigate("/")}>two chairs</button>
         <div className="topbar-right">
           {home ? <span className="handle">@{home.user.handle}</span> : null}
           {/* Universal ⋯ menu — top-right on every screen per team-lead.
@@ -1800,17 +1839,23 @@ function useRealtimeGame(
   gameId: string,
   {
     onGame,
+    onSignal,
     onResync,
+    sendRef,
     enabled,
   }: {
     onGame: (game: GameState) => void;
+    onSignal?: (message: VoiceSignalMessage) => void;
     onResync: () => Promise<void> | void;
+    sendRef?: React.MutableRefObject<((message: VoiceOutboundMessage) => boolean) | null>;
     enabled: boolean;
   },
 ) {
   const onGameRef = React.useRef(onGame);
+  const onSignalRef = React.useRef(onSignal);
   const onResyncRef = React.useRef(onResync);
   onGameRef.current = onGame;
+  onSignalRef.current = onSignal;
   onResyncRef.current = onResync;
 
   useEffect(() => {
@@ -1852,6 +1897,13 @@ function useRealtimeGame(
       }
       const s = socket;
       s.addEventListener("open", () => {
+        if (sendRef) {
+          sendRef.current = (message: VoiceOutboundMessage) => {
+            if (s.readyState !== WebSocket.OPEN) return false;
+            s.send(JSON.stringify(message));
+            return true;
+          };
+        }
         backoffMs = 250;
         lastInboundAt = Date.now();
         try { s.send("sync"); } catch { /* dead almost immediately */ }
@@ -1879,9 +1931,11 @@ function useRealtimeGame(
         try {
           const payload = JSON.parse(raw);
           if (payload && payload.game) onGameRef.current(payload.game as GameState);
+          else if (payload && typeof payload.type === "string") onSignalRef.current?.(payload as VoiceSignalMessage);
         } catch { /* non-JSON frame ignored */ }
       });
       s.addEventListener("close", () => {
+        if (sendRef && sendRef.current) sendRef.current = null;
         clearTimers();
         scheduleReconnect();
       });
@@ -1917,9 +1971,330 @@ function useRealtimeGame(
       document.removeEventListener("visibilitychange", onVisibility);
       clearTimers();
       try { socket?.close(); } catch { /* ignored */ }
+      if (sendRef) sendRef.current = null;
       socket = null;
     };
-  }, [gameId, enabled]);
+  }, [gameId, enabled, sendRef]);
+}
+
+function useVoiceCall({
+  game,
+  selfId,
+  opponentId,
+  sendRef,
+  setMessage,
+}: {
+  game: GameState | null;
+  selfId: string;
+  opponentId: string;
+  sendRef: React.MutableRefObject<((message: VoiceOutboundMessage) => boolean) | null>;
+  setMessage: SetMessage;
+}) {
+  const session = game?.callSession || null;
+  const sessionRef = React.useRef<CallSession | null>(null);
+  const pcRef = React.useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = React.useRef<MediaStream | null>(null);
+  const remoteAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const pendingCandidatesRef = React.useRef<RTCIceCandidateInit[]>([]);
+  const [localTrackEnabled, setLocalTrackEnabled] = useState(true);
+  const [endArmed, setEndArmed] = useState(false);
+  const [dismissedEndedId, setDismissedEndedId] = useState<string | null>(null);
+  const ignoreOwnMuteAckRef = React.useRef(false);
+  const lastSnapshotKeyRef = React.useRef("");
+  const sawIceConnectedRef = React.useRef(false);
+  sessionRef.current = session;
+
+  const send = React.useCallback((message: VoiceOutboundMessage) => sendRef.current?.(message) === true, [sendRef]);
+
+  const setLocalEnabled = React.useCallback((enabled: boolean) => {
+    const stream = localStreamRef.current;
+    for (const track of stream?.getAudioTracks() || []) track.enabled = enabled;
+    setLocalTrackEnabled(enabled);
+  }, []);
+
+  const closePeerConnection = React.useCallback(() => {
+    pcRef.current?.close();
+    pcRef.current = null;
+    pendingCandidatesRef.current = [];
+    sawIceConnectedRef.current = false;
+  }, []);
+
+  const stopLocalMedia = React.useCallback(() => {
+    closePeerConnection();
+    for (const track of localStreamRef.current?.getTracks() || []) track.stop();
+    localStreamRef.current = null;
+    setLocalTrackEnabled(true);
+    setEndArmed(false);
+  }, [closePeerConnection]);
+
+  const ensureLocalStream = React.useCallback(async () => {
+    if (localStreamRef.current) return localStreamRef.current;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    localStreamRef.current = stream;
+    setLocalTrackEnabled(stream.getAudioTracks().every((track) => track.enabled));
+    return stream;
+  }, []);
+
+  const ensurePeerConnection = React.useCallback(async (callSessionId: string) => {
+    if (pcRef.current) return pcRef.current;
+    const stream = await ensureLocalStream();
+    const ice = await api<{ iceServers: RTCIceServer[] }>("/api/voice/ice-servers");
+    const pc = new RTCPeerConnection({ iceServers: ice.iceServers });
+    pcRef.current = pc;
+    for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+    pc.addEventListener("track", (event) => {
+      if (!remoteAudioRef.current) return;
+      const [remote] = event.streams;
+      if (remote) remoteAudioRef.current.srcObject = remote;
+      void remoteAudioRef.current.play().catch(() => undefined);
+    });
+    pc.addEventListener("icecandidate", (event) => {
+      if (event.candidate) {
+        send({ type: "call-ice-candidate", callSessionId, candidate: event.candidate.toJSON() });
+      }
+    });
+    pc.addEventListener("iceconnectionstatechange", () => {
+      const state = pc.iceConnectionState;
+      if (state === "connected" || state === "completed") {
+        sawIceConnectedRef.current = true;
+        send({ type: "peer-ice-connected", callSessionId });
+      } else if (state === "checking" && sawIceConnectedRef.current) {
+        send({ type: "peer-ice-restart", callSessionId });
+      } else if (state === "disconnected") {
+        send({ type: "peer-ice-disconnected", callSessionId });
+      }
+    });
+    return pc;
+  }, [ensureLocalStream, send]);
+
+  const beginAsOfferer = React.useCallback(async (callSessionId: string) => {
+    const pc = await ensurePeerConnection(callSessionId);
+    if (pc.localDescription) return;
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    send({ type: "call-offer", callSessionId, sdp: offer });
+  }, [ensurePeerConnection, send]);
+
+  const handleSignal = React.useCallback(async (message: VoiceSignalMessage) => {
+    const current = sessionRef.current;
+    if (!current || current.id !== message.callSessionId || current.state === "ended") return;
+    try {
+      const pc = await ensurePeerConnection(current.id);
+      if (message.type === "call-offer") {
+        await pc.setRemoteDescription(message.sdp);
+        for (const candidate of pendingCandidatesRef.current.splice(0)) await pc.addIceCandidate(candidate);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        send({ type: "call-answer", callSessionId: current.id, sdp: answer });
+      } else if (message.type === "call-answer") {
+        await pc.setRemoteDescription(message.sdp);
+        for (const candidate of pendingCandidatesRef.current.splice(0)) await pc.addIceCandidate(candidate);
+      } else if (message.type === "call-ice-candidate") {
+        if (!pc.remoteDescription) pendingCandidatesRef.current.push(message.candidate);
+        else await pc.addIceCandidate(message.candidate);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Voice connection failed.", "error");
+    }
+  }, [ensurePeerConnection, send, setMessage]);
+
+  useEffect(() => {
+    if (!session) {
+      stopLocalMedia();
+      setDismissedEndedId(null);
+      lastSnapshotKeyRef.current = "";
+      return;
+    }
+    if (session.state === "ended") {
+      stopLocalMedia();
+      const timer = window.setTimeout(() => setDismissedEndedId(session.id), 5000);
+      return () => window.clearTimeout(timer);
+    }
+    if (session.state === "connecting" && session.initiatorId === selfId && localStreamRef.current) {
+      void beginAsOfferer(session.id).catch((error) => setMessage(error instanceof Error ? error.message : "Voice connection failed.", "error"));
+    }
+  }, [beginAsOfferer, selfId, session, setMessage, stopLocalMedia]);
+
+  useEffect(() => {
+    if (!session || !endArmed) return;
+    const key = `${session.id}:${session.state}:${JSON.stringify(session.muted)}:${session.graceExpiresAt || ""}`;
+    if (!lastSnapshotKeyRef.current) {
+      lastSnapshotKeyRef.current = key;
+      return;
+    }
+    if (key === lastSnapshotKeyRef.current) return;
+    if (ignoreOwnMuteAckRef.current && session.muted[selfId] === true) {
+      ignoreOwnMuteAckRef.current = false;
+      lastSnapshotKeyRef.current = key;
+      return;
+    }
+    setLocalEnabled(true);
+    if (session.state === "connected" || session.state === "reconnecting") send({ type: "call-mute", callSessionId: session.id, muted: false });
+    setEndArmed(false);
+    lastSnapshotKeyRef.current = key;
+  }, [endArmed, selfId, send, session, setLocalEnabled]);
+
+  const initiate = React.useCallback(async () => {
+    try {
+      await ensureLocalStream();
+      send({ type: "call-initiate" });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Microphone access failed.", "error");
+    }
+  }, [ensureLocalStream, send, setMessage]);
+
+  const accept = React.useCallback(async () => {
+    if (!session) return;
+    try {
+      await ensureLocalStream();
+      send({ type: "call-accept", callSessionId: session.id });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Microphone access failed.", "error");
+    }
+  }, [ensureLocalStream, send, session, setMessage]);
+
+  const hangup = React.useCallback(() => {
+    const current = sessionRef.current;
+    if (!current || current.state === "ended") return false;
+    return send({ type: "call-hangup", callSessionId: current.id });
+  }, [send]);
+
+  const primary = React.useCallback(() => {
+    if (!session || session.state !== "connected") return;
+    if (endArmed) {
+      hangup();
+      return;
+    }
+    setLocalEnabled(false);
+    ignoreOwnMuteAckRef.current = true;
+    lastSnapshotKeyRef.current = `${session.id}:${session.state}:${JSON.stringify(session.muted)}:${session.graceExpiresAt || ""}`;
+    send({ type: "call-mute", callSessionId: session.id, muted: true });
+    setEndArmed(true);
+  }, [endArmed, hangup, send, session, setLocalEnabled]);
+
+  const unmute = React.useCallback(() => {
+    if (!session) return;
+    setLocalEnabled(true);
+    send({ type: "call-mute", callSessionId: session.id, muted: false });
+    setEndArmed(false);
+    ignoreOwnMuteAckRef.current = false;
+  }, [send, session, setLocalEnabled]);
+
+  return {
+    session,
+    visibleSession: session?.state === "ended" && dismissedEndedId === session.id ? null : session,
+    endArmed,
+    localTrackEnabled,
+    peerMuted: !!session?.muted?.[opponentId],
+    remoteAudioRef,
+    handleSignal,
+    initiate,
+    accept,
+    primary,
+    unmute,
+    hangup,
+  };
+}
+
+function VoiceCallBar({
+  game,
+  selfId,
+  opponentHandle,
+  voice,
+}: {
+  game: GameState;
+  selfId: string;
+  opponentHandle: string;
+  voice: ReturnType<typeof useVoiceCall>;
+}) {
+  const session = voice.visibleSession;
+  const canStart = game.status === "active";
+  if (!session) {
+    return (
+      <div className="voice-bar voice-idle" data-call-state="idle">
+        <button
+          type="button"
+          className="voice-icon-button"
+          onClick={() => void voice.initiate()}
+          disabled={!canStart}
+          aria-label={canStart ? "Start voice call" : "Voice calls start during live games"}
+          title={canStart ? "Start voice call" : "Voice calls start during live games"}
+        >
+          <Mic size={17} strokeWidth={2.2} aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
+  const isInitiator = session.initiatorId === selfId;
+  if (session.state === "requesting") {
+    return (
+      <div className="voice-bar voice-pill" data-call-state="requesting">
+        <span className="voice-state-icon crossed" aria-hidden="true"><MicOff size={16} strokeWidth={2.2} /></span>
+        <span className="voice-copy">{isInitiator ? `Waiting for @${opponentHandle} to accept` : `@${opponentHandle} wants to talk`}</span>
+        {isInitiator ? (
+          <button type="button" className="voice-link" onClick={() => voice.hangup()}>Cancel</button>
+        ) : (
+          <button type="button" className="voice-action" onClick={() => void voice.accept()}>Accept</button>
+        )}
+      </div>
+    );
+  }
+  if (session.state === "connecting") {
+    return (
+      <div className="voice-bar voice-pill" data-call-state="connecting">
+        <span className="voice-state-icon" aria-hidden="true"><Mic size={16} strokeWidth={2.2} /></span>
+        <span className="voice-copy">Connecting...</span>
+      </div>
+    );
+  }
+  if (session.state === "reconnecting") {
+    return (
+      <div className="voice-bar voice-pill" data-call-state="reconnecting">
+        <span className="voice-state-icon crossed" aria-hidden="true"><MicOff size={16} strokeWidth={2.2} /></span>
+        <span className="voice-copy">Reconnecting call...</span>
+        <button type="button" className="voice-action" disabled>Muted</button>
+      </div>
+    );
+  }
+  if (session.state === "ended") {
+    return (
+      <div className="voice-bar voice-ended" data-call-state="ended">
+        <span>Call ended - {formatCallEndReason(session.endReason)}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="voice-bar voice-connected" data-call-state="connected">
+      <span className={`voice-live ${voice.localTrackEnabled ? "enabled" : "disabled"}`} aria-hidden="true">
+        {voice.localTrackEnabled ? <Mic size={16} strokeWidth={2.2} /> : <MicOff size={16} strokeWidth={2.2} />}
+      </span>
+      <button type="button" className="voice-action primary" onClick={voice.primary}>
+        {voice.endArmed ? "END CALL" : "MUTE"}
+      </button>
+      {voice.endArmed ? (
+        <button type="button" className="voice-link" onClick={voice.unmute}>Unmute</button>
+      ) : null}
+      <audio ref={voice.remoteAudioRef} autoPlay playsInline />
+    </div>
+  );
+}
+
+function PeerMutedPill({ muted, handle }: { muted: boolean; handle: string }) {
+  if (!muted) return null;
+  return (
+    <span className="peer-muted-pill" aria-label={`@${handle} muted`}>
+      <MicOff size={12} strokeWidth={2.4} aria-hidden="true" />
+      <span>@{handle} muted</span>
+    </span>
+  );
+}
+
+function formatCallEndReason(reason?: CallEndReason): string {
+  if (!reason) return "ended";
+  if (reason === "no-answer-timeout") return "no answer";
+  if (reason === "peer-gone-timeout") return "peer gone";
+  if (reason === "failed") return "failed";
+  return "hung up";
 }
 
 function presenceLabel(state: "connected" | "reconnecting" | "gone", _handle: string): string {
@@ -2367,7 +2742,6 @@ function InvitePanel({
     | { kind: "ok"; status: "created" | "accepted" | "already-friends"; friend: { id: string; handle: string } }
     | { kind: "error"; message: string }
   >({ kind: "working" });
-
   const refreshRef = React.useRef(refresh);
   const postedTokenRef = React.useRef("");
 
@@ -3354,10 +3728,13 @@ function GameScreen({
   const [selected, setSelected] = useState<Square | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<{ from: Square; to: Square } | null>(null);
   const [confirmResign, setConfirmResign] = useState(false);
+  const [endingCall, setEndingCall] = useState(false);
   const [now, setNow] = useState(Date.now());
   const myColor = game?.whiteId === home.user.id ? "w" : "b";
   const opponentId = game ? (game.whiteId === home.user.id ? game.blackId : game.whiteId) : "";
   const opponentRawState = game?.connectionState?.[opponentId] || "gone";
+  const sendVoiceRef = React.useRef<((message: VoiceOutboundMessage) => boolean) | null>(null);
+  const voice = useVoiceCall({ game, selfId: home.user.id, opponentId, sendRef: sendVoiceRef, setMessage });
 
   useEffect(() => {
     let cancelled = false;
@@ -3387,6 +3764,7 @@ function GameScreen({
       setGame(next);
       setLoadError(null);
     },
+    onSignal: voice.handleSignal,
     onResync: async () => {
       try {
         const data = await api<GameState>(`/api/games/${gameId}/state`);
@@ -3397,8 +3775,37 @@ function GameScreen({
         // socket message; the socket itself is separately reconnecting.
       }
     },
-    enabled: !!game && game.status === "active",
+    sendRef: sendVoiceRef,
+    enabled: !!game,
   });
+
+  useEffect(() => {
+    void api<HomeData>("/api/presence/heartbeat", { method: "POST", body: JSON.stringify({ foregroundGameId: gameId }) })
+      .catch(() => undefined);
+  }, [gameId]);
+
+  const hasActiveCall = !!voice.session && voice.session.state !== "ended";
+  const leaveGame = React.useCallback(() => {
+    if (hasActiveCall) {
+      setEndingCall(true);
+      voice.hangup();
+      window.setTimeout(() => onHome(), 150);
+      return;
+    }
+    onHome();
+  }, [hasActiveCall, onHome, voice]);
+
+  useEffect(() => {
+    const onRouteAway = () => {
+      if (voice.session && voice.session.state !== "ended") voice.hangup();
+    };
+    window.addEventListener("popstate", onRouteAway);
+    window.addEventListener("pagehide", onRouteAway);
+    return () => {
+      window.removeEventListener("popstate", onRouteAway);
+      window.removeEventListener("pagehide", onRouteAway);
+    };
+  }, [voice]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -3510,7 +3917,7 @@ function GameScreen({
       </Shell>
     );
   }
-  if (!game) return <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage}><LoadingLine /></Shell>;
+  if (!game) return <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} onNavigateHome={leaveGame}><LoadingLine /></Shell>;
 
   const opponentHandle = myColor === "w" ? game.blackHandle : game.whiteHandle;
   const myHandle = myColor === "w" ? game.whiteHandle : game.blackHandle;
@@ -3526,7 +3933,7 @@ function GameScreen({
   const gameMenuExtras = (closeMenu: () => void) => (
     <>
       <li>
-        <button className="menu-item" onClick={() => { closeMenu(); onHome(); }}>
+        <button className="menu-item" onClick={() => { closeMenu(); leaveGame(); }}>
           Home
         </button>
       </li>
@@ -3564,7 +3971,7 @@ function GameScreen({
   const activeCount = game.moves.length;
 
   return (
-    <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} menuExtras={gameMenuExtras}>
+    <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} menuExtras={gameMenuExtras} onNavigateHome={leaveGame}>
       <section className="game game-fixed">
         <div className="board-column">
           {/* active-turn class paints the strip DEEP-INK (Villalba
@@ -3579,6 +3986,7 @@ function GameScreen({
                 aria-label={opponentPresence}
               />
               <span className="handle-line">@{opponentHandle}</span>
+              <PeerMutedPill muted={voice.peerMuted} handle={opponentHandle} />
             </div>
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>
@@ -3611,6 +4019,9 @@ function GameScreen({
           </div>
         </div>
 
+        <VoiceCallBar game={game} selfId={home.user.id} opponentHandle={opponentHandle} voice={voice} />
+        {endingCall ? <div className="voice-ending" role="status">Ending call...</div> : null}
+
         {pendingPromotion ? (
           <PromotionPicker
             color={myColor || "w"}
@@ -3633,7 +4044,7 @@ function GameScreen({
               </span>
               <div className="game-bottom-right">
                 <span className="move-count">{activeCount} move{activeCount === 1 ? "" : "s"}</span>
-                <button className="game-bottom-home" onClick={onHome} type="button">Home</button>
+                <button className="game-bottom-home" onClick={leaveGame} type="button">Home</button>
               </div>
             </>
           ) : (
@@ -3645,7 +4056,7 @@ function GameScreen({
                 </span>
               </span>
               <div className="game-bottom-actions">
-                <button className="ghost compact" onClick={onHome} type="button">Home</button>
+                <button className="ghost compact" onClick={leaveGame} type="button">Home</button>
               </div>
             </>
           )}
