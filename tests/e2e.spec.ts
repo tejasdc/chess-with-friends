@@ -344,9 +344,9 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
 
   // Home lives inside the game screen's ⋯ menu.
   await alice.page.getByRole("button", { name: "Open menu" }).click();
-  await alice.page.getByRole("button", { name: "Home" }).click();
+  await alice.page.getByLabel("App menu").getByRole("button", { name: "Home" }).click();
   await bob.page.getByRole("button", { name: "Open menu" }).click();
-  await bob.page.getByRole("button", { name: "Home" }).click();
+  await bob.page.getByLabel("App menu").getByRole("button", { name: "Home" }).click();
   await scheduleSoon(alice.page, bob.handle);
   await bob.page.reload();
   await bob.page.getByRole("button", { name: "Accept" }).first().click();
