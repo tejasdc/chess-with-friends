@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Chess, type Color, type Move as ChessMove, type PieceSymbol, type Square } from "chess.js";
-import { Mic, MicOff } from "lucide-react";
+import { MicOff, Phone, PhoneOff } from "lucide-react";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -2185,7 +2185,7 @@ function useVoiceCall({
     visibleSession: session?.state === "ended" && dismissedEndedId === session.id ? null : session,
     endArmed,
     localTrackEnabled,
-    peerMuted: !!session?.muted?.[opponentId],
+    peerMuted: !!session && session.state !== "ended" && !!session.muted?.[opponentId],
     remoteAudioRef,
     handleSignal,
     initiate,
@@ -2196,39 +2196,49 @@ function useVoiceCall({
   };
 }
 
-function VoiceCallBar({
-  game,
+function VoiceCallInlineControl({
+  voice,
+}: {
+  voice: ReturnType<typeof useVoiceCall>;
+}) {
+  const session = voice.visibleSession;
+  if (!session || session.state !== "connected") return null;
+  const muted = voice.endArmed || !voice.localTrackEnabled;
+  return (
+    <button
+      type="button"
+      className={`call-inline-button ${muted ? "is-muted" : "is-active"}`}
+      data-call-state="connected"
+      data-call-control-state={muted ? "muted" : "unmuted"}
+      onClick={voice.primary}
+      aria-label={muted ? "End call" : "Mute call"}
+      title={muted ? "End call" : "Mute call"}
+    >
+      {muted ? (
+        <PhoneOff size={17} strokeWidth={2.3} aria-hidden="true" />
+      ) : (
+        <Phone size={17} strokeWidth={2.4} fill="currentColor" aria-hidden="true" />
+      )}
+      <audio ref={voice.remoteAudioRef} autoPlay playsInline />
+    </button>
+  );
+}
+
+function VoiceCallStatus({
   selfId,
   opponentHandle,
   voice,
 }: {
-  game: GameState;
   selfId: string;
   opponentHandle: string;
   voice: ReturnType<typeof useVoiceCall>;
 }) {
   const session = voice.visibleSession;
-  const canStart = game.status === "active";
-  if (!session) {
-    return (
-      <div className="voice-bar voice-idle" data-call-state="idle">
-        <button
-          type="button"
-          className="voice-icon-button"
-          onClick={() => void voice.initiate()}
-          disabled={!canStart}
-          aria-label={canStart ? "Start voice call" : "Voice calls start during live games"}
-          title={canStart ? "Start voice call" : "Voice calls start during live games"}
-        >
-          <Mic size={17} strokeWidth={2.2} aria-hidden="true" />
-        </button>
-      </div>
-    );
-  }
+  if (!session || session.state === "connected") return null;
   const isInitiator = session.initiatorId === selfId;
   if (session.state === "requesting") {
     return (
-      <div className="voice-bar voice-pill" data-call-state="requesting">
+      <div className="voice-status voice-pill" data-call-state="requesting">
         <span className="voice-state-icon crossed" aria-hidden="true"><MicOff size={16} strokeWidth={2.2} /></span>
         <span className="voice-copy">{isInitiator ? `Waiting for @${opponentHandle} to accept` : `@${opponentHandle} wants to talk`}</span>
         {isInitiator ? (
@@ -2241,15 +2251,15 @@ function VoiceCallBar({
   }
   if (session.state === "connecting") {
     return (
-      <div className="voice-bar voice-pill" data-call-state="connecting">
-        <span className="voice-state-icon" aria-hidden="true"><Mic size={16} strokeWidth={2.2} /></span>
+      <div className="voice-status voice-pill" data-call-state="connecting">
+        <span className="voice-state-icon" aria-hidden="true"><Phone size={16} strokeWidth={2.2} /></span>
         <span className="voice-copy">Connecting...</span>
       </div>
     );
   }
   if (session.state === "reconnecting") {
     return (
-      <div className="voice-bar voice-pill" data-call-state="reconnecting">
+      <div className="voice-status voice-pill" data-call-state="reconnecting">
         <span className="voice-state-icon crossed" aria-hidden="true"><MicOff size={16} strokeWidth={2.2} /></span>
         <span className="voice-copy">Reconnecting call...</span>
         <button type="button" className="voice-action" disabled>Muted</button>
@@ -2258,25 +2268,12 @@ function VoiceCallBar({
   }
   if (session.state === "ended") {
     return (
-      <div className="voice-bar voice-ended" data-call-state="ended">
+      <div className="voice-status voice-ended" data-call-state="ended">
         <span>Call ended - {formatCallEndReason(session.endReason)}</span>
       </div>
     );
   }
-  return (
-    <div className="voice-bar voice-connected" data-call-state="connected">
-      <span className={`voice-live ${voice.localTrackEnabled ? "enabled" : "disabled"}`} aria-hidden="true">
-        {voice.localTrackEnabled ? <Mic size={16} strokeWidth={2.2} /> : <MicOff size={16} strokeWidth={2.2} />}
-      </span>
-      <button type="button" className="voice-action primary" onClick={voice.primary}>
-        {voice.endArmed ? "END CALL" : "MUTE"}
-      </button>
-      {voice.endArmed ? (
-        <button type="button" className="voice-link" onClick={voice.unmute}>Unmute</button>
-      ) : null}
-      <audio ref={voice.remoteAudioRef} autoPlay playsInline />
-    </div>
-  );
+  return null;
 }
 
 function PeerMutedPill({ muted, handle }: { muted: boolean; handle: string }) {
@@ -4015,11 +4012,12 @@ function GameScreen({
               <span className="handle-line">@{myHandle}</span>
               <span className="you">you</span>
             </div>
+            <VoiceCallInlineControl voice={voice} />
             <time className="clock">{formatClock(myClock)}</time>
           </div>
         </div>
 
-        <VoiceCallBar game={game} selfId={home.user.id} opponentHandle={opponentHandle} voice={voice} />
+        <VoiceCallStatus selfId={home.user.id} opponentHandle={opponentHandle} voice={voice} />
         {endingCall ? <div className="voice-ending" role="status">Ending call...</div> : null}
 
         {pendingPromotion ? (
