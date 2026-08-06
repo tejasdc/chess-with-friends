@@ -77,7 +77,7 @@ async function register(page: Page, handle: string) {
   await page.waitForTimeout(500);
   // See tests/e2e.spec.ts register() for morph-label rationale.
   await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
-  await expect(page.getByText(`@${handle}`)).toBeVisible();
+  await expect(page.locator(".topbar .handle", { hasText: `@${handle}` })).toBeVisible();
 }
 
 // Send a friend request through the Add-a-friend disclosure (collapsed by
@@ -91,6 +91,16 @@ async function addFriendByHandle(page: Page, handle: string) {
   // exact:true avoids matching the "Add a friend" disclosure button that
   // is already expanded (accessible name contains "Add").
   await page.getByRole("button", { name: "Add", exact: true }).click();
+}
+
+async function expectFriendRequestSent(page: Page, handle: string) {
+  await expect
+    .poll(async () => {
+      const toast = await page.getByText("Friend request sent.").count();
+      const row = await page.getByText(`Friend request sent to @${handle}`).count();
+      return toast + row;
+    }, { timeout: 10_000 })
+    .toBeGreaterThan(0);
 }
 
 async function twoClientsInGame(browser: Browser, suffix: string, opts: { instrumentSockets?: boolean; voiceMocks?: boolean } = {}) {
@@ -116,7 +126,7 @@ async function twoClientsInGame(browser: Browser, suffix: string, opts: { instru
   await register(bob, bH);
 
   await addFriendByHandle(alice, bH);
-  await expect(alice.getByText("Friend request sent.")).toBeVisible();
+  await expectFriendRequestSent(alice, bH);
   await bob.reload();
   await bob.getByRole("button", { name: "Accept" }).first().click();
   await expect(bob.getByText(`@${aH}`)).toBeVisible();
@@ -232,6 +242,9 @@ async function installVoiceMocks(page: Page) {
 }
 
 async function sendVoice(page: Page, message: Record<string, unknown>) {
+  await page.waitForFunction(() => {
+    return ((window as unknown as { __sockets?: WebSocket[] }).__sockets || []).some((socket) => socket.readyState === WebSocket.OPEN);
+  }, null, { timeout: 10_000 });
   await page.evaluate((payload) => {
     const sockets = ((window as unknown as { __sockets?: WebSocket[] }).__sockets || []).filter((socket) => socket.readyState === WebSocket.OPEN);
     if (!sockets.length) throw new Error("No open tracked socket.");
@@ -388,10 +401,12 @@ test("voice call invite push is gated by foregroundGameId (state-smith GAP-28)",
   const suffix = `push_${Date.now().toString(36).slice(-6)}`;
   const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
   try {
+    const baseline = await alice.evaluate(async () => (await (await fetch("/api/debug/push-log")).json()) as { pushLog: Array<{ type: string }> });
+    const startingCallInvites = baseline.pushLog.filter((entry) => entry.type === "call_invite").length;
     await bob.evaluate((id) => fetch("/api/presence/heartbeat", { method: "POST", body: JSON.stringify({ foregroundGameId: id }) }), gameId);
     await sendVoice(alice, { type: "call-initiate" });
     let log = await alice.evaluate(async () => (await (await fetch("/api/debug/push-log")).json()) as { pushLog: Array<{ type: string }> });
-    expect(log.pushLog.filter((entry) => entry.type === "call_invite")).toHaveLength(0);
+    expect(log.pushLog.filter((entry) => entry.type === "call_invite")).toHaveLength(startingCallInvites);
     const first = (await gameSnapshot(alice, gameId)).callSession!;
     await sendVoice(alice, { type: "call-hangup", callSessionId: first.id });
     await waitCallState(alice, gameId, "ended");
@@ -399,7 +414,7 @@ test("voice call invite push is gated by foregroundGameId (state-smith GAP-28)",
     await bob.evaluate(() => fetch("/api/presence/heartbeat", { method: "POST", body: "{}" }));
     await sendVoice(alice, { type: "call-initiate" });
     log = await alice.evaluate(async () => (await (await fetch("/api/debug/push-log")).json()) as { pushLog: Array<{ type: string }> });
-    expect(log.pushLog.filter((entry) => entry.type === "call_invite")).toHaveLength(1);
+    expect(log.pushLog.filter((entry) => entry.type === "call_invite")).toHaveLength(startingCallInvites + 1);
   } finally {
     await aliceCtx.close();
     await bobCtx.close();
