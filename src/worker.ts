@@ -356,8 +356,11 @@ function presenceForegroundGameId(record: number | PresenceRecord | undefined): 
   return typeof record === "number" ? undefined : record?.foregroundGameId;
 }
 
-function cloudflareStunOnly(): RTCIceServer[] {
-  return [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+function iceServersIncludeTurn(iceServers: RTCIceServer[]): boolean {
+  return iceServers.some((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some((url) => typeof url === "string" && (url.startsWith("turn:") || url.startsWith("turns:")));
+  });
 }
 
 function clientOpId(request: Request) {
@@ -1042,20 +1045,22 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async iceServers() {
-    if (this.env.TURN_KEY_ID && this.env.TURN_KEY_API_TOKEN) {
-      const response = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${this.env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
-        method: "POST",
-        headers: {
-          "authorization": `Bearer ${this.env.TURN_KEY_API_TOKEN}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ ttl: 86_400 }),
-      });
-      if (!response.ok) throw new Error("Could not create voice credentials.");
-      const body = await response.json() as { iceServers?: RTCIceServer[] };
-      return json({ iceServers: body.iceServers || cloudflareStunOnly() });
+    if (!this.env.TURN_KEY_ID || !this.env.TURN_KEY_API_TOKEN) {
+      return json({ error: "TURN is not configured. Set TURN_KEY_ID and TURN_KEY_API_TOKEN before enabling voice calls." }, { status: 503 });
     }
-    return json({ iceServers: cloudflareStunOnly() });
+    const response = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${this.env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
+      method: "POST",
+      headers: {
+        "authorization": `Bearer ${this.env.TURN_KEY_API_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ ttl: 86_400 }),
+    });
+    if (!response.ok) throw new Error("Could not create voice credentials.");
+    const body = await response.json() as { iceServers?: RTCIceServer[] };
+    const iceServers = body.iceServers || [];
+    if (!iceServersIncludeTurn(iceServers)) throw new Error("Voice credentials did not include TURN servers.");
+    return json({ iceServers });
   }
 
   private async subscribe(request: Request, user: User) {
@@ -1984,13 +1989,7 @@ export class GameDO extends DurableObject<Env> {
     const game = await this.requirePlayer(userId);
     const session = callSessionId ? await this.getCurrentCallSession(callSessionId) : await this.getCallSession();
     if (!session || session.state === "ended" || !this.isCallParticipant(game, userId, session)) return;
-    await this.mutateCallSession(game, {
-      ...session,
-      state: "ended",
-      endedAt: Date.now(),
-      endReason: `hung-up-by-${userId}`,
-      graceExpiresAt: undefined,
-    }, { broadcast: true });
+    await this.endCallSession(game, session, "hung-up", userId, { broadcast: true });
   }
 
   private async callMute(userId: string, callSessionId: string, muted: boolean) {
@@ -2043,30 +2042,37 @@ export class GameDO extends DurableObject<Env> {
     if (options.broadcast) await this.broadcastFrom(game, next);
   }
 
+  private async endCallSession(
+    game: GameState,
+    session: CallSession,
+    reason: "hung-up" | "peer-gone-timeout" | "no-answer-timeout" | "failed",
+    byUserId?: string,
+    options: { broadcast: boolean; now?: number } = { broadcast: true },
+  ) {
+    if (session.state === "ended") return session;
+    const endReason: CallEndReason = reason === "hung-up"
+      ? `hung-up-by-${byUserId || "unknown"}`
+      : reason;
+    const next: CallSession = {
+      ...session,
+      state: "ended",
+      endedAt: options.now || Date.now(),
+      endReason,
+      graceExpiresAt: undefined,
+      muted: {},
+    };
+    await this.mutateCallSession(game, next, { broadcast: options.broadcast });
+    return next;
+  }
+
   private async sweepCallAlarms(game: GameState, now: number): Promise<CallSession | null> {
     const session = await this.getCallSession();
     if (!session || session.state === "ended") return null;
     if (session.state === "requesting" && now - session.startedAt >= REQUEST_TIMEOUT_MS) {
-      const next: CallSession = {
-        ...session,
-        state: "ended",
-        endedAt: now,
-        endReason: "no-answer-timeout",
-        graceExpiresAt: undefined,
-      };
-      await this.mutateCallSession(game, next, { broadcast: false });
-      return next;
+      return await this.endCallSession(game, session, "no-answer-timeout", undefined, { broadcast: false, now });
     }
     if (session.state === "reconnecting" && session.graceExpiresAt && session.graceExpiresAt <= now) {
-      const next: CallSession = {
-        ...session,
-        state: "ended",
-        endedAt: now,
-        endReason: "peer-gone-timeout",
-        graceExpiresAt: undefined,
-      };
-      await this.mutateCallSession(game, next, { broadcast: false });
-      return next;
+      return await this.endCallSession(game, session, "peer-gone-timeout", undefined, { broadcast: false, now });
     }
     return null;
   }
