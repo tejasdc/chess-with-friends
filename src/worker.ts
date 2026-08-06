@@ -1075,10 +1075,12 @@ export class AppDO extends DurableObject<Env> {
     const endpoint = body.endpoint || "";
     const ownsEndpoint = endpoint && (db.pushSubscriptions[user.id] || []).some((subscription) => subscription.endpoint === endpoint);
     if (body.ackId) {
-      const beforeEndpoint = ownsEndpoint ? db.pendingPushesByEndpoint[endpoint] || [] : [];
-      const beforeUser = db.pendingPushes[user.id] || [];
-      if (ownsEndpoint) db.pendingPushesByEndpoint[endpoint] = beforeEndpoint.filter((pending) => pending.id !== body.ackId);
-      db.pendingPushes[user.id] = beforeUser.filter((pending) => pending.id !== body.ackId);
+      for (const [queuedEndpoint, queue] of Object.entries(db.pendingPushesByEndpoint)) {
+        db.pendingPushesByEndpoint[queuedEndpoint] = queue.filter((pending) => pending.id !== body.ackId);
+      }
+      for (const [userId, queue] of Object.entries(db.pendingPushes)) {
+        if (userId === user.id) db.pendingPushes[userId] = queue.filter((pending) => pending.id !== body.ackId);
+      }
       await this.save(db);
       return json({ ok: true });
     }
