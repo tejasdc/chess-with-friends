@@ -212,6 +212,40 @@ sockets are open (and dies when they all close). Either way, "who is
 connected" belongs in storage or is derived from a snapshot, not from an
 in-memory map.
 
+### WebRTC signalling on a WebSocket-terminating DO
+
+When a DO already terminates a WebSocket for one purpose (in this
+codebase, GameDO for game state), WebRTC signalling can and should
+ride the same socket instead of opening a new transport. The DO
+becomes the signalling rendezvous: SDP offers, answers, and ICE
+candidates are relayed through it; media is peer-to-peer via
+STUN/TURN (Cloudflare Calls) and the DO sees zero media packets.
+
+Two invariants make this safe:
+
+1. **Model the signalling, not the media.** The DO can enforce
+   what it can observe: which peer sent `initiate`, whether SDP has
+   been exchanged, whether either peer reported ICE-connected. It
+   cannot observe track-level audio energy or OS-level track
+   suspension. Do not put those in the state machine. Media
+   viability is a client-side derivation and lives at the
+   representation layer. See pattern #5 below.
+2. **Every signalling message carries the session id it was
+   composed for.** WebRTC sessions can start and stop many times
+   in the DO's lifetime; a stale ICE candidate from a previous
+   session, delivered late, will attach to the new session's PC
+   and produce a broken connection. The DO drops any signalling
+   message whose `sessionId` doesn't match the current session's
+   id. This is the WebRTC equivalent of an idempotency key.
+
+Cross-machine coupling on the same close event: if the game
+socket dropping already arms a grace period for the
+game-connection machine, and the same drop must also affect the
+call-session machine, both transitions live inside the ONE
+`webSocketClose(ws)` handler and share the same
+`graceExpiresAt` lookup. Two independent handlers on the same
+event will disagree eventually.
+
 ## What good looks like
 
 Three named patterns in this codebase to imitate.
@@ -260,7 +294,33 @@ terminal status is right (see pattern #2). When nothing observes,
 delete. Do not reflex to "add another terminal status" — ask what
 would read it.
 
-### 4. Prime the just-written handle rather than re-reading the set
+### 4. Model the signalling, not the media
+
+Machine 8 (per-game voice call, `docs/state-machines.md`). The DO
+tracks what it can observe over its own socket: `requesting`,
+`connecting`, `connected`, `reconnecting`, `ended`. It does NOT
+track `muted`, `audio-silent`, `os-suspended-track`, or any other
+media-level condition — those live in the client's derivation
+layer and render as UI hints, never as machine states. The
+machine's job is to answer "can these two peers reach each other
+via signalling right now, and did they agree to open a channel?"
+— nothing more.
+
+The pattern: when a lifecycle straddles a server/client boundary
+where one side owns a strictly larger information set than the
+other, model only what the writer can enforce. The rest goes into
+representation as client-side projections, marked as such. A
+machine that pretends to model what its writer can't observe is a
+machine that will lie — its `connected` will diverge from actual
+audibility, its `muted` will diverge from actual track state, and
+callers will chase phantom bugs.
+
+The dual test: if you can name a state whose transition into it
+depends on information the writer doesn't have, that state
+doesn't belong in this machine. Either move the writer, or move
+the state to the surface as a projection.
+
+### 5. Prime the just-written handle rather than re-reading the set
 
 The `GameDO` `socket` handler accepts a new WebSocket via
 `ctx.acceptWebSocket(server)`, then calls `server.send(...)` with the
@@ -279,7 +339,7 @@ inside the same request boundary.
 
 ---
 
-These four patterns together are what a lifecycle looks like when
+These five patterns together are what a lifecycle looks like when
 it's designed as a machine instead of a sequence of feature patches.
 See `docs/state-machines.md` for the current inventory and the
 outstanding gaps.

@@ -31,11 +31,22 @@ appended at the next unused number.
   dead push endpoints on 410/404), GAP-13 (lazy TTL sweep of auth
   challenges, 10 min cutoff), GAP-16 (time-warp harness via `POST
   /_debug/tick`).
+- **2026-08-05 (pre-implementation)** — Machine 8 (per-game voice
+  call) added as the modelled shape of an ordered but unimplemented
+  feature. No code lands yet; the machine is documented first so the
+  implementer inherits the invariants rather than re-deriving them.
+  GAP-18 through GAP-25 filed against the proposed machine — each is
+  a real hazard the model exposes, ranked by user impact. Rule
+  additions in `state-machine-rules.md`: "signaling vs media" (new
+  pattern under *What good looks like*) and a WebRTC subsection
+  under *Cloudflare-specific notes*.
 
 Remaining: GAP-16-follow-up — a time-warp regression that ticks a
 recurring accepted schedule multiple times, proving `nextFireAt`
 advances by exactly one interval per tick without piling up games. The
-existing real-time test only covers a single firing.
+existing real-time test only covers a single firing. Plus GAP-18
+through GAP-25 on Machine 8; those close as the voice-call feature
+lands, not before.
 
 ## Why this doc exists
 
@@ -86,7 +97,8 @@ or unreachable so an implementing agent can close them one at a time.
 |---|---|---|
 | Accounts, friendships, friend requests, challenges, schedules, game metadata, presence, push subscriptions, push log | `AppDO` (`ctx.storage.get("db")`) | Durable Object storage, single JSON blob keyed `"db"` |
 | Per-game state (FEN, clocks, moves, terminal status, resign) | `GameDO` (`ctx.storage.get("game")`) | one DO per `gameId` |
-| Per-game connection state (WebSocket presence of each player) | `GameDO` (in-memory `Map`, see GAP-13/14) | not persisted |
+| Per-game connection state (WebSocket presence of each player) | `GameDO` (derived from `ctx.getWebSockets()` + persisted `graceExpiresAt`) | not stored as a field |
+| Per-game voice-call session (planned, Machine 8) | `GameDO` (`ctx.storage.get("callSession")`) | one session slot per `GameDO`; media is peer-to-peer and never persisted |
 | Session token | `AppDO.sessions` | Durable Object storage |
 | Push permission and subscription | browser (permission), `AppDO.pushSubscriptions[userId]` (up to 5) | browser + DO |
 | Client `home` | derived from `/api/me` and `/api/presence/heartbeat` | React state, refreshed every 10s and after any action |
@@ -107,6 +119,7 @@ except through the routes the DO exposes.
 5. Game
 6. Per-player game-connection state
 7. Push subscription
+8. Per-game voice call (planned, not yet implemented — see Machine 8)
 
 Presence, the message toast, and the landing puzzle shelf carry state but
 are not full machines — they are described in "Non-machines" at the end.
@@ -693,6 +706,341 @@ recovery copy (`src/main.tsx:2241-2280`). Absent when `enabled`.
 
 ---
 
+## Machine 8 — Per-game voice call (planned)
+
+Ordered 2026-08-05. Not yet implemented. Documented here first so the
+invariants are known before the code lands, matching the discipline
+`state-machine-rules.md` rule #1 asks of every lifecycle.
+
+### Purpose
+
+Give the two players of a live game a hands-free open voice channel
+for the duration of that game. Both peers opt in; either can hang up;
+the game ending ends the call. No persistent voice hangouts, no
+missed-call notifications, no cross-game rooms. Voice is a
+game-scoped affordance, not a communications product.
+
+### Architecture in one paragraph
+
+WebRTC peer-to-peer for media. Cloudflare Calls provides STUN/TURN
+so the two peers can find each other through NATs; the server routes
+zero media packets. Signalling (SDP offers, SDP answers, ICE
+candidates, and the call-state events below) rides the existing
+GameDO WebSocket that both players are already connected to for the
+game itself. No new server transport. GameDO is the signalling
+rendezvous *and* the single writer for the machine below.
+
+### The invariant this machine models
+
+The machine tracks **signalling viability**, not media viability.
+Media is a client-side concern: `RTCPeerConnection.connectionState`
+is opaque to the server, and even the peers only know their own
+half. What the server can enforce is what it can observe over its
+own socket: which peer has raised its hand, whether SDP has been
+exchanged, whether either peer has confirmed ICE reached
+`connected`, whether either peer's signalling channel has dropped.
+Everything downstream of that — track energy, OS-level track
+suspension, muted audio — is a client-side projection and lives in
+Machine 8's *representation* section, not its *states* section. This
+framing is what saves the machine from becoming a walking
+`isConnected/isMuted/isRinging` boolean soup. See GAP-25 and pattern
+#5 in `state-machine-rules.md`.
+
+### States
+
+Per-`GameDO`, one call session at a time. The session record is
+`CallSession = { id, initiatorId, state, startedAt, endedAt?, endReason? }`;
+when there is no session, `game.callSession = null`.
+
+- `idle` — `callSession === null`. No session is running and none has
+  ever run in this game, or the last one ended and was replaced with
+  `null` on the next initiate. Default state at game creation.
+- `requesting` — one peer sent `call-initiate`; the other peer has
+  not yet sent `call-join`. Waiting-for-consent phase.
+- `connecting` — both peers agreed via signalling; SDP
+  offer/answer/ICE candidates are flowing over the game socket.
+  Neither peer has yet reported `peer-ice-connected`.
+- `connected` — at least one peer has reported
+  `peer-ice-connected`. Media is considered viable. Server does not
+  wait for the second peer — ICE is symmetric, and the first
+  successful candidate pair proves the peers found each other.
+- `reconnecting` — was `connected`, and either (a) one peer's game
+  socket dropped, or (b) a peer emitted `peer-ice-disconnected` /
+  `peer-ice-restart`. `graceExpiresAt` is armed. Grace covers both
+  the signalling drop case and the ICE restart case with one timer.
+- `ended` — terminal. `endedAt` and `endReason` set. Durable in the
+  DO until a new `call-initiate` replaces the session record. The
+  set of `endReason` values is closed:
+  - `hung-up-by-<userId>` — one peer explicitly hung up.
+  - `game-ended` — the game entered a terminal state
+    (checkmate / draw / resigned / timeout) while a call was live.
+  - `peer-gone-timeout` — reconnect grace expired without recovery.
+  - `unanswered` — `requesting` decayed without a `call-join`.
+  - `failed` — signalling itself errored (malformed SDP, transport
+    exception, etc.). Rare in practice; distinct terminal so the
+    surface can render "call failed" instead of "call ended".
+
+### Events
+
+- `call-initiate` — peer sends `{type: "call-initiate"}` over the
+  game socket. Guards: game is `active`; caller is one of
+  `whiteId`/`blackId`; no active (`requesting|connecting|connected|reconnecting`)
+  session exists. **Idempotent**: a second `call-initiate` from the
+  same peer while a session already exists returns the existing
+  session — never creates a duplicate, never generates a duplicate
+  offer. If the existing session is `ended`, the new initiate
+  replaces it with a fresh session. Mirrors the `create-challenge`
+  dedupe pattern (rule #4, GAP-3).
+- `call-join` — the *other* peer sends `{type: "call-join"}`. Guard:
+  `session.state === "requesting"` AND `caller !== session.initiatorId`.
+  Transitions to `connecting`.
+- `peer-sdp` — either peer forwards `{type: "peer-sdp", sdp,
+  kind: "offer"|"answer"}`. Server relays to the other peer;
+  does NOT transition state. SDP exchange is a media concern
+  observed but not adjudicated by the machine.
+- `peer-ice-candidate` — either peer forwards
+  `{type: "peer-ice-candidate", candidate}`. Server relays to the
+  other peer; does NOT transition state.
+- `peer-ice-connected` — a peer reports their local
+  `RTCPeerConnection` reached `connected`. First occurrence
+  transitions `connecting → connected` and clears any
+  `graceExpiresAt`. Subsequent occurrences are no-ops.
+- `peer-ice-restart` / `peer-ice-disconnected` — a peer reports
+  their local PC dropped or entered `disconnected`. If the session
+  is currently `connected`, transitions to `reconnecting` and arms
+  the grace alarm. If already `reconnecting`, no-op (grace is
+  already ticking).
+- `call-hangup` — a peer sends `{type: "call-hangup"}`. Guard:
+  caller is a participant AND session is not already `ended`.
+  Transitions to `ended` with `endReason = "hung-up-by-<userId>"`.
+  Idempotent: a second `call-hangup` from any participant is a
+  no-op returning the current `ended` session.
+- `game-terminal-cascade` — internal event fired by
+  `Machine 5.move()`, `Machine 5.resign()`, and
+  `Machine 5.applyClock()`'s clock-alarm path whenever
+  `game.status` moves off `active`. If a session exists in a
+  non-terminal state, sets `endReason = "game-ended"`. See GAP-19
+  on why this must funnel through a single helper rather than
+  being repeated at every game-terminal site.
+- `game-connection-close` — the same `webSocketClose(ws)` handler
+  that arms Machine 6's game-connection grace ALSO transitions
+  the call session to `reconnecting` if the closing socket
+  belongs to a call participant AND the session is `connected` or
+  `connecting`. Same underlying event; two machines observe it.
+  See GAP-22 on why this is a single guard, not two independent
+  ones.
+- `call-alarm-sweep` — extension of Machine 5/6's `alarm()`.
+  Two per-wake concerns:
+  1. If `session.state === "requesting"` AND
+     `now - session.startedAt >= REQUEST_TIMEOUT_MS`, transition
+     to `ended` with `endReason = "unanswered"`.
+  2. If `session.state === "reconnecting"` AND
+     `graceExpiresAt <= now`, transition to `ended` with
+     `endReason = "peer-gone-timeout"`.
+
+### Transitions
+
+```mermaid
+stateDiagram-v2
+  [*] --> idle: game init
+  idle --> requesting: call-initiate
+  requesting --> connecting: call-join
+  requesting --> ended: call-hangup (by initiator)
+  requesting --> ended: call-alarm-sweep (unanswered)
+  requesting --> ended: game-terminal-cascade
+  connecting --> connected: peer-ice-connected (first)
+  connecting --> ended: call-hangup
+  connecting --> ended: game-terminal-cascade
+  connecting --> failed_end: signalling error
+  connected --> reconnecting: game-connection-close (participant)
+  connected --> reconnecting: peer-ice-restart | peer-ice-disconnected
+  connected --> ended: call-hangup
+  connected --> ended: game-terminal-cascade
+  reconnecting --> connected: peer-ice-connected (recovery)
+  reconnecting --> ended: call-alarm-sweep (grace expired → peer-gone-timeout)
+  reconnecting --> ended: call-hangup
+  reconnecting --> ended: game-terminal-cascade
+  ended --> requesting: call-initiate (fresh session id)
+  ended --> [*]
+```
+
+### Writer
+
+`GameDO`. The session record is written only by handlers on the
+game socket that forward the events above through a single
+`mutateCallSession(next, options)` helper — the same discipline
+Machine 6 keeps for `graceExpiresAt`. AppDO never touches the call
+session; nothing outside the GameDO does. Same DO-serialised
+single-writer property that lets us treat every other GameDO state
+as lock-free.
+
+Reads: the session is included in every `snapshotFrom(game)` payload
+alongside `game`, so the existing WebSocket broadcast fans it out to
+both peers. No new HTTP route, no poll.
+
+### Representation
+
+Only surface: the `/game/:id` screen. Voice is game-scoped and does
+not persist beyond it. Non-game surfaces (Dashboard, Friends,
+IncomingPanel) render nothing about voice. That's the spec, and
+Machine 8 must not leak into them.
+
+| Session state | Own view | Peer view |
+|---|---|---|
+| `idle` | Mic icon in the game chrome, tap to initiate. | Same. |
+| `requesting` (own peer initiated) | "Waiting for @peer to accept" pill with a Cancel action. Mic icon shows initiating spinner. **No local audio is transmitted yet** (see GAP-20). | Incoming-call pill: "@peer wants to talk" with Accept and Ignore. Optional subtle chime on arrival. No banner outside the game screen — never on Dashboard. |
+| `connecting` | "Connecting…" pill; mic icon transitions to live-ready but no track energy yet. | Same. |
+| `connected` | Live-mic indicator (small pulse). Mute toggle available. See GAP-25 on whether the peer's mute state is signalled. | Same, plus optional audio-energy indicator on the peer avatar (client-derived, see GAP-18). |
+| `reconnecting` | "Reconnecting call…" pill; mute controls disabled. | Same, plus "@peer is away" hint (Machine 6's game-connection grace and Machine 8's grace are surfaced together — one message, not two). |
+| `ended` | "Call ended — <reason>" strip, auto-dismisses in ~5s. Then chrome returns to `idle` affordance. | Same. |
+
+Mute is a media-level projection: `track.enabled = false` on the
+local `RTCPeerConnection`. The machine has no `muted` state. If
+peer-visible mute is desired, it rides as a `muted: {[userId]:
+boolean}` field on the session — broadcast on every toggle,
+purely observational, never gating a transition. GAP-25 tracks the
+decision.
+
+### Closure
+
+- `idle` — exits via `call-initiate`.
+- `requesting` — exits via `call-join`, `call-hangup`,
+  `call-alarm-sweep` (unanswered), or `game-terminal-cascade`.
+- `connecting` — exits via `peer-ice-connected` (first),
+  `call-hangup`, `game-terminal-cascade`, or `failed`.
+- `connected` — exits via `reconnecting` event,
+  `call-hangup`, or `game-terminal-cascade`.
+- `reconnecting` — exits via `peer-ice-connected` (recovery),
+  `call-alarm-sweep` (grace expiry → `peer-gone-timeout`),
+  `call-hangup`, or `game-terminal-cascade`.
+- `ended` — terminal. Replaced (not "transitioned from") on the
+  next `call-initiate` with a fresh session id.
+
+Every non-terminal exits on at least three distinct paths, and
+`game-terminal-cascade` is a universal exit for every non-terminal.
+The machine cannot deadlock on any state so long as the alarm
+sweep keeps ticking — which is enforced by Machine 6's existing
+`setNextAlarm` because we fold call-machine wakes into the same
+alarm computation.
+
+### Judgment-call defaults (recommendations for the implementer)
+
+Explicit values so the implementer inherits them rather than
+reinventing them:
+
+- `REQUEST_TIMEOUT_MS = 30_000`. Long enough for the recipient to
+  hear the incoming pill and act; short enough that an abandoned
+  request auto-cleans. Matches the general ballpark of consumer
+  voice apps (FaceTime rings ~30–40s); chess is casual, 30s is
+  right.
+- `CALL_GRACE_MS = 20_000`. Longer than Machine 6's game-connection
+  grace (`GRACE_MS = 15_000`) because voice UX degrades harder
+  under premature hangup, and because the ICE-restart window on
+  a network hop routinely takes 5–15s. Not longer than 20s —
+  a truly dropped peer should end the call promptly.
+- **Broadcast every mutation.** The game socket is already
+  terminating at GameDO and every game-state mutation already
+  broadcasts. Fold the call session into `snapshotFrom(game)` and
+  the two-peer signalling problem reduces to what the existing
+  fan-out already solves. Do not poll and do not open a new
+  channel.
+- **Hangup does not require confirmation.** One tap = hangup;
+  second tap on the mic-off affordance is a no-op. Unlike game
+  resign (which is destructive and irreversible), a voice hangup
+  is easy to redo — a confirmation dialog trades UX friction for
+  no safety.
+- **First peer to report `peer-ice-connected` wins the transition
+  to `connected`.** Don't wait for both. ICE is symmetric; a
+  single successful candidate pair proves connectivity in both
+  directions barring exotic asymmetric NAT scenarios that
+  Cloudflare TURN eliminates anyway.
+- **Cross-machine cascade goes through a single helper.** See
+  GAP-19. Do not sprinkle `if (game.status !== "active" &&
+  callSession) endCall(...)` at every game-terminal site.
+
+### Notes on soundness
+
+- **Read-your-writes on the call snapshot.** The same hazard
+  Machine 6 documents applies. When `mutateCallSession` fires,
+  `broadcast()` must derive its message from the just-written
+  session — do not re-read `ctx.storage.get("callSession")` from
+  a separate handler and hope. Pass the new session through the
+  same call that persisted it, matching the pattern in
+  `state-machine-rules.md` §"Prime the just-written handle".
+- **`ended` is not cleared by any alarm.** It sits durable until
+  a fresh `call-initiate` overwrites it. The 5-second
+  auto-dismiss of the "Call ended" strip is a client-side timer,
+  not a state transition. Do not add a `ended → idle` server
+  alarm — you would be reproducing the setTimeout-in-DO
+  anti-pattern for zero user-visible benefit.
+- **`callSession.id` is a fresh UUID per initiate.** This is
+  what makes `call-initiate` an idempotent overwrite when the
+  prior session is `ended`: the client sees a different `id` and
+  knows the previous transcript is gone. Signalling messages
+  (`peer-sdp`, `peer-ice-candidate`) MUST carry the
+  `callSessionId` they were composed for; the server drops any
+  signalling message whose session id is stale. Without this,
+  an in-flight ICE candidate from the previous session can leak
+  into the new one and produce a broken PC.
+- **Mute is NOT a state.** It's `track.enabled = false`. If we
+  add `muted: {[userId]: boolean}` to the session for observer
+  UX (GAP-25), it is a per-participant attribute, not a
+  transition; the machine has no `muted` state and never gates
+  on it.
+- **The AppDO does not project this.** Unlike Machine 5, whose
+  status projects to `db.games[id].status` for Dashboard
+  filtering, Machine 8 does NOT project outside the GameDO.
+  Voice has no cross-game surface. Adding a projection would
+  regress "no missed-call notifications" and grow surface area
+  for no product benefit.
+
+### Pseudocode for the writer
+
+Sketch of `mutateCallSession` — not implementation, but the shape
+the writer has to enforce. Every event above ends in one call to
+this helper.
+
+```
+mutateCallSession(next, { broadcast: true }):
+  prev = await storage.get("callSession")
+  guard(next, prev)                        # per-event guards above
+  if isTerminal(next) and prev?.id != next.id:
+    # Fresh session; discard any signalling for the prior id
+    invalidateSignallingBefore(next.id)
+  await storage.put("callSession", next)
+  await setNextAlarm(game)                 # folds call wakes into GameDO alarm
+  if broadcast:
+    await broadcast(snapshotFrom(game, next))  # game and session in one message
+```
+
+### Failure modes the machine explicitly covers
+
+- Recipient never notices the request → `unanswered` terminal at 30s.
+- Initiator changes their mind mid-request → `call-hangup` while in
+  `requesting` — the "Cancel" action in the initiator's pill.
+- One peer locks their phone mid-call → their game socket drops →
+  Machine 6 arms game-connection grace, Machine 8 arms
+  `CALL_GRACE_MS`, and the peer's `RTCPeerConnection` tracks
+  silently suspend on iOS Safari. Server sees `reconnecting`.
+  If the phone comes back within 20s, socket reopens, machine
+  returns to `connected`. Beyond 20s, `peer-gone-timeout`.
+- WiFi ↔ LTE hop mid-call → ICE restart, in-band. If the peer
+  emits `peer-ice-restart` (see GAP-21), the machine goes to
+  `reconnecting` and back on `peer-ice-connected`. If the peer
+  does not emit anything and ICE restart silently succeeds, the
+  server never leaves `connected` — which is honest given what
+  the server can observe.
+- Game ends mid-call — `game-terminal-cascade` fires from the
+  single helper (GAP-19), machine goes to `ended` with reason
+  `game-ended`.
+- iOS Safari backgrounded but tab kept alive — signalling stays
+  up, media tracks suspend, server still says `connected`. The
+  observer hears silence and the machine has no way to know.
+  Handled at the representation layer, not the machine layer.
+  See GAP-18.
+
+---
+
 ## Non-machines (worth naming so nobody treats them as machines)
 
 - **Presence dot on Friends list.** Derived value: `now -
@@ -864,6 +1212,172 @@ one new game was created, (b) `nextFireAt` advanced by exactly one
 interval, (c) the next `nextFireAt` is strictly in the future.
 Estimated effort: small — the harness already exists.
 
+### GAP-18 (P0, NEW — Machine 8): Silent-peer indistinguishable from `connected`
+**Where:** GameScreen's voice representation for the peer, when the
+peer is on iOS Safari with the tab backgrounded (screen locked, home
+button, or Safari sent to the app switcher).
+**What:** iOS suspends `getUserMedia` audio tracks silently while
+the tab is backgrounded. The signalling channel (game socket) usually
+survives short backgrounds. The `RTCPeerConnection` stays
+`connected`. Server-side, Machine 8 also stays `connected`. The
+observer hears silence but sees the machine's `connected` pill and
+assumes the call is fine.
+**Why it matters:** the most common voice-app failure mode is "why
+can't you hear me" — precisely this case. The server is honest per
+its framing (it tracks signalling, not media), but the surface must
+project the discrepancy.
+**Fix (representation, not machine):** the observing peer runs a
+Web Audio `AnalyserNode` on the inbound remote track and detects
+sustained silence (rms energy below floor for >4s while machine is
+`connected`). Render a `Silent — peer may be locked` hint next to
+the peer avatar. This is a client-side derivation and never
+becomes a machine state — the machine tracks signalling, not
+media. See pattern #5 in `state-machine-rules.md`.
+
+### GAP-19 (P1, NEW — Machine 8): Game → call cascade needs a single writer
+**Where:** every place `GameDO` sets `game.status` off `"active"` —
+`move()`'s checkmate/draw branch, `resign()`, `applyClock()`'s
+timeout branch (in `alarm()` and in `snapshot`/`stateResponse`
+paths). Four sites today.
+**What:** the cascade "when the game ends, end any active call
+with `endReason: game-ended`" must fire from every one of those
+sites. If the implementer copies the two-line snippet to each,
+someone will add a fifth site later and forget it — reintroducing
+the "call outlives the game" bug for the next reviewer to notice.
+**Why it matters:** the entire premise of Machine 8 being
+game-scoped is that call is a strict subset of game's lifetime. A
+missed cascade site breaks the invariant silently.
+**Fix:** introduce a single `endGameSideEffects(game, next)`
+helper called immediately after every `game.status = <terminal>`
+mutation. Inside, it calls `mutateCallSession({ state: "ended",
+endReason: "game-ended", … })` when there's an active session.
+Adversity test: start a game, initiate + accept a call, resign;
+assert `callSession.state === "ended"` and `endReason ===
+"game-ended"` in the same broadcast that carries the game
+terminal.
+
+### GAP-20 (P1, NEW — Machine 8): `requesting` misrepresents mic state
+**Where:** initiator's UI while the session is `requesting`.
+**What:** the naive model shows the initiator "mic on" the moment
+they tap — but there is no `RTCPeerConnection` yet and no track is
+transmitting. If the recipient never joins, the initiator will
+have been staring at a live-mic indicator that transmitted
+nothing. A user who spoke into it during those 30 seconds thinks
+the words were heard.
+**Why it matters:** false-positive live-mic indicator is a
+privacy anti-affordance in reverse — users assume they were
+transmitting when they weren't. Sends the wrong signal about
+whether the recipient could hear them.
+**Fix:** the initiator's chrome renders "Waiting for @peer to
+accept" with a *muted-preview* mic icon (crossed) — not the
+active-mic indicator. `getUserMedia` may run to check permissions,
+but the track is not attached to any PC and the visual reflects
+that. When the state moves to `connecting → connected`, THEN the
+live-mic indicator lights up.
+
+### GAP-21 (P2, NEW — Machine 8): ICE restart silently invisible to the server
+**Where:** the `connected → reconnecting` transition, specifically
+the network-hop case (WiFi ↔ LTE).
+**What:** WebRTC handles a network hop by triggering an in-band
+ICE restart. The peers renegotiate candidates over the game
+socket (signalling stays up). If the client doesn't emit an
+explicit `peer-ice-restart` signal to the server, Machine 8 stays
+`connected` for the full 5–15s restart window, and the observer
+hears silence during it. If restart fails silently, the server
+never leaves `connected` at all.
+**Why it matters:** silent 15-second dropouts read as "call is
+buggy" even though the machine is technically consistent.
+**Fix:** clients emit `peer-ice-restart` when
+`RTCPeerConnection.iceConnectionState` becomes `disconnected` or
+`checking` (post-`connected`), and `peer-ice-connected` on the
+subsequent recovery. The machine transitions to `reconnecting` on
+the first signal and back on the second. Grace timer arms as
+usual, so a failed restart terminates at `peer-gone-timeout`.
+Note: this is the same `reconnecting` state and the same alarm
+that Machine 6's game-connection grace uses — one grace period
+covers both concerns.
+
+### GAP-22 (P2, NEW — Machine 8): Navigation-away needs paired-machine handoff
+**Where:** `webSocketClose(ws)` inside `GameDO`, which today
+serves Machine 6 only.
+**What:** when a call participant navigates away from
+`/game/:id`, the game socket closes. Machine 6 arms
+game-connection grace. Machine 8 must ALSO transition its
+session to `reconnecting` and arm its own grace. Two machines
+transitioning off one event; the guards must be consistent so
+they can't disagree ("Machine 6 says gone, Machine 8 still says
+connected" and vice versa).
+**Why it matters:** the peer-observed UX collapses under
+disagreement — "Alice is away for the game but still on the
+call?" is nonsense. And a divergent state means one machine's
+grace expires and the other's doesn't, leaving zombie call
+sessions on the peer's screen.
+**Fix:** extend `webSocketClose(ws)` to check for an active call
+session with this user as a participant; if so, mutate the call
+session to `reconnecting` in the same handler, sharing the same
+`graceExpiresAt` lookup. `setNextAlarm` already folds all wake
+times together (Machine 6's alarm computation). Peer surface
+renders one "@peer is away" message, not two.
+
+### GAP-23 (P3, NEW — Machine 8): No adversity coverage for the game-ends-mid-call cascade
+**Where:** `tests/adversity.spec.ts`.
+**What:** the game → call cascade (GAP-19) has no failing test
+today because Machine 8 doesn't exist yet. When it lands, the
+adversity spec must exercise: initiate + accept a call, both
+peers reach `connected`, one player resigns; assert the call
+session terminates with `endReason = "game-ended"` in the same
+broadcast as the game terminal. Also exercise the checkmate
+path and the timeout path (via `debugExpire`) — three
+independent game-terminal sites, three tests.
+**Why it matters:** without this, GAP-19's single-writer helper
+can be regressed by adding a fourth game-terminal site that
+forgets to call it, and the test suite passes.
+**Fix:** three adversity cases named
+`voice call ends when game ends by resign|checkmate|timeout
+(state-smith GAP-19/23)`.
+
+### GAP-24 (P3, NEW — Machine 8): No time-warp harness for call alarms
+**Where:** `POST /_debug/call-tick` or equivalent on the `GameDO`
+(local-only, matching the `x-debug-local` gate the other debug
+endpoints use).
+**What:** Machine 8 introduces two new alarm-driven terminals —
+`unanswered` (30s `requesting` timeout) and `peer-gone-timeout`
+(20s reconnect grace). Adversity tests should not spend real
+wall-clock time waiting them out; the existing pattern for
+Machine 4/5/6 is `debugExpire` / `debugExpireGrace` /
+`/_debug/tick`. Machine 8 needs the same.
+**Why it matters:** without a harness, tests either wait 30s
+(making CI slow) or don't cover the terminals (making them
+untested).
+**Fix:** `POST /games/:id/debug/call-expire` that shifts
+`session.startedAt` and `graceExpiresAt` into the past and runs
+the DO alarm once. Guarded by `x-debug-local` header. Mirrors
+`debugExpireGrace` at `src/worker.ts:1358`.
+
+### GAP-25 (P4, NEW — Machine 8): Mute-broadcast decision must be settled at merge
+**Where:** the session record shape — specifically whether it
+carries a `muted: {[userId]: boolean}` field.
+**What:** mute is defined as media-level and NOT a machine
+state. The remaining product question is whether the *peer's*
+mute state is visible to the observer. Two options:
+- **Don't signal.** Simpler. Silent peer looks the same as muted
+  peer. Consistent with GAP-18's "we render silence
+  client-side"; the observer never has to distinguish "muted"
+  from "locked-phone".
+- **Signal via a per-participant attribute on the session.**
+  Add `muted` to `CallSession`. Toggle in one signalling
+  message; broadcast reuses the existing snapshot fan-out. UI
+  renders a "@peer muted" pill distinct from a "silent" hint.
+**Why it matters:** picking silently is worse than either
+choice. If we don't decide, someone will add mute-signalling in
+a later PR without adding it to the machine, and it becomes a
+scattered flag (rule #7 violation).
+**Fix (recommendation):** add `muted: {[userId]: boolean}` to the
+session. It's a per-participant attribute, not a state; the
+machine doesn't gate on it and no transition depends on it.
+Broadcast is free (already fans out per mutation). UX clarity
+is worth the ~40 bytes.
+
 ---
 
 ## What's next
@@ -874,10 +1388,21 @@ writer, reachable states, exits from every non-terminal, projections
 on every surface where the entity is user-relevant, and durable
 storage that survives DO hibernation.
 
-Only GAP-17 (recurring-schedule multi-tick regression via the
-time-warp harness) remains, ranked P4 — the harness exists, the
-missing test is small, and the underlying code is already reviewed to
-be correct.
+Remaining open across the seven implemented machines: GAP-17
+(recurring-schedule multi-tick regression via the time-warp harness),
+P4 — the harness exists, the missing test is small, and the
+underlying code is already reviewed to be correct.
+
+**TIER C — Machine 8 (voice call).** Documented here before code;
+GAP-18 through GAP-25 file the hazards the model exposes. The
+P0/P1 items (GAP-18 silent-peer, GAP-19 cascade helper, GAP-20
+requesting UX) block a first-class voice-call implementation; the
+P2 items (GAP-21 ICE-restart signalling, GAP-22 paired-machine
+handoff) can ship in the same round if the implementer wires them
+from the start; the P3/P4 items (GAP-23 tests, GAP-24 harness,
+GAP-25 mute broadcast) close during test-and-polish. The invariants
+and defaults in Machine 8 are the handoff artifact — the code
+should read as a translation, not a re-derivation.
 
 The `stateful-shapes` skill in this workspace is the complementary
 read for anyone adding a new machine from here.
