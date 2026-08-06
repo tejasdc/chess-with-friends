@@ -246,6 +246,20 @@ call-session machine, both transitions live inside the ONE
 `graceExpiresAt` lookup. Two independent handlers on the same
 event will disagree eventually.
 
+**A signalling lifecycle can outlive the socket's primary
+purpose.** In this codebase the game socket exists because of
+Machine 5 (Game) — but Machine 8 (voice call) also rides it and
+its lifecycle is not a subset of the game's. The call can
+continue after the game reaches a terminal state; the socket
+must therefore continue too. Two implications: (a) do not close
+the socket on the primary machine's terminal; let close events
+happen only when clients navigate away or connections drop.
+(b) The DO's warm-lifetime is bounded by whether ANY of the
+riding machines still needs it — not just the primary. Machine
+5 terminating does not authorise Machine 8 to lose warm state.
+Persist everything a secondary machine needs; assume the DO
+can hibernate at any moment once all sockets close.
+
 ## What good looks like
 
 Three named patterns in this codebase to imitate.
