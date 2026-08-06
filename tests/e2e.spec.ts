@@ -390,7 +390,7 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
 });
 
 async function client(browser: Browser, handle: string) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
   await addAuthenticator(page);
   await page.goto("/");
