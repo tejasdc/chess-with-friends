@@ -197,6 +197,27 @@ async function installSocketTracker(page: Page) {
 
 async function installVoiceMocks(page: Page) {
   await page.addInitScript(() => {
+    const realFetch = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+      if (url.includes("/api/voice/ice-servers")) {
+        return Response.json({
+          iceServers: [
+            { urls: ["stun:stun.cloudflare.com:3478"] },
+            {
+              urls: [
+                "turn:turn.cloudflare.com:3478?transport=udp",
+                "turn:turn.cloudflare.com:3478?transport=tcp",
+                "turns:turn.cloudflare.com:5349?transport=tcp",
+              ],
+              username: "test-turn-user",
+              credential: "test-turn-credential",
+            },
+          ],
+        });
+      }
+      return realFetch(input, init);
+    };
     class FakeTrack {
       enabled = true;
       kind = "audio";
@@ -223,6 +244,11 @@ async function installVoiceMocks(page: Page) {
       iceConnectionState = "new";
       localDescription: RTCSessionDescriptionInit | null = null;
       remoteDescription: RTCSessionDescriptionInit | null = null;
+      constructor(config?: RTCConfiguration) {
+        super();
+        const w = window as unknown as { __rtcConfigs?: RTCConfiguration[] };
+        w.__rtcConfigs = [...(w.__rtcConfigs || []), config || {}];
+      }
       addTrack() { /* media is mocked */ }
       async createOffer() { return { type: "offer", sdp: "fake-offer" } as RTCSessionDescriptionInit; }
       async createAnswer() { return { type: "answer", sdp: "fake-answer" } as RTCSessionDescriptionInit; }
@@ -275,11 +301,24 @@ async function directConnectedCall(alice: Page, bob: Page, gameId: string) {
 }
 
 async function uiConnectedCall(alice: Page, bob: Page, gameId: string) {
-  await alice.getByRole("button", { name: "Start voice call" }).click();
+  await sendVoice(alice, { type: "call-initiate" });
   const requesting = await waitCallState(alice, gameId, "requesting");
-  await expect(bob.locator(".voice-bar", { hasText: "wants to talk" })).toBeVisible({ timeout: 5000 });
-  await bob.locator(".voice-bar").getByRole("button", { name: "Accept" }).click();
+  await expect(bob.locator(".voice-status", { hasText: "wants to talk" })).toBeVisible({ timeout: 5000 });
+  await bob.locator(".voice-status").getByRole("button", { name: "Accept" }).click();
+  await waitCallState(alice, gameId, "connecting");
+  await sendVoice(alice, { type: "peer-ice-connected", callSessionId: requesting.id });
   return await waitCallState(alice, gameId, "connected");
+}
+
+async function wakeLocalVoiceTrack(page: Page, peer: Page, callSessionId: string) {
+  await sendVoice(peer, {
+    type: "call-offer",
+    callSessionId,
+    sdp: { type: "offer", sdp: "v=0\r\n" },
+  });
+  await expect.poll(async () => page.evaluate(() => {
+    return (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled;
+  }), { timeout: 5000 }).toBe(true);
 }
 
 async function debugCallExpire(page: Page, gameId: string) {
@@ -295,8 +334,31 @@ test("voice call happy path reaches connected (state-smith GAP-20/21)", async ({
   const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
   try {
     await uiConnectedCall(alice, bob, gameId);
-    await expect(alice.locator(".voice-bar[data-call-state='connected']")).toBeVisible();
-    await expect(bob.locator(".voice-bar[data-call-state='connected']")).toBeVisible();
+    await expect(alice.locator(".call-inline-button[data-call-control-state='unmuted']")).toBeVisible();
+    await expect(bob.locator(".call-inline-button[data-call-control-state='unmuted']")).toBeVisible();
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice ICE config uses credentialed TURN servers, not STUN-only", async ({ browser }) => {
+  const suffix = `turn_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
+  try {
+    const session = await uiConnectedCall(alice, bob, gameId);
+    await wakeLocalVoiceTrack(alice, bob, session.id);
+    const iceServers = await alice.evaluate(() => {
+      const configs = (window as unknown as { __rtcConfigs?: RTCConfiguration[] }).__rtcConfigs || [];
+      return configs.at(-1)?.iceServers || [];
+    });
+    const urls = iceServers.flatMap((server) => {
+      const value = server.urls;
+      return Array.isArray(value) ? value : [value];
+    });
+    expect(urls.some((url) => typeof url === "string" && url.startsWith("stun:"))).toBe(true);
+    expect(urls.some((url) => typeof url === "string" && (url.startsWith("turn:") || url.startsWith("turns:")))).toBe(true);
+    expect(iceServers.some((server) => Boolean(server.username) && Boolean(server.credential))).toBe(true);
   } finally {
     await aliceCtx.close();
     await bobCtx.close();
@@ -445,19 +507,44 @@ test("voice mute then end sequence and peer-mute interruption (state-smith GAP-2
   const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
   try {
     const session = await uiConnectedCall(alice, bob, gameId);
-    await alice.locator(".voice-bar").getByRole("button", { name: "MUTE" }).click();
-    await expect(alice.locator(".voice-bar").getByRole("button", { name: "END CALL" })).toBeVisible();
+    await wakeLocalVoiceTrack(alice, bob, session.id);
+    await alice.getByRole("button", { name: "Mute call" }).click();
+    await expect(alice.getByRole("button", { name: "End call" })).toBeVisible();
     await expect.poll(async () => alice.evaluate(() => (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled)).toBe(false);
     expect((await gameSnapshot(bob, gameId)).callSession?.state).toBe("connected");
 
     await sendVoice(bob, { type: "call-mute", callSessionId: session.id, muted: true });
-    await expect(alice.locator(".voice-bar").getByRole("button", { name: "MUTE" })).toBeVisible({ timeout: 5000 });
+    await expect(alice.getByRole("button", { name: "Mute call" })).toBeVisible({ timeout: 5000 });
     await expect.poll(async () => alice.evaluate(() => (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled)).toBe(true);
 
-    await alice.locator(".voice-bar").getByRole("button", { name: "MUTE" }).click();
-    await alice.locator(".voice-bar").getByRole("button", { name: "END CALL" }).click();
+    await alice.getByRole("button", { name: "Mute call" }).click();
+    await alice.getByRole("button", { name: "End call" }).click();
     const ended = await waitCallState(alice, gameId, "ended");
     expect(ended.endReason).toMatch(/^hung-up-by-usr_/);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice hangup clears muted projections on ended snapshots", async ({ browser }) => {
+  const suffix = `mute_end_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
+  try {
+    const session = await uiConnectedCall(alice, bob, gameId);
+    await wakeLocalVoiceTrack(alice, bob, session.id);
+    await alice.getByRole("button", { name: "Mute call" }).click();
+    await expect(bob.locator(".peer-muted-pill", { hasText: "muted" })).toBeVisible({ timeout: 5000 });
+
+    await alice.getByRole("button", { name: "End call" }).click();
+    const [aliceEnded, bobEnded] = await Promise.all([
+      waitCallState(alice, gameId, "ended"),
+      waitCallState(bob, gameId, "ended"),
+    ]);
+    expect(aliceEnded.muted).toEqual({});
+    expect(bobEnded.muted).toEqual({});
+    await expect(alice.locator(".peer-muted-pill")).toHaveCount(0);
+    await expect(bob.locator(".peer-muted-pill")).toHaveCount(0);
   } finally {
     await aliceCtx.close();
     await bobCtx.close();
