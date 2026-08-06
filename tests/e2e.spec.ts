@@ -462,12 +462,14 @@ async function peekPendingPush(page: Page): Promise<{ id: string; type?: string 
 async function ackPendingPush(page: Page, id: string) {
   await page.evaluate(async (ackId) => {
     const endpoint = window.localStorage.getItem("testPushEndpoint") || "";
-    await fetch("/api/push/pending", {
+    const response = await fetch("/api/push/pending", {
       method: "POST",
+      credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ endpoint, ackId }),
     });
-  });
+    if (!response.ok) throw new Error(`ack failed: ${response.status}`);
+  }, id);
 }
 
 async function waitForPush(page: Page, type: string, timeout = 10_000) {
