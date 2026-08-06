@@ -129,7 +129,7 @@ async function twoClientsInGame(browser: Browser, suffix: string, opts: { instru
   await expectFriendRequestSent(alice, bH);
   await bob.reload();
   await bob.getByRole("button", { name: "Accept" }).first().click();
-  await expect(bob.getByText(`@${aH}`)).toBeVisible();
+  await expect(bob.getByRole("button", { name: `Invite @${aH}` })).toBeVisible();
 
   await alice.reload();
   // Presence heartbeat is no longer required for the Invite button — it's
@@ -137,6 +137,7 @@ async function twoClientsInGame(browser: Browser, suffix: string, opts: { instru
   // Alice's home refresh to reflect the accepted friendship.
   await presenceHeartbeat(bob);
   await alice.reload();
+  await expect(alice.getByRole("button", { name: `Invite @${bH}` })).toBeVisible();
   await alice.getByRole("button", { name: `Invite @${bH}` }).click();
   await expect(alice).toHaveURL(/\/waiting\/chl_/);
   await bob.reload();
@@ -1792,15 +1793,19 @@ test("schedule decline exit (state-smith GAP-6)", async ({ browser }) => {
     await register(alice, aH);
     await register(bob, bH);
     await addFriendByHandle(alice, bH);
+    await expectFriendRequestSent(alice, bH);
     await bob.reload();
     await bob.getByRole("button", { name: "Accept" }).first().click();
+    await expect(bob.getByRole("button", { name: `Invite @${aH}` })).toBeVisible();
     await alice.reload();
     await presenceHeartbeat(bob);
     await alice.reload();
+    await expect(alice.getByRole("button", { name: `Invite @${bH}` })).toBeVisible();
     // Propose a schedule.
     await alice.getByRole("button", { name: "Schedule a game" }).click();
+    await alice.locator(".play-form select").nth(1).selectOption({ label: "Tomorrow" });
     await alice.getByRole("button", { name: "Propose" }).click();
-    await expect(alice.getByText("Game time proposed.")).toBeVisible();
+    await expect(alice.getByText(new RegExp(`@${aH}.*@${bH}.*pending`))).toBeVisible();
     // Bob sees the proposal in incoming with Accept + Decline.
     await bob.reload();
     const bobDeclineSchedule = bob.getByRole("button", { name: "Decline" });

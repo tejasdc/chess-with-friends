@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { release } from "node:os";
 
 const webkitRunnable = !(process.platform === "darwin" && release().startsWith("25."));
+const port = process.env.PLAYWRIGHT_PORT || "8787";
 
 // Two projects: chromium runs the full v1 mechanics suite. mobile-webkit
 // runs the mobile-viewport layout tests to catch iOS-Safari-specific
@@ -15,7 +16,7 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 10_000 },
   use: {
-    baseURL: "http://localhost:8787",
+    baseURL: `http://localhost:${port}`,
     headless: true,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
@@ -45,8 +46,8 @@ export default defineConfig({
     }] : []),
   ],
   webServer: {
-    command: "npm run worker:dev",
-    url: "http://localhost:8787/api/health",
+    command: `npm run build && wrangler dev --local --persist-to=.wrangler/state-${port} --port ${port}`,
+    url: `http://localhost:${port}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
   },
