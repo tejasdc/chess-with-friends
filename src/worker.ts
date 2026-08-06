@@ -10,10 +10,12 @@ import {
 } from "@simplewebauthn/server";
 import { isoBase64URL } from "@simplewebauthn/server/helpers";
 
-type PushType = "friend_request" | "challenge" | "challenge_accepted" | "scheduled_start";
+type PushType = "friend_request" | "challenge" | "challenge_accepted" | "scheduled_start" | "call_invite";
 type TimeControl = "10|0" | "5|0";
 type GameStatus = "active" | "checkmate" | "resigned" | "timeout" | "draw";
 type PlayerColor = "w" | "b";
+type CallSessionState = "requesting" | "connecting" | "connected" | "reconnecting" | "ended";
+type CallEndReason = `hung-up-by-${string}` | "peer-gone-timeout" | "no-answer-timeout" | "failed";
 
 // Present set of push types. This list is a descriptive snapshot of what
 // the notification principle currently produces — NOT a locked cap. The
@@ -26,14 +28,19 @@ type PlayerColor = "w" | "b";
 // cap. `challenge_accepted` is here because it completes the handshake
 // the inviter initiated (they invited, then went back to their life;
 // this tells them the game is ready).
-const PUSH_TYPES: PushType[] = ["friend_request", "challenge", "challenge_accepted", "scheduled_start"];
+const PUSH_TYPES: PushType[] = ["friend_request", "challenge", "challenge_accepted", "scheduled_start", "call_invite"];
 const COOKIE = "cwf_session";
 const APP_DO_NAME = "app";
+const PRESENCE_WINDOW_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const CALL_GRACE_MS = 20_000;
 
 interface Env {
   APP_NAME: string;
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY?: string;
+  TURN_KEY_ID?: string;
+  TURN_KEY_API_TOKEN?: string;
   ASSETS: Fetcher;
   APP_DO: DurableObjectNamespace<AppDO>;
   GAME_DO: DurableObjectNamespace<GameDO>;
@@ -170,6 +177,52 @@ interface PendingPush {
   createdAt: number;
 }
 
+interface PresenceRecord {
+  lastSeenAt: number;
+  foregroundGameId?: string;
+}
+
+interface CallSession {
+  id: string;
+  initiatorId: string;
+  state: CallSessionState;
+  startedAt: number;
+  acceptedAt?: number;
+  graceExpiresAt?: number;
+  endedAt?: number;
+  endReason?: CallEndReason;
+  muted: Record<string, boolean>;
+}
+
+interface StoredOpResult {
+  userId: string;
+  opId: string;
+  createdAt: number;
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
+interface RateLimitBucket {
+  count: number;
+  resetAt: number;
+}
+
+interface ClientErrorRecord {
+  id: string;
+  createdAt: number;
+  url: string;
+  message: string;
+  stack?: string;
+  userAgent: string;
+  userId?: string;
+}
+
+interface PushDeliveryIntent {
+  userId: string;
+  pushId: string;
+}
+
 interface AppDb {
   users: Record<string, User>;
   handleToUserId: Record<string, string>;
@@ -181,11 +234,14 @@ interface AppDb {
   challenges: Record<string, Challenge>;
   schedules: Record<string, Schedule>;
   games: Record<string, GameMeta>;
-  presence: Record<string, number>;
+  presence: Record<string, number | PresenceRecord>;
   pushSubscriptions: Record<string, StoredSubscription[]>;
   pendingPushes: Record<string, PendingPush[]>;
   pendingPushesByEndpoint: Record<string, PendingPush[]>;
   pushLog: Array<{ type: PushType; userId: string; createdAt: number; delivered: boolean; status?: number }>;
+  opResults: Record<string, StoredOpResult>;
+  rateLimits: Record<string, RateLimitBucket>;
+  clientErrors: ClientErrorRecord[];
 }
 
 interface GameState {
@@ -233,6 +289,9 @@ function emptyDb(): AppDb {
     pendingPushes: {},
     pendingPushesByEndpoint: {},
     pushLog: [],
+    opResults: {},
+    rateLimits: {},
+    clientErrors: [],
   };
 }
 
@@ -254,6 +313,12 @@ async function readJson<T>(request: Request): Promise<T> {
 // 10-minute lifetime is generously past the WebAuthn dialog's own 60s
 // timeout and covers slow user-verification steps on some devices.
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
+const MAX_AUTH_CHALLENGES = 200;
+const OP_RESULT_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_OP_RESULTS = 1_000;
+const RATE_LIMIT_MAX_BUCKETS = 1_000;
+const CLIENT_ERROR_LIMIT = 500;
+
 function sweepExpiredChallenges(db: AppDb) {
   const cutoff = Date.now() - CHALLENGE_TTL_MS;
   for (const [handle, record] of Object.entries(db.registrationChallenges)) {
@@ -262,6 +327,94 @@ function sweepExpiredChallenges(db: AppDb) {
   for (const [userId, record] of Object.entries(db.authenticationChallenges)) {
     if (record.createdAt < cutoff) delete db.authenticationChallenges[userId];
   }
+  pruneRecordMap(db.registrationChallenges, MAX_AUTH_CHALLENGES);
+  pruneRecordMap(db.authenticationChallenges, MAX_AUTH_CHALLENGES);
+}
+
+function pruneRecordMap<T extends { createdAt: number }>(record: Record<string, T>, max: number) {
+  const entries = Object.entries(record);
+  if (entries.length <= max) return;
+  entries
+    .sort((a, b) => a[1].createdAt - b[1].createdAt)
+    .slice(0, entries.length - max)
+    .forEach(([key]) => delete record[key]);
+}
+
+function normalizeDb(db: AppDb): AppDb {
+  db.pendingPushesByEndpoint ||= {};
+  db.opResults ||= {};
+  db.rateLimits ||= {};
+  db.clientErrors ||= [];
+  return db;
+}
+
+function presenceSeenAt(record: number | PresenceRecord | undefined): number {
+  return typeof record === "number" ? record : record?.lastSeenAt || 0;
+}
+
+function presenceForegroundGameId(record: number | PresenceRecord | undefined): string | undefined {
+  return typeof record === "number" ? undefined : record?.foregroundGameId;
+}
+
+function cloudflareStunOnly(): RTCIceServer[] {
+  return [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+}
+
+function clientOpId(request: Request) {
+  const value = request.headers.get("x-client-op-id") || request.headers.get("x-op-id") || "";
+  return /^[A-Za-z0-9._:-]{1,128}$/.test(value) ? value : "";
+}
+
+function opKey(userId: string, opId: string) {
+  return `${userId}:${opId}`;
+}
+
+function responseFromStoredOp(stored: StoredOpResult) {
+  return new Response(stored.body, { status: stored.status, headers: stored.headers });
+}
+
+async function storeResponseForOp(response: Response, userId: string, opId: string): Promise<{ stored: StoredOpResult; response: Response }> {
+  const body = await response.clone().text();
+  const headers = Object.fromEntries(response.headers.entries());
+  const stored = { userId, opId, createdAt: Date.now(), status: response.status, headers, body };
+  return { stored, response: new Response(body, { status: response.status, headers }) };
+}
+
+function sweepOpResults(results: Record<string, StoredOpResult>) {
+  const cutoff = Date.now() - OP_RESULT_TTL_MS;
+  for (const [key, result] of Object.entries(results)) {
+    if (result.createdAt < cutoff) delete results[key];
+  }
+  pruneRecordMap(results, MAX_OP_RESULTS);
+}
+
+function ipSignal(request: Request) {
+  return (request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown").split(",")[0].trim();
+}
+
+function sweepRateLimits(db: AppDb) {
+  const now = Date.now();
+  for (const [key, bucket] of Object.entries(db.rateLimits)) {
+    if (bucket.resetAt <= now) delete db.rateLimits[key];
+  }
+  const entries = Object.entries(db.rateLimits);
+  if (entries.length <= RATE_LIMIT_MAX_BUCKETS) return;
+  entries
+    .sort((a, b) => a[1].resetAt - b[1].resetAt)
+    .slice(0, entries.length - RATE_LIMIT_MAX_BUCKETS)
+    .forEach(([key]) => delete db.rateLimits[key]);
+}
+
+function checkRateLimit(db: AppDb, key: string, max: number, windowMs: number) {
+  const now = Date.now();
+  sweepRateLimits(db);
+  const current = db.rateLimits[key];
+  if (!current || current.resetAt <= now) {
+    db.rateLimits[key] = { count: 1, resetAt: now + windowMs };
+    return;
+  }
+  current.count += 1;
+  if (current.count > max) throw new Error("Too many attempts. Try again soon.");
 }
 
 function cleanHandle(handle: string) {
@@ -404,8 +557,10 @@ export class AppDO extends DurableObject<Env> {
     try {
       if (url.pathname === "/_auth/session") return await this.session(request);
       if (url.pathname === "/_internal/game-status" && request.method === "POST") return await this.updateGameStatus(request);
+      if (url.pathname === "/_internal/call-invite" && request.method === "POST") return await this.callInvite(request);
       if (url.pathname === "/api/health") return json({ ok: true, pushTypes: PUSH_TYPES });
       if (url.pathname === "/api/push/policy") return json({ pushTypes: PUSH_TYPES });
+      if (url.pathname === "/api/_client_error" && request.method === "POST") return await this.clientError(request);
       if (url.pathname === "/api/auth/register/options" && request.method === "POST") return await this.registrationOptions(request);
       if (url.pathname === "/api/auth/register/verify" && request.method === "POST") return await this.registrationVerify(request);
       if (url.pathname === "/api/auth/login/options" && request.method === "POST") return await this.loginOptions(request);
@@ -413,45 +568,58 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname === "/api/auth/logout" && request.method === "POST") return await this.logout(request);
 
       const user = await this.requireUser(request);
+      const mutate = (event: string, entity: { kind: string; id: string }, fn: () => Promise<Response>) =>
+        this.runMutation(request, user, event, entity, fn);
       if (url.pathname === "/api/me" && request.method === "GET") return await this.me(user);
-      if (url.pathname === "/api/presence/heartbeat" && request.method === "POST") return await this.heartbeat(user);
-      if (url.pathname === "/api/push/subscribe" && request.method === "POST") return await this.subscribe(request, user);
-      if (url.pathname === "/api/push/pending" && (request.method === "GET" || request.method === "POST")) return await this.pendingPush(request, user);
-      if (url.pathname === "/api/friends/request" && request.method === "POST") return await this.requestFriend(request, user);
-      if (url.pathname === "/api/friends/invite" && request.method === "POST") return await this.requestByInvite(request, user);
+      if (url.pathname === "/api/presence/heartbeat" && request.method === "POST") return await mutate("presence.heartbeat", { kind: "presence", id: user.id }, () => this.heartbeat(request, user));
+      if (url.pathname === "/api/voice/ice-servers" && request.method === "GET") return await this.iceServers();
+      if (url.pathname === "/api/push/subscribe" && request.method === "POST") return await mutate("push.subscribe", { kind: "user", id: user.id }, () => this.subscribe(request, user));
+      if (url.pathname === "/api/push/pending" && request.method === "POST") return await mutate("push.pending", { kind: "user", id: user.id }, () => this.pendingPush(request, user));
+      if (url.pathname === "/api/friends/request" && request.method === "POST") return await mutate("friend_request.create", { kind: "user", id: user.id }, () => this.requestFriend(request, user));
+      if (url.pathname === "/api/friends/invite" && request.method === "POST") return await mutate("friend_invite.use", { kind: "user", id: user.id }, () => this.requestByInvite(request, user));
       if (url.pathname.match(/^\/api\/friends\/requests\/[^/]+$/) && request.method === "DELETE") {
-        return await this.withdrawFriendRequest(url.pathname.split("/")[4], user);
+        const id = url.pathname.split("/")[4];
+        return await mutate("friend_request.withdraw", { kind: "friend_request", id }, () => this.withdrawFriendRequest(id, user));
       }
       if (url.pathname.match(/^\/api\/friends\/[^/]+\/accept$/) && request.method === "POST") {
-        return await this.acceptFriend(url.pathname.split("/")[3], user);
+        const id = url.pathname.split("/")[3];
+        return await mutate("friend_request.accept", { kind: "friend_request", id }, () => this.acceptFriend(id, user));
       }
       if (url.pathname.match(/^\/api\/friends\/[^/]+\/decline$/) && request.method === "POST") {
-        return await this.declineFriendRequest(url.pathname.split("/")[3], user);
+        const id = url.pathname.split("/")[3];
+        return await mutate("friend_request.decline", { kind: "friend_request", id }, () => this.declineFriendRequest(id, user));
       }
-      if (url.pathname === "/api/challenges" && request.method === "POST") return await this.createChallenge(request, user);
+      if (url.pathname === "/api/challenges" && request.method === "POST") return await mutate("challenge.create", { kind: "user", id: user.id }, () => this.createChallenge(request, user));
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/accept$/) && request.method === "POST") {
-        return await this.acceptChallenge(url.pathname.split("/")[3], user);
+        const id = url.pathname.split("/")[3];
+        return await mutate("challenge.accept", { kind: "challenge", id }, () => this.acceptChallenge(id, user));
       }
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/withdraw$/) && request.method === "POST") {
-        return await this.withdrawChallenge(url.pathname.split("/")[3], user);
+        const id = url.pathname.split("/")[3];
+        return await mutate("challenge.withdraw", { kind: "challenge", id }, () => this.withdrawChallenge(id, user));
       }
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/decline$/) && request.method === "POST") {
-        return await this.declineChallenge(url.pathname.split("/")[3], user);
+        const id = url.pathname.split("/")[3];
+        return await mutate("challenge.decline", { kind: "challenge", id }, () => this.declineChallenge(id, user));
       }
       if (url.pathname.match(/^\/api\/challenges\/[^/]+\/state$/) && request.method === "GET") {
         return await this.challengeState(url.pathname.split("/")[3], user);
       }
-      if (url.pathname === "/api/schedules" && request.method === "POST") return await this.createSchedule(request, user);
+      if (url.pathname === "/api/schedules" && request.method === "POST") return await mutate("schedule.create", { kind: "user", id: user.id }, () => this.createSchedule(request, user));
       if (url.pathname.match(/^\/api\/schedules\/[^/]+\/accept$/) && request.method === "POST") {
-        return await this.acceptSchedule(url.pathname.split("/")[3], user);
+        const id = url.pathname.split("/")[3];
+        return await mutate("schedule.accept", { kind: "schedule", id }, () => this.acceptSchedule(id, user));
       }
       if (url.pathname.match(/^\/api\/schedules\/[^/]+\/cancel$/) && request.method === "POST") {
-        return await this.cancelSchedule(url.pathname.split("/")[3], user);
+        const id = url.pathname.split("/")[3];
+        return await mutate("schedule.cancel", { kind: "schedule", id }, () => this.cancelSchedule(id, user));
       }
       if (url.pathname.match(/^\/api\/schedules\/[^/]+\/decline$/) && request.method === "POST") {
-        return await this.declineSchedule(url.pathname.split("/")[3], user);
+        const id = url.pathname.split("/")[3];
+        return await mutate("schedule.decline", { kind: "schedule", id }, () => this.declineSchedule(id, user));
       }
       if (url.pathname === "/api/debug/push-log" && request.method === "GET") return await this.debugPushLog(request);
+      if (url.pathname === "/api/debug/client-errors" && request.method === "GET") return await this.debugClientErrors(request);
       if (url.pathname === "/_debug/tick" && request.method === "POST") return await this.debugTick(request);
 
       return json({ error: "Not found" }, { status: 404 });
@@ -463,6 +631,8 @@ export class AppDO extends DurableObject<Env> {
   async alarm() {
     const db = await this.db();
     const now = Date.now();
+    const pushIntents: PushDeliveryIntent[] = [];
+    const gameInits: GameMeta[] = [];
     // Ensure legacy records without nextFireAt fall back to startAt on
     // the first alarm pass — the field was added when recurring
     // schedules shipped.
@@ -488,7 +658,8 @@ export class AppDO extends DurableObject<Env> {
     for (const schedule of due) {
       // Create ONE fresh game per firing — always a new game even for
       // recurring, because each occurrence is a distinct playing session.
-      const game = await this.createGame(db, schedule.fromId, schedule.toId, schedule.timeControl, "schedule");
+      const game = this.createGame(db, schedule.fromId, schedule.toId, schedule.timeControl, "schedule");
+      gameInits.push(game);
       schedule.lastGameId = game.id;
       if (!schedule.gameId) schedule.gameId = game.id;   // preserve legacy field for the first firing
       // Human-first push copy (Tejas's iPhone-test order): put the OTHER
@@ -497,8 +668,8 @@ export class AppDO extends DurableObject<Env> {
       // two chairs".
       const fromHandle = db.users[schedule.fromId]?.handle || "your friend";
       const toHandle = db.users[schedule.toId]?.handle || "your friend";
-      await this.enqueuePush(db, schedule.fromId, "scheduled_start", `Your game with @${toHandle} is starting`, `/game/${game.id}`);
-      await this.enqueuePush(db, schedule.toId,   "scheduled_start", `Your game with @${fromHandle} is starting`, `/game/${game.id}`);
+      pushIntents.push(this.enqueuePush(db, schedule.fromId, "scheduled_start", `Your game with @${toHandle} is starting`, `/game/${game.id}`));
+      pushIntents.push(this.enqueuePush(db, schedule.toId,   "scheduled_start", `Your game with @${fromHandle} is starting`, `/game/${game.id}`));
       // Recurring schedules stay "accepted" and roll forward; one-offs
       // are done. Cap advance to a single interval per wake so a missed
       // week doesn't fire a stack of catch-up games — the loop below
@@ -516,14 +687,90 @@ export class AppDO extends DurableObject<Env> {
     }
     await this.save(db);
     await this.setNextScheduleAlarm(db);
+    for (const game of gameInits) this.ctx.waitUntil(this.initGame(game));
+    for (const intent of pushIntents) this.ctx.waitUntil(this.deliverPush(intent));
   }
 
   private async db() {
-    return ((await this.ctx.storage.get("db")) as AppDb | undefined) || emptyDb();
+    return normalizeDb(((await this.ctx.storage.get("db")) as AppDb | undefined) || emptyDb());
   }
 
   private save(db: AppDb) {
     return this.ctx.storage.put("db", db);
+  }
+
+  private async runMutation(
+    request: Request,
+    user: User,
+    event: string,
+    entity: { kind: string; id: string },
+    fn: () => Promise<Response>,
+  ) {
+    const start = Date.now();
+    const opId = clientOpId(request);
+    const key = opId ? opKey(user.id, opId) : "";
+    if (key) {
+      const db = await this.db();
+      sweepOpResults(db.opResults);
+      const replay = db.opResults[key];
+      if (replay) {
+        this.logMutation({ event, actor: user.id, entity, outcome: "replayed", start });
+        return responseFromStoredOp(replay);
+      }
+      await this.save(db);
+    }
+    try {
+      const response = await fn();
+      if (!key || !response.ok) {
+        this.logMutation({ event, actor: user.id, entity, outcome: response.ok ? "ok" : "failed", start });
+        return response;
+      }
+      const { stored, response: replayable } = await storeResponseForOp(response, user.id, opId);
+      const db = await this.db();
+      sweepOpResults(db.opResults);
+      db.opResults[key] = stored;
+      await this.save(db);
+      this.logMutation({ event, actor: user.id, entity, outcome: "ok", start });
+      return replayable;
+    } catch (error) {
+      this.logMutation({ event, actor: user.id, entity, outcome: "error", start, error });
+      throw error;
+    }
+  }
+
+  private logMutation({
+    event,
+    actor,
+    entity,
+    outcome,
+    start,
+    error,
+  }: {
+    event: string;
+    actor?: string;
+    entity: { kind: string; id: string };
+    outcome: string;
+    start: number;
+    error?: unknown;
+  }) {
+    const entry: {
+      level: "info" | "error";
+      event: string;
+      actor?: string;
+      entity: { kind: string; id: string };
+      outcome: string;
+      latency_ms: number;
+      error?: string;
+    } = {
+      level: error ? "error" : "info",
+      event,
+      actor,
+      entity,
+      outcome,
+      latency_ms: Date.now() - start,
+    };
+    if (error) entry.error = error instanceof Error ? error.message : String(error);
+    console.log(JSON.stringify(entry));
   }
 
   private async requireUser(request: Request) {
@@ -544,12 +791,42 @@ export class AppDO extends DurableObject<Env> {
     return json({ id: user.id, handle: user.handle });
   }
 
+  private async clientError(request: Request) {
+    const start = Date.now();
+    const db = await this.db();
+    const token = getCookie(request, COOKIE);
+    const sessionUserId = token ? db.sessions[token] : undefined;
+    const body = await readJson<{ url?: string; message?: string; stack?: string; userAgent?: string; userId?: string }>(request)
+      .catch(() => ({} as { url?: string; message?: string; stack?: string; userAgent?: string; userId?: string }));
+    const userId = body.userId && body.userId === sessionUserId ? body.userId : sessionUserId;
+    db.clientErrors.push({
+      id: newId("cer"),
+      createdAt: Date.now(),
+      url: String(body.url || "").slice(0, 500),
+      message: String(body.message || "Client error").slice(0, 1_000),
+      stack: body.stack ? String(body.stack).slice(0, 4_000) : undefined,
+      userAgent: String(body.userAgent || request.headers.get("user-agent") || "").slice(0, 500),
+      userId,
+    });
+    db.clientErrors = db.clientErrors.slice(-CLIENT_ERROR_LIMIT);
+    await this.save(db);
+    this.logMutation({ event: "client_error.record", actor: userId, entity: { kind: "client_error", id: "ring" }, outcome: "ok", start });
+    return json({ ok: true });
+  }
+
   private async registrationOptions(request: Request) {
+    const start = Date.now();
     const db = await this.db();
     const { handle: rawHandle } = await readJson<{ handle: string }>(request);
     const handle = cleanHandle(rawHandle || "");
     assertHandle(handle);
-    if (db.handleToUserId[handle]) throw new Error("That handle is already taken.");
+    sweepExpiredChallenges(db);
+    checkRateLimit(db, `register-options:${ipSignal(request)}:${handle}`, 12, 60_000);
+    if (db.handleToUserId[handle]) {
+      await this.save(db);
+      this.logMutation({ event: "auth.registration_options", entity: { kind: "handle", id: handle }, outcome: "rejected", start });
+      throw new Error("That handle is already taken.");
+    }
     const userId = newId("usr");
     const { rpID } = rpInfo(request);
     const options = await generateRegistrationOptions({
@@ -564,10 +841,12 @@ export class AppDO extends DurableObject<Env> {
     });
     db.registrationChallenges[handle] = { handle, userId, challenge: options.challenge, createdAt: Date.now() };
     await this.save(db);
+    this.logMutation({ event: "auth.registration_options", entity: { kind: "handle", id: handle }, outcome: "ok", start });
     return json(options);
   }
 
   private async registrationVerify(request: Request) {
+    const start = Date.now();
     const db = await this.db();
     const url = new URL(request.url);
     const body = await readJson<{ handle: string; response: RegistrationResponseJSON }>(request);
@@ -609,16 +888,24 @@ export class AppDO extends DurableObject<Env> {
     const token = newId("ses");
     db.sessions[token] = user.id;
     await this.save(db);
+    this.logMutation({ event: "auth.registration_verify", actor: user.id, entity: { kind: "user", id: user.id }, outcome: "ok", start });
     return json({ user: this.publicUser(user) }, { headers: { "set-cookie": sessionCookie(token, url) } });
   }
 
   private async loginOptions(request: Request) {
+    const start = Date.now();
     const db = await this.db();
     const { handle: rawHandle } = await readJson<{ handle: string }>(request);
     const handle = cleanHandle(rawHandle || "");
+    sweepExpiredChallenges(db);
+    checkRateLimit(db, `login-options:${ipSignal(request)}:${handle}`, 12, 60_000);
     const userId = db.handleToUserId[handle];
     const user = userId ? db.users[userId] : undefined;
-    if (!user) throw new Error("No account with that handle.");
+    if (!user) {
+      await this.save(db);
+      this.logMutation({ event: "auth.login_options", entity: { kind: "handle", id: handle || "(blank)" }, outcome: "rejected", start });
+      throw new Error("No account with that handle.");
+    }
     const { rpID } = rpInfo(request);
     const options = await generateAuthenticationOptions({
       rpID,
@@ -631,10 +918,12 @@ export class AppDO extends DurableObject<Env> {
     });
     db.authenticationChallenges[user.id] = { userId: user.id, challenge: options.challenge, createdAt: Date.now() };
     await this.save(db);
+    this.logMutation({ event: "auth.login_options", actor: user.id, entity: { kind: "user", id: user.id }, outcome: "ok", start });
     return json(options);
   }
 
   private async loginVerify(request: Request) {
+    const start = Date.now();
     const db = await this.db();
     const url = new URL(request.url);
     const body = await readJson<{ handle: string; response: AuthenticationResponseJSON }>(request);
@@ -668,14 +957,18 @@ export class AppDO extends DurableObject<Env> {
     const token = newId("ses");
     db.sessions[token] = user.id;
     await this.save(db);
+    this.logMutation({ event: "auth.login_verify", actor: user.id, entity: { kind: "user", id: user.id }, outcome: "ok", start });
     return json({ user: this.publicUser(user) }, { headers: { "set-cookie": sessionCookie(token, url) } });
   }
 
   private async logout(request: Request) {
+    const start = Date.now();
     const db = await this.db();
     const token = getCookie(request, COOKIE);
+    const userId = token ? db.sessions[token] : undefined;
     if (token) delete db.sessions[token];
     await this.save(db);
+    this.logMutation({ event: "auth.logout", actor: userId, entity: { kind: "session", id: token || "(none)" }, outcome: "ok", start });
     return json({ ok: true }, { headers: { "set-cookie": clearSessionCookie(new URL(request.url)) } });
   }
 
@@ -694,7 +987,7 @@ export class AppDO extends DurableObject<Env> {
         return {
           id: friend.id,
           handle: friend.handle,
-          online: now - (db.presence[friend.id] || 0) < 30000,
+          online: now - presenceSeenAt(db.presence[friend.id]) < PRESENCE_WINDOW_MS,
         };
       });
     const requests = Object.values(db.friendRequests)
@@ -737,11 +1030,32 @@ export class AppDO extends DurableObject<Env> {
     });
   }
 
-  private async heartbeat(user: User) {
+  private async heartbeat(request: Request, user: User) {
     const db = await this.db();
-    db.presence[user.id] = Date.now();
+    const body = await readJson<{ foregroundGameId?: string }>(request).catch(() => ({} as { foregroundGameId?: string }));
+    const foregroundGameId = typeof body.foregroundGameId === "string" && /^gam_[A-Za-z0-9_-]+$/.test(body.foregroundGameId)
+      ? body.foregroundGameId
+      : undefined;
+    db.presence[user.id] = { lastSeenAt: Date.now(), foregroundGameId };
     await this.save(db);
     return await this.me(user);
+  }
+
+  private async iceServers() {
+    if (this.env.TURN_KEY_ID && this.env.TURN_KEY_API_TOKEN) {
+      const response = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${this.env.TURN_KEY_ID}/credentials/generate-ice-servers`, {
+        method: "POST",
+        headers: {
+          "authorization": `Bearer ${this.env.TURN_KEY_API_TOKEN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ ttl: 86_400 }),
+      });
+      if (!response.ok) throw new Error("Could not create voice credentials.");
+      const body = await response.json() as { iceServers?: RTCIceServer[] };
+      return json({ iceServers: body.iceServers || cloudflareStunOnly() });
+    }
+    return json({ iceServers: cloudflareStunOnly() });
   }
 
   private async subscribe(request: Request, user: User) {
@@ -757,14 +1071,18 @@ export class AppDO extends DurableObject<Env> {
   private async pendingPush(request: Request, user: User) {
     const db = await this.db();
     db.pendingPushesByEndpoint ||= {};
-    let endpoint = "";
-    if (request.method === "POST") {
-      const body = await readJson<{ endpoint?: string }>(request);
-      endpoint = body.endpoint || "";
-    }
+    const body = await readJson<{ endpoint?: string; ackId?: string }>(request).catch(() => ({} as { endpoint?: string; ackId?: string }));
+    const endpoint = body.endpoint || "";
     const ownsEndpoint = endpoint && (db.pushSubscriptions[user.id] || []).some((subscription) => subscription.endpoint === endpoint);
-    const pending = ownsEndpoint ? db.pendingPushesByEndpoint[endpoint]?.shift() || null : db.pendingPushes[user.id]?.shift() || null;
-    await this.save(db);
+    if (body.ackId) {
+      const beforeEndpoint = ownsEndpoint ? db.pendingPushesByEndpoint[endpoint] || [] : [];
+      const beforeUser = db.pendingPushes[user.id] || [];
+      if (ownsEndpoint) db.pendingPushesByEndpoint[endpoint] = beforeEndpoint.filter((pending) => pending.id !== body.ackId);
+      db.pendingPushes[user.id] = beforeUser.filter((pending) => pending.id !== body.ackId);
+      await this.save(db);
+      return json({ ok: true });
+    }
+    const pending = ownsEndpoint ? db.pendingPushesByEndpoint[endpoint]?.[0] || null : db.pendingPushes[user.id]?.[0] || null;
     return json(pending);
   }
 
@@ -846,22 +1164,27 @@ export class AppDO extends DurableObject<Env> {
     };
     db.friendRequests[request.id] = request;
     // Human-first title (Tejas's iPhone-test order): "@handle sent a friend request".
-    await this.enqueuePush(db, target.id, "friend_request", `@${user.handle} sent a friend request`, "/");
+    const pushIntent = this.enqueuePush(db, target.id, "friend_request", `@${user.handle} sent a friend request`, "/");
     await this.save(db);
+    this.ctx.waitUntil(this.deliverPush(pushIntent));
     return json({ request });
   }
 
   private async acceptFriend(id: string, user: User) {
     const db = await this.db();
     const request = db.friendRequests[id];
-    if (!request || request.toId !== user.id || request.status !== "pending") throw new Error("Friend request not available.");
-    request.status = "accepted";
-    db.friendships[friendshipId(request.fromId, request.toId)] = {
-      id: friendshipId(request.fromId, request.toId),
-      userIds: [request.fromId, request.toId],
-      createdAt: Date.now(),
-    };
-    await this.save(db);
+    if (!request || request.toId !== user.id) throw new Error("Friend request not available.");
+    if (request.status === "pending") {
+      request.status = "accepted";
+      db.friendships[friendshipId(request.fromId, request.toId)] = {
+        id: friendshipId(request.fromId, request.toId),
+        userIds: [request.fromId, request.toId],
+        createdAt: Date.now(),
+      };
+      await this.save(db);
+    } else if (request.status !== "accepted" || !db.friendships[friendshipId(request.fromId, request.toId)]) {
+      throw new Error("Friend request not available.");
+    }
     return await this.me(user);
   }
 
@@ -929,8 +1252,9 @@ export class AppDO extends DurableObject<Env> {
     };
     db.challenges[challenge.id] = challenge;
     // Human-first title (Tejas's iPhone-test order): "@handle invited you to a game".
-    await this.enqueuePush(db, target.id, "challenge", `@${user.handle} invited you to a game`, "/");
+    const pushIntent = this.enqueuePush(db, target.id, "challenge", `@${user.handle} invited you to a game`, "/");
     await this.save(db);
+    this.ctx.waitUntil(this.deliverPush(pushIntent));
     return json({ challenge });
   }
 
@@ -973,16 +1297,22 @@ export class AppDO extends DurableObject<Env> {
   private async acceptChallenge(id: string, user: User) {
     const db = await this.db();
     const challenge = db.challenges[id];
-    if (!challenge || challenge.toId !== user.id || challenge.status !== "pending") throw new Error("Challenge not available.");
-    const game = await this.createGame(db, challenge.fromId, challenge.toId, challenge.timeControl, "challenge");
+    if (!challenge || challenge.toId !== user.id) throw new Error("Challenge not available.");
+    if (challenge.status === "accepted" && challenge.gameId && db.games[challenge.gameId]) {
+      return json({ game: db.games[challenge.gameId] });
+    }
+    if (challenge.status !== "pending") throw new Error("Challenge not available.");
+    const game = this.createGame(db, challenge.fromId, challenge.toId, challenge.timeControl, "challenge");
     challenge.status = "accepted";
     challenge.gameId = game.id;
     // Tell the inviter their handshake completed — they invited, went
     // back to their life, this brings them back to the ready game. The
     // realtime poll on /waiting/:id transitions them in-place if they
     // stayed at the table; the push covers the case where they left.
-    await this.enqueuePush(db, challenge.fromId, "challenge_accepted", `@${user.handle} accepted — your game is ready`, `/game/${game.id}`);
+    const pushIntent = this.enqueuePush(db, challenge.fromId, "challenge_accepted", `@${user.handle} accepted — your game is ready`, `/game/${game.id}`);
     await this.save(db);
+    await this.initGame(game);
+    this.ctx.waitUntil(this.deliverPush(pushIntent));
     return json({ game });
   }
 
@@ -1031,12 +1361,16 @@ export class AppDO extends DurableObject<Env> {
   private async acceptSchedule(id: string, user: User) {
     const db = await this.db();
     const schedule = db.schedules[id];
-    if (!schedule || schedule.toId !== user.id || schedule.status !== "pending") throw new Error("Schedule not available.");
-    schedule.status = "accepted";
-    // Ensure nextFireAt is set for records that came in without it.
-    if (schedule.nextFireAt === undefined) schedule.nextFireAt = schedule.startAt;
-    await this.save(db);
-    await this.setNextScheduleAlarm(db);
+    if (!schedule || schedule.toId !== user.id) throw new Error("Schedule not available.");
+    if (schedule.status === "pending") {
+      schedule.status = "accepted";
+      // Ensure nextFireAt is set for records that came in without it.
+      if (schedule.nextFireAt === undefined) schedule.nextFireAt = schedule.startAt;
+      await this.save(db);
+      await this.setNextScheduleAlarm(db);
+    } else if (schedule.status !== "accepted" && schedule.status !== "fired") {
+      throw new Error("Schedule not available.");
+    }
     return json({ schedule });
   }
 
@@ -1076,9 +1410,7 @@ export class AppDO extends DurableObject<Env> {
     return json({ schedule });
   }
 
-  private async createGame(db: AppDb, whiteId: string, blackId: string, timeControl: TimeControl, source: GameMeta["source"]) {
-    const white = db.users[whiteId];
-    const black = db.users[blackId];
+  private createGame(db: AppDb, whiteId: string, blackId: string, timeControl: TimeControl, source: GameMeta["source"]) {
     const game: GameMeta = {
       id: newId("gam"),
       whiteId,
@@ -1089,20 +1421,27 @@ export class AppDO extends DurableObject<Env> {
       createdAt: Date.now(),
     };
     db.games[game.id] = game;
+    return game;
+  }
+
+  private async initGame(game: GameMeta) {
+    const db = await this.db();
+    const white = db.users[game.whiteId];
+    const black = db.users[game.blackId];
+    if (!white || !black) throw new Error("Cannot initialize game without both players.");
     const stub = this.env.GAME_DO.get(this.env.GAME_DO.idFromName(game.id));
     await stub.fetch("https://game.local/init", {
       method: "POST",
       headers: { "content-type": "application/json", "x-internal": "app" },
       body: JSON.stringify({
         id: game.id,
-        whiteId,
-        blackId,
+        whiteId: game.whiteId,
+        blackId: game.blackId,
         whiteHandle: white.handle,
         blackHandle: black.handle,
-        timeControl,
+        timeControl: game.timeControl,
       }),
     });
-    return game;
   }
 
   private assertFriends(db: AppDb, a: string, b: string) {
@@ -1110,31 +1449,63 @@ export class AppDO extends DurableObject<Env> {
     if (!db.friendships[friendshipId(a, b)]) throw new Error("You can only play friends.");
   }
 
-  private async enqueuePush(db: AppDb, userId: string, type: PushType, body: string, url: string) {
+  private enqueuePush(db: AppDb, userId: string, type: PushType, body: string, url: string): PushDeliveryIntent {
     if (!PUSH_TYPES.includes(type)) throw new Error("Push type is not allowed.");
     const pending: PendingPush = { id: newId("psh"), type, body, url, createdAt: Date.now() };
     db.pendingPushesByEndpoint ||= {};
     const subscriptions = db.pushSubscriptions[userId] || [];
-    // Endpoints the push gateway reports as dead (410 Gone or 404). These
-    // are removed in the same transaction as the log write (state-smith
-    // GAP-12) so the server stops trying to push to browsers that have
-    // revoked the subscription.
-    const dead = new Set<string>();
     for (const subscription of subscriptions) {
       db.pendingPushesByEndpoint[subscription.endpoint] = [...(db.pendingPushesByEndpoint[subscription.endpoint] || []), pending].slice(-20);
-      const result = await sendWebPush(subscription, this.env);
-      db.pushLog.push({ type, userId, createdAt: Date.now(), delivered: result.delivered, status: result.status });
-      if (result.status === 410 || result.status === 404) dead.add(subscription.endpoint);
-    }
-    if (dead.size) {
-      db.pushSubscriptions[userId] = subscriptions.filter((s) => !dead.has(s.endpoint));
-      for (const endpoint of dead) delete db.pendingPushesByEndpoint[endpoint];
     }
     if (subscriptions.length === 0) {
       db.pendingPushes[userId] = [...(db.pendingPushes[userId] || []), pending].slice(-20);
-      db.pushLog.push({ type, userId, createdAt: Date.now(), delivered: false });
+    }
+    return { userId, pushId: pending.id };
+  }
+
+  private async deliverPush(intent: PushDeliveryIntent) {
+    const db = await this.db();
+    const subscriptions = db.pushSubscriptions[intent.userId] || [];
+    const dead = new Set<string>();
+    for (const subscription of subscriptions) {
+      const queued = db.pendingPushesByEndpoint[subscription.endpoint]?.some((pending) => pending.id === intent.pushId);
+      if (!queued) continue;
+      const result = await sendWebPush(subscription, this.env);
+      const type = db.pendingPushesByEndpoint[subscription.endpoint]?.find((pending) => pending.id === intent.pushId)?.type;
+      if (type) db.pushLog.push({ type, userId: intent.userId, createdAt: Date.now(), delivered: result.delivered, status: result.status });
+      if (result.status === 410 || result.status === 404) dead.add(subscription.endpoint);
+    }
+    if (dead.size) {
+      db.pushSubscriptions[intent.userId] = subscriptions.filter((s) => !dead.has(s.endpoint));
+      for (const endpoint of dead) delete db.pendingPushesByEndpoint[endpoint];
+    }
+    if (subscriptions.length === 0) {
+      const type = db.pendingPushes[intent.userId]?.find((pending) => pending.id === intent.pushId)?.type;
+      if (type) db.pushLog.push({ type, userId: intent.userId, createdAt: Date.now(), delivered: false });
     }
     db.pushLog = db.pushLog.slice(-100);
+    await this.save(db);
+  }
+
+  private async callInvite(request: Request) {
+    if (request.headers.get("x-internal") !== "game") throw new Error("Internal route.");
+    const db = await this.db();
+    const body = await readJson<{ gameId: string; initiatorId: string; recipientId: string }>(request);
+    const game = db.games[body.gameId];
+    if (!game || ![game.whiteId, game.blackId].includes(body.initiatorId) || ![game.whiteId, game.blackId].includes(body.recipientId)) {
+      throw new Error("Call invite not available.");
+    }
+    const now = Date.now();
+    const presence = db.presence[body.recipientId];
+    const foreground = presenceForegroundGameId(presence) === body.gameId && now - presenceSeenAt(presence) < PRESENCE_WINDOW_MS;
+    let pushIntent: PushDeliveryIntent | null = null;
+    if (!foreground) {
+      const initiator = db.users[body.initiatorId];
+      pushIntent = this.enqueuePush(db, body.recipientId, "call_invite", `@${initiator?.handle || "your friend"} wants to talk`, `/game/${body.gameId}`);
+    }
+    await this.save(db);
+    if (pushIntent) this.ctx.waitUntil(this.deliverPush(pushIntent));
+    return json({ ok: true, pushed: !foreground });
   }
 
   private async setNextScheduleAlarm(db: AppDb) {
@@ -1169,6 +1540,12 @@ export class AppDO extends DurableObject<Env> {
     if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
     const db = await this.db();
     return json({ pushTypes: PUSH_TYPES, pushLog: db.pushLog, pendingPushes: db.pendingPushes });
+  }
+
+  private async debugClientErrors(request: Request) {
+    if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
+    const db = await this.db();
+    return json({ clientErrors: db.clientErrors.slice(-CLIENT_ERROR_LIMIT) });
   }
 
   // Time-warp harness for alarm-driven behaviors (state-smith GAP-16).
@@ -1240,6 +1617,7 @@ export class GameDO extends DurableObject<Env> {
       if (url.pathname === "/resign" && request.method === "POST") return await this.resign(request);
       if (url.pathname === "/debug/expire" && request.method === "POST") return await this.debugExpire(request);
       if (url.pathname === "/debug/expire-grace" && request.method === "POST") return await this.debugExpireGrace(request);
+      if (url.pathname === "/debug/call-expire" && request.method === "POST") return await this.debugCallExpire(request);
       return json({ error: "Not found" }, { status: 404 });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "Game request failed" }, { status: 400 });
@@ -1255,7 +1633,7 @@ export class GameDO extends DurableObject<Env> {
       try { ws.send("pong"); } catch { /* close event will fire */ }
       return;
     }
-    await this.send(ws);
+    await this.handleSocketMessage(ws, data);
   }
   async webSocketClose(ws: WebSocket) { await this.disconnect(ws); }
   async webSocketError(ws: WebSocket) { await this.disconnect(ws); }
@@ -1285,7 +1663,9 @@ export class GameDO extends DurableObject<Env> {
       }
     }
     if (graceChanged) await this.ctx.storage.put("graceExpiresAt", graces);
-    if (graceChanged || game.status !== "active") await this.broadcast();
+    const sweptCall = await this.sweepCallAlarms(game, now);
+    if (sweptCall) await this.broadcastFrom(game, sweptCall);
+    else if (graceChanged || game.status !== "active") await this.broadcast();
     await this.setNextAlarm(game);
   }
 
@@ -1365,13 +1745,34 @@ export class GameDO extends DurableObject<Env> {
     return json({ expired: Object.keys(graces).length });
   }
 
+  private async debugCallExpire(request: Request) {
+    if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
+    const session = await this.getCallSession();
+    if (session && session.state !== "ended") {
+      const now = Date.now();
+      if (session.state === "requesting") session.startedAt = now - REQUEST_TIMEOUT_MS - 1_000;
+      if (session.graceExpiresAt) session.graceExpiresAt = now - 1_000;
+      await this.ctx.storage.put("callSession", session);
+    }
+    await this.alarm();
+    return json({ callSession: await this.getCallSession() });
+  }
+
   private async move(request: Request) {
     const userId = request.headers.get("x-user-id") || "";
+    return await this.runGameMutation(request, userId, "game.move", async () => {
+      return await this.performMove(request, userId);
+    });
+  }
+
+  private async performMove(request: Request, userId: string) {
     const body = await readJson<{ from: string; to: string; promotion?: string }>(request);
     const game = await this.requirePlayer(userId);
     this.applyClock(game, Date.now());
     if (game.status !== "active") {
       await this.putGame(game);
+      await this.reportStatus(game);
+      await this.broadcast();
       return json(await this.snapshotFrom(game));
     }
     const color = userId === game.whiteId ? "w" : "b";
@@ -1402,6 +1803,12 @@ export class GameDO extends DurableObject<Env> {
 
   private async resign(request: Request) {
     const userId = request.headers.get("x-user-id") || "";
+    return await this.runGameMutation(request, userId, "game.resign", async () => {
+      return await this.performResign(userId);
+    });
+  }
+
+  private async performResign(userId: string) {
     const game = await this.requirePlayer(userId);
     if (game.status === "active") {
       game.status = "resigned";
@@ -1417,17 +1824,276 @@ export class GameDO extends DurableObject<Env> {
     return json(await this.snapshotFrom(game));
   }
 
+  private async runGameMutation(request: Request, userId: string, event: string, fn: () => Promise<Response>) {
+    const start = Date.now();
+    const opId = clientOpId(request);
+    const key = opId ? opKey(userId, opId) : "";
+    if (key) {
+      const results = await this.gameOpResults();
+      sweepOpResults(results);
+      const replay = results[key];
+      if (replay) {
+        await this.logGameMutation(event, userId, "replayed", start);
+        return responseFromStoredOp(replay);
+      }
+      await this.ctx.storage.put("opResults", results);
+    }
+    try {
+      const response = await fn();
+      if (!key || !response.ok) {
+        await this.logGameMutation(event, userId, response.ok ? "ok" : "failed", start);
+        return response;
+      }
+      const { stored, response: replayable } = await storeResponseForOp(response, userId, opId);
+      const results = await this.gameOpResults();
+      sweepOpResults(results);
+      results[key] = stored;
+      await this.ctx.storage.put("opResults", results);
+      await this.logGameMutation(event, userId, "ok", start);
+      return replayable;
+    } catch (error) {
+      await this.logGameMutation(event, userId, "error", start, error);
+      throw error;
+    }
+  }
+
+  private async gameOpResults() {
+    return ((await this.ctx.storage.get("opResults")) as Record<string, StoredOpResult> | undefined) || {};
+  }
+
+  private async logGameMutation(event: string, actor: string, outcome: string, start: number, error?: unknown) {
+    const entityId = (await this.game())?.id || "(unknown)";
+    const entry: {
+      level: "info" | "error";
+      event: string;
+      actor: string;
+      entity: { kind: string; id: string };
+      outcome: string;
+      latency_ms: number;
+      error?: string;
+    } = {
+      level: error ? "error" : "info",
+      event,
+      actor,
+      entity: { kind: "game", id: entityId },
+      outcome,
+      latency_ms: Date.now() - start,
+    };
+    if (error) entry.error = error instanceof Error ? error.message : String(error);
+    console.log(JSON.stringify(entry));
+  }
+
   private async debugExpire(request: Request) {
     const userId = request.headers.get("x-user-id") || "";
     const game = await this.requirePlayer(userId);
     if (game.status !== "active") return json(await this.snapshotFrom(game));
-    if (game.turn === "w") game.whiteMs = 250;
-    else game.blackMs = 250;
+    const body = await readJson<{ ms?: number }>(request).catch(() => ({} as { ms?: number }));
+    const ms = typeof body.ms === "number" && Number.isFinite(body.ms) ? Math.max(0, body.ms) : 250;
+    if (game.turn === "w") game.whiteMs = ms;
+    else game.blackMs = ms;
     game.lastTickAt = Date.now();
     await this.putGame(game);
     await this.setNextAlarm(game);
     await this.broadcast();
     return json(await this.snapshotFrom(game));
+  }
+
+  private async handleSocketMessage(ws: WebSocket, data: string) {
+    const attachment = this.readAttachment(ws);
+    if (!attachment) return;
+    let message: { type?: unknown; callSessionId?: unknown; muted?: unknown; [key: string]: unknown };
+    try {
+      message = JSON.parse(data) as { type?: unknown; callSessionId?: unknown; muted?: unknown; [key: string]: unknown };
+    } catch {
+      await this.send(ws);
+      return;
+    }
+    if (typeof message.type !== "string" || !message.type.startsWith("call-") && !message.type.startsWith("peer-")) {
+      await this.send(ws);
+      return;
+    }
+    const type = message.type;
+    switch (type) {
+      case "call-initiate":
+        await this.callInitiate(attachment.userId);
+        return;
+      case "call-accept":
+        await this.callAccept(attachment.userId, typeof message.callSessionId === "string" ? message.callSessionId : "");
+        return;
+      case "call-hangup":
+        await this.callHangup(attachment.userId, typeof message.callSessionId === "string" ? message.callSessionId : undefined);
+        return;
+      case "call-mute":
+        await this.callMute(attachment.userId, typeof message.callSessionId === "string" ? message.callSessionId : "", message.muted === true);
+        return;
+      case "peer-ice-connected":
+        await this.peerIceConnected(attachment.userId, typeof message.callSessionId === "string" ? message.callSessionId : "");
+        return;
+      case "peer-ice-restart":
+      case "peer-ice-disconnected":
+        await this.peerIceDisconnected(attachment.userId, typeof message.callSessionId === "string" ? message.callSessionId : "");
+        return;
+      case "call-offer":
+      case "call-answer":
+      case "call-ice-candidate":
+        await this.relayCallSignal(attachment.userId, message);
+        return;
+      default:
+        return;
+    }
+  }
+
+  private async callInitiate(userId: string) {
+    const game = await this.requirePlayer(userId);
+    if (game.status !== "active") {
+      await this.sendToUser(userId, { type: "state", game: await this.snapshotFrom(game) });
+      return;
+    }
+    const prev = await this.getCallSession();
+    if (prev && prev.state !== "ended") {
+      await this.sendToUser(userId, { type: "state", game: await this.snapshotFrom(game, prev) });
+      return;
+    }
+    const next: CallSession = {
+      id: crypto.randomUUID(),
+      initiatorId: userId,
+      state: "requesting",
+      startedAt: Date.now(),
+      muted: {},
+    };
+    await this.mutateCallSession(game, next, { broadcast: true });
+    const recipientId = this.otherPlayerId(game, userId);
+    this.ctx.waitUntil(this.enqueueCallInvite(game.id, userId, recipientId));
+  }
+
+  private async callAccept(userId: string, callSessionId: string) {
+    const game = await this.requirePlayer(userId);
+    const session = await this.getCurrentCallSession(callSessionId);
+    if (!session || session.state !== "requesting" || session.initiatorId === userId) return;
+    await this.mutateCallSession(game, {
+      ...session,
+      state: "connecting",
+      acceptedAt: Date.now(),
+    }, { broadcast: true });
+  }
+
+  private async callHangup(userId: string, callSessionId?: string) {
+    const game = await this.requirePlayer(userId);
+    const session = callSessionId ? await this.getCurrentCallSession(callSessionId) : await this.getCallSession();
+    if (!session || session.state === "ended" || !this.isCallParticipant(game, userId, session)) return;
+    await this.mutateCallSession(game, {
+      ...session,
+      state: "ended",
+      endedAt: Date.now(),
+      endReason: `hung-up-by-${userId}`,
+      graceExpiresAt: undefined,
+    }, { broadcast: true });
+  }
+
+  private async callMute(userId: string, callSessionId: string, muted: boolean) {
+    const game = await this.requirePlayer(userId);
+    const session = await this.getCurrentCallSession(callSessionId);
+    if (!session || !this.isCallParticipant(game, userId, session)) return;
+    if (session.state !== "connected" && session.state !== "reconnecting") return;
+    if (session.muted[userId] === muted) return;
+    await this.mutateCallSession(game, {
+      ...session,
+      muted: { ...session.muted, [userId]: muted },
+    }, { broadcast: true });
+  }
+
+  private async peerIceConnected(userId: string, callSessionId: string) {
+    const game = await this.requirePlayer(userId);
+    const session = await this.getCurrentCallSession(callSessionId);
+    if (!session || !this.isCallParticipant(game, userId, session)) return;
+    if (session.state !== "connecting" && session.state !== "reconnecting") return;
+    await this.mutateCallSession(game, {
+      ...session,
+      state: "connected",
+      graceExpiresAt: undefined,
+    }, { broadcast: true });
+  }
+
+  private async peerIceDisconnected(userId: string, callSessionId: string) {
+    const game = await this.requirePlayer(userId);
+    const session = await this.getCurrentCallSession(callSessionId);
+    if (!session || !this.isCallParticipant(game, userId, session)) return;
+    if (session.state !== "connected") return;
+    await this.mutateCallSession(game, {
+      ...session,
+      state: "reconnecting",
+      graceExpiresAt: Date.now() + CALL_GRACE_MS,
+    }, { broadcast: true });
+  }
+
+  private async relayCallSignal(userId: string, message: { type?: unknown; callSessionId?: unknown; [key: string]: unknown }) {
+    const game = await this.requirePlayer(userId);
+    const callSessionId = typeof message.callSessionId === "string" ? message.callSessionId : "";
+    const session = await this.getCurrentCallSession(callSessionId);
+    if (!session || !this.isCallParticipant(game, userId, session) || session.state === "ended") return;
+    await this.sendToUser(this.otherPlayerId(game, userId), { ...message, fromUserId: userId });
+  }
+
+  private async mutateCallSession(game: GameState, next: CallSession, options: { broadcast: boolean }) {
+    await this.ctx.storage.put("callSession", next);
+    await this.setNextAlarm(game, next);
+    if (options.broadcast) await this.broadcastFrom(game, next);
+  }
+
+  private async sweepCallAlarms(game: GameState, now: number): Promise<CallSession | null> {
+    const session = await this.getCallSession();
+    if (!session || session.state === "ended") return null;
+    if (session.state === "requesting" && now - session.startedAt >= REQUEST_TIMEOUT_MS) {
+      const next: CallSession = {
+        ...session,
+        state: "ended",
+        endedAt: now,
+        endReason: "no-answer-timeout",
+        graceExpiresAt: undefined,
+      };
+      await this.mutateCallSession(game, next, { broadcast: false });
+      return next;
+    }
+    if (session.state === "reconnecting" && session.graceExpiresAt && session.graceExpiresAt <= now) {
+      const next: CallSession = {
+        ...session,
+        state: "ended",
+        endedAt: now,
+        endReason: "peer-gone-timeout",
+        graceExpiresAt: undefined,
+      };
+      await this.mutateCallSession(game, next, { broadcast: false });
+      return next;
+    }
+    return null;
+  }
+
+  private async getCallSession(): Promise<CallSession | null> {
+    return ((await this.ctx.storage.get("callSession")) as CallSession | undefined) || null;
+  }
+
+  private async getCurrentCallSession(callSessionId: string): Promise<CallSession | null> {
+    const session = await this.getCallSession();
+    if (!session || session.id !== callSessionId) return null;
+    return session;
+  }
+
+  private isCallParticipant(game: GameState, userId: string, _session: CallSession): boolean {
+    return game.whiteId === userId || game.blackId === userId;
+  }
+
+  private otherPlayerId(game: GameState, userId: string): string {
+    return userId === game.whiteId ? game.blackId : game.whiteId;
+  }
+
+  private async enqueueCallInvite(gameId: string, initiatorId: string, recipientId: string) {
+    const app = appStub(this.env);
+    const res = await app.fetch("https://app.local/_internal/call-invite", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal": "game" },
+      body: JSON.stringify({ gameId, initiatorId, recipientId }),
+    });
+    if (!res.ok) console.warn(`[GameDO ${gameId}] call invite failed: ${res.status}`);
   }
 
   private async disconnect(socket: WebSocket) {
@@ -1448,9 +2114,23 @@ export class GameDO extends DurableObject<Env> {
     const graces = await this.getGraces();
     graces[userId] = Date.now() + GameDO.GRACE_MS;
     await this.ctx.storage.put("graceExpiresAt", graces);
-    await this.broadcast();
     const game = await this.game();
-    if (game) await this.setNextAlarm(game);
+    if (!game) {
+      await this.broadcast();
+      return;
+    }
+    const session = await this.getCallSession();
+    if (session && this.isCallParticipant(game, userId, session) && (session.state === "connected" || session.state === "connecting")) {
+      const next: CallSession = {
+        ...session,
+        state: "reconnecting",
+        graceExpiresAt: Date.now() + CALL_GRACE_MS,
+      };
+      await this.mutateCallSession(game, next, { broadcast: true });
+    } else {
+      await this.broadcast();
+      await this.setNextAlarm(game);
+    }
   }
 
   // Persisted grace map lookup — returns {} when unset. Storage backs
@@ -1496,10 +2176,11 @@ export class GameDO extends DurableObject<Env> {
     return await this.snapshotFrom(game);
   }
 
-  private async snapshotFrom(game: GameState) {
+  private async snapshotFrom(game: GameState, callSession?: CallSession | null) {
     return {
       ...game,
       connectionState: await this.computeConnectionState(game),
+      callSession: callSession === undefined ? await this.getCallSession() : callSession,
     };
   }
 
@@ -1551,7 +2232,7 @@ export class GameDO extends DurableObject<Env> {
   // and (b) the nearest graceExpiresAt. Combined so a single alarm
   // handles both concerns without either starving the other
   // (state-smith GAP-9 alignment).
-  private async setNextAlarm(game: GameState) {
+  private async setNextAlarm(game: GameState, callSession?: CallSession | null) {
     const now = Date.now();
     const wakes: number[] = [];
     if (game.status === "active") {
@@ -1560,6 +2241,9 @@ export class GameDO extends DurableObject<Env> {
     }
     const graces = await this.getGraces();
     for (const at of Object.values(graces)) wakes.push(Math.max(now + 100, at));
+    const session = callSession === undefined ? await this.getCallSession() : callSession;
+    if (session?.state === "requesting") wakes.push(Math.max(now + 100, session.startedAt + REQUEST_TIMEOUT_MS));
+    if (session?.state === "reconnecting" && session.graceExpiresAt) wakes.push(Math.max(now + 100, session.graceExpiresAt));
     if (!wakes.length) return;
     await this.ctx.storage.setAlarm(Math.min(...wakes));
   }
@@ -1605,8 +2289,21 @@ export class GameDO extends DurableObject<Env> {
   private async broadcast() {
     const game = await this.game();
     if (!game) return;
-    const message = JSON.stringify({ type: "state", game: await this.snapshotFrom(game) });
+    await this.broadcastFrom(game);
+  }
+
+  private async broadcastFrom(game: GameState, callSession?: CallSession | null) {
+    const message = JSON.stringify({ type: "state", game: await this.snapshotFrom(game, callSession) });
     for (const ws of this.ctx.getWebSockets()) {
+      try { ws.send(message); } catch { /* dead socket → close event fires */ }
+    }
+  }
+
+  private async sendToUser(userId: string, payload: unknown) {
+    const message = JSON.stringify(payload);
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = this.readAttachment(ws);
+      if (att?.userId !== userId) continue;
       try { ws.send(message); } catch { /* dead socket → close event fires */ }
     }
   }
@@ -1635,7 +2332,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/games/")) return gameRequest(request, env, url.pathname);
-    if (url.pathname === "/api/debug/push-log" || url.pathname === "/_debug/tick") {
+    if (url.pathname === "/api/debug/push-log" || url.pathname === "/api/debug/client-errors" || url.pathname === "/_debug/tick") {
       if (!["127.0.0.1", "localhost"].includes(url.hostname)) return json({ error: "Not found" }, { status: 404 });
       const headers = new Headers(request.headers);
       headers.set("x-debug-local", "true");

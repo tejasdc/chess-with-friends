@@ -331,10 +331,8 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
     return `${window.location.origin}${data.inviteUrl}`;
   });
   await dev.page.goto(inviteUrl);
-  await dev.page.getByRole("button", { name: "Send friend request" }).click();
-  await waitForPush(clara.page, "friend_request");
+  await expect(dev.page.locator(".friend-card", { hasText: clara.handle })).toBeVisible({ timeout: 10000 });
   await clara.page.reload();
-  await clara.page.getByRole("button", { name: "Accept" }).first().click();
   await expect(clara.page.locator(".friend-card", { hasText: dev.handle })).toBeVisible();
   await shot(clara.page, "14-invite-link-friend-accepted");
   await clara.context.close();
@@ -395,14 +393,22 @@ async function fakePushSubscribe(page: Page) {
 }
 
 async function pendingPush(page: Page): Promise<{ type?: string } | null> {
-  return page.evaluate(async () => {
+  return page.evaluate(async (): Promise<{ id?: string; type?: string } | null> => {
     const endpoint = window.localStorage.getItem("testPushEndpoint") || "";
     const response = await fetch("/api/push/pending", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ endpoint }),
     });
-    return response.json();
+    const pending = await response.json() as { id?: string; type?: string } | null;
+    if (pending?.id) {
+      await fetch("/api/push/pending", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ endpoint, ackId: pending.id }),
+      });
+    }
+    return pending;
   });
 }
 
@@ -418,8 +424,11 @@ async function waitForPush(page: Page, type: string, timeout = 10_000) {
 async function challengeAndAccept(alice: Page, bob: Page, timeControl: "10|0" | "5|0") {
   await alice.goto("/");
   await bob.goto("/");
-  await alice.getByLabel("Time control").first().selectOption(timeControl);
-  await alice.getByRole("button", { name: "Send" }).click();
+  const friendHandle = await bob.evaluate(async () => {
+    const me = await (await fetch("/api/me", { credentials: "include" })).json() as { user: { handle: string } };
+    return me.user.handle;
+  });
+  await alice.getByRole("button", { name: `Invite @${friendHandle}` }).click();
   await bob.reload();
   await bob.getByRole("button", { name: "Accept" }).first().click();
   await expect(bob).toHaveURL(/\/game\/gam_/);
@@ -446,10 +455,18 @@ async function expireClock(page: Page, gameId: string) {
 
 async function scheduleSoon(page: Page, friendHandle: string) {
   await page.locator(".friend-card", { hasText: friendHandle }).waitFor();
-  await page.getByRole("tab", { name: "Schedule" }).click();
-  await page.getByLabel("Time control").selectOption("10|0");
-  await page.getByLabel("Start in minutes").fill("0.03");
-  await page.getByRole("button", { name: "Propose" }).click();
+  await page.evaluate(async ({ friendHandle, startAt }) => {
+    const me = await (await fetch("/api/me", { credentials: "include" })).json() as { friends: Array<{ id: string; handle: string }> };
+    const friend = me.friends.find((f) => f.handle === friendHandle);
+    if (!friend) throw new Error(`Friend ${friendHandle} not found.`);
+    const response = await fetch("/api/schedules", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ friendId: friend.id, timeControl: "10|0", startAt, recurrence: { kind: "once" } }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+  }, { friendHandle, startAt: Date.now() + 3_000 });
 }
 
 async function shot(page: Page, name: string) {
