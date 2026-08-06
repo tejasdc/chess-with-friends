@@ -93,7 +93,7 @@ async function addFriendByHandle(page: Page, handle: string) {
   await page.getByRole("button", { name: "Add", exact: true }).click();
 }
 
-async function twoClientsInGame(browser: Browser, suffix: string, opts: { instrumentSockets?: boolean } = {}) {
+async function twoClientsInGame(browser: Browser, suffix: string, opts: { instrumentSockets?: boolean; voiceMocks?: boolean } = {}) {
   const aliceCtx = await browser.newContext();
   const bobCtx = await browser.newContext();
   const alice = await aliceCtx.newPage();
@@ -103,6 +103,10 @@ async function twoClientsInGame(browser: Browser, suffix: string, opts: { instru
     // reach into the socket bag from within tests.
     await installSocketTracker(alice);
     await installSocketTracker(bob);
+  }
+  if (opts.voiceMocks) {
+    await installVoiceMocks(alice);
+    await installVoiceMocks(bob);
   }
   await addAuthenticator(alice);
   await addAuthenticator(bob);
@@ -180,7 +184,269 @@ async function installSocketTracker(page: Page) {
   });
 }
 
+async function installVoiceMocks(page: Page) {
+  await page.addInitScript(() => {
+    class FakeTrack {
+      enabled = true;
+      kind = "audio";
+      id = `track-${Math.random()}`;
+      stop() { this.enabled = false; }
+    }
+    class FakeStream {
+      track = new FakeTrack();
+      getAudioTracks() { return [this.track]; }
+      getTracks() { return [this.track]; }
+    }
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: async () => {
+          const stream = new FakeStream();
+          const w = window as unknown as { __voiceTracks?: FakeTrack[] };
+          w.__voiceTracks = [...(w.__voiceTracks || []), stream.track];
+          return stream;
+        },
+      },
+    });
+    class FakePeerConnection extends EventTarget {
+      iceConnectionState = "new";
+      localDescription: RTCSessionDescriptionInit | null = null;
+      remoteDescription: RTCSessionDescriptionInit | null = null;
+      addTrack() { /* media is mocked */ }
+      async createOffer() { return { type: "offer", sdp: "fake-offer" } as RTCSessionDescriptionInit; }
+      async createAnswer() { return { type: "answer", sdp: "fake-answer" } as RTCSessionDescriptionInit; }
+      async setLocalDescription(desc: RTCSessionDescriptionInit) {
+        this.localDescription = desc;
+        window.setTimeout(() => this.setIce("connected"), 0);
+      }
+      async setRemoteDescription(desc: RTCSessionDescriptionInit) { this.remoteDescription = desc; }
+      async addIceCandidate() { /* trickle ICE mocked */ }
+      close() { this.setIce("closed"); }
+      setIce(state: string) {
+        this.iceConnectionState = state;
+        this.dispatchEvent(new Event("iceconnectionstatechange"));
+      }
+    }
+    (window as unknown as { RTCPeerConnection: typeof RTCPeerConnection }).RTCPeerConnection = FakePeerConnection as unknown as typeof RTCPeerConnection;
+  });
+}
+
+async function sendVoice(page: Page, message: Record<string, unknown>) {
+  await page.evaluate((payload) => {
+    const sockets = ((window as unknown as { __sockets?: WebSocket[] }).__sockets || []).filter((socket) => socket.readyState === WebSocket.OPEN);
+    if (!sockets.length) throw new Error("No open tracked socket.");
+    sockets[sockets.length - 1].send(JSON.stringify(payload));
+  }, message);
+}
+
+async function gameSnapshot(page: Page, gameId: string) {
+  return page.evaluate(async (id) => {
+    const response = await fetch(`/api/games/${id}/state`, { credentials: "include" });
+    return await response.json() as { callSession: null | { id: string; state: string; endReason?: string; muted?: Record<string, boolean> }; status: string };
+  }, gameId);
+}
+
+async function waitCallState(page: Page, gameId: string, state: string) {
+  await expect.poll(async () => (await gameSnapshot(page, gameId)).callSession?.state || null, { timeout: 10_000 }).toBe(state);
+  return (await gameSnapshot(page, gameId)).callSession!;
+}
+
+async function directConnectedCall(alice: Page, bob: Page, gameId: string) {
+  await sendVoice(alice, { type: "call-initiate" });
+  const requesting = await waitCallState(alice, gameId, "requesting");
+  await sendVoice(bob, { type: "call-accept", callSessionId: requesting.id });
+  await waitCallState(alice, gameId, "connecting");
+  await sendVoice(alice, { type: "peer-ice-connected", callSessionId: requesting.id });
+  return await waitCallState(alice, gameId, "connected");
+}
+
+async function uiConnectedCall(alice: Page, bob: Page, gameId: string) {
+  await alice.getByRole("button", { name: "Start voice call" }).click();
+  const requesting = await waitCallState(alice, gameId, "requesting");
+  await expect(bob.locator(".voice-bar", { hasText: "wants to talk" })).toBeVisible({ timeout: 5000 });
+  await bob.locator(".voice-bar").getByRole("button", { name: "Accept" }).click();
+  return await waitCallState(alice, gameId, "connected");
+}
+
+async function debugCallExpire(page: Page, gameId: string) {
+  await page.evaluate(async (id) => {
+    await fetch(`/api/games/${id}/debug/call-expire`, { method: "POST", credentials: "include" });
+  }, gameId);
+}
+
 // ---------- adversity scenarios ----------
+
+test("voice call happy path reaches connected (state-smith GAP-20/21)", async ({ browser }) => {
+  const suffix = `voice_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
+  try {
+    await uiConnectedCall(alice, bob, gameId);
+    await expect(alice.locator(".voice-bar[data-call-state='connected']")).toBeVisible();
+    await expect(bob.locator(".voice-bar[data-call-state='connected']")).toBeVisible();
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice call hangup by initiator reaches ended", async ({ browser }) => {
+  const suffix = `hang_i_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    const session = await directConnectedCall(alice, bob, gameId);
+    await sendVoice(alice, { type: "call-hangup", callSessionId: session.id });
+    const ended = await waitCallState(alice, gameId, "ended");
+    expect(ended.endReason).toMatch(/^hung-up-by-usr_/);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice call hangup by responder reaches ended", async ({ browser }) => {
+  const suffix = `hang_r_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    const session = await directConnectedCall(alice, bob, gameId);
+    await sendVoice(bob, { type: "call-hangup", callSessionId: session.id });
+    const ended = await waitCallState(alice, gameId, "ended");
+    expect(ended.endReason).toMatch(/^hung-up-by-usr_/);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice no-answer timeout is alarm driven (state-smith GAP-24)", async ({ browser }) => {
+  const suffix = `noans_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    await sendVoice(alice, { type: "call-initiate" });
+    await waitCallState(alice, gameId, "requesting");
+    await debugCallExpire(alice, gameId);
+    const ended = await waitCallState(alice, gameId, "ended");
+    expect(ended.endReason).toBe("no-answer-timeout");
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice peer-gone timeout after responder socket death (state-smith GAP-22/24)", async ({ browser }) => {
+  const suffix = `gone_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    await directConnectedCall(alice, bob, gameId);
+    await killAllSockets(bob);
+    await waitCallState(alice, gameId, "reconnecting");
+    await debugCallExpire(alice, gameId);
+    const ended = await waitCallState(alice, gameId, "ended");
+    expect(ended.endReason).toBe("peer-gone-timeout");
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice call survives game terminal (state-smith GAP-23-follow/GAP-26)", async ({ browser }) => {
+  const suffix = `term_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    const session = await directConnectedCall(alice, bob, gameId);
+    await bob.getByRole("button", { name: "Open menu" }).click();
+    await bob.getByRole("button", { name: "Resign" }).click();
+    await bob.getByRole("button", { name: "Confirm resign" }).click();
+    await expect(alice.getByText("resigned")).toBeVisible({ timeout: 5000 });
+    const snapshot = await gameSnapshot(alice, gameId);
+    expect(snapshot.status).toBe("resigned");
+    expect(snapshot.callSession?.state).toBe("connected");
+    await sendVoice(alice, { type: "call-ice-candidate", callSessionId: session.id, candidate: { candidate: "candidate:1 1 udp 1 127.0.0.1 9 typ host", sdpMid: "0", sdpMLineIndex: 0 } });
+    expect((await gameSnapshot(alice, gameId)).callSession?.state).toBe("connected");
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice nav away hangs up before home transition (state-smith GAP-27)", async ({ browser }) => {
+  const suffix = `nav_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
+  try {
+    await uiConnectedCall(alice, bob, gameId);
+    await alice.getByRole("button", { name: "two chairs" }).click();
+    await expect(alice.getByText("Ending call...")).toBeVisible({ timeout: 5000 });
+    await expect(alice).toHaveURL(/\/$/);
+    const ended = await waitCallState(bob, gameId, "ended");
+    expect(ended.endReason).toMatch(/^hung-up-by-usr_/);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice call invite push is gated by foregroundGameId (state-smith GAP-28)", async ({ browser }) => {
+  const suffix = `push_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    await bob.evaluate((id) => fetch("/api/presence/heartbeat", { method: "POST", body: JSON.stringify({ foregroundGameId: id }) }), gameId);
+    await sendVoice(alice, { type: "call-initiate" });
+    let log = await alice.evaluate(async () => (await (await fetch("/api/debug/push-log")).json()) as { pushLog: Array<{ type: string }> });
+    expect(log.pushLog.filter((entry) => entry.type === "call_invite")).toHaveLength(0);
+    const first = (await gameSnapshot(alice, gameId)).callSession!;
+    await sendVoice(alice, { type: "call-hangup", callSessionId: first.id });
+    await waitCallState(alice, gameId, "ended");
+    await bob.goto("/");
+    await bob.evaluate(() => fetch("/api/presence/heartbeat", { method: "POST", body: "{}" }));
+    await sendVoice(alice, { type: "call-initiate" });
+    log = await alice.evaluate(async () => (await (await fetch("/api/debug/push-log")).json()) as { pushLog: Array<{ type: string }> });
+    expect(log.pushLog.filter((entry) => entry.type === "call_invite")).toHaveLength(1);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice call state survives socket hibernation adversity (state-smith GAP-29)", async ({ browser }) => {
+  const suffix = `hib_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    await directConnectedCall(alice, bob, gameId);
+    await killAllSockets(alice);
+    await killAllSockets(bob);
+    await debugCallExpire(alice, gameId);
+    const ended = await waitCallState(alice, gameId, "ended");
+    expect(ended.endReason).toBe("peer-gone-timeout");
+    await alice.reload();
+    await expect.poll(async () => (await gameSnapshot(alice, gameId)).callSession?.endReason, { timeout: 10_000 }).toBe("peer-gone-timeout");
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice mute then end sequence and peer-mute interruption (state-smith GAP-25)", async ({ browser }) => {
+  const suffix = `mute_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
+  try {
+    const session = await uiConnectedCall(alice, bob, gameId);
+    await alice.locator(".voice-bar").getByRole("button", { name: "MUTE" }).click();
+    await expect(alice.locator(".voice-bar").getByRole("button", { name: "END CALL" })).toBeVisible();
+    await expect.poll(async () => alice.evaluate(() => (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled)).toBe(false);
+    expect((await gameSnapshot(bob, gameId)).callSession?.state).toBe("connected");
+
+    await sendVoice(bob, { type: "call-mute", callSessionId: session.id, muted: true });
+    await expect(alice.locator(".voice-bar").getByRole("button", { name: "MUTE" })).toBeVisible({ timeout: 5000 });
+    await expect.poll(async () => alice.evaluate(() => (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled)).toBe(true);
+
+    await alice.locator(".voice-bar").getByRole("button", { name: "MUTE" }).click();
+    await alice.locator(".voice-bar").getByRole("button", { name: "END CALL" }).click();
+    const ended = await waitCallState(alice, gameId, "ended");
+    expect(ended.endReason).toMatch(/^hung-up-by-usr_/);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
 
 test("socket death mid-game recovers silently, no lost opponent moves", async ({ browser }) => {
   const suffix = Date.now().toString(36).slice(-6);
