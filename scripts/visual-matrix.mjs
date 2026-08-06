@@ -46,11 +46,13 @@ const SIMULATOR_UDIDS = [
   "3C3CF59F-CC82-47B0-A139-0F14D6AF6165", // iPhone 17 Pro
 ];
 
-const VIEWPORTS = [
+const ALL_VIEWPORTS = [
   { name: "390x844", width: 390, height: 844 },
   { name: "430x932", width: 430, height: 932 },
   { name: "1440x900", width: 1440, height: 900 },
 ];
+const VIEWPORT_FILTER = (process.env.VISUAL_MATRIX_VIEWPORTS || "").split(",").map((item) => item.trim()).filter(Boolean);
+const VIEWPORTS = VIEWPORT_FILTER.length ? ALL_VIEWPORTS.filter((viewport) => VIEWPORT_FILTER.includes(viewport.name)) : ALL_VIEWPORTS;
 
 async function preflight() {
   try {
@@ -290,7 +292,11 @@ async function ensureLiveGame(ctx) {
   // Ensure alice+bob are in an active game together. Prereq: an
   // outgoing challenge exists; then bob accepts via API. If a game is
   // already active between them, this is a no-op.
-  if (ctx.liveGameId) return ctx.liveGameId;
+  if (ctx.liveGameId) {
+    const cached = await gameSnapshot(ctx.alice.page, ctx.liveGameId).catch(() => null);
+    if (cached?.status === "active") return ctx.liveGameId;
+    ctx.liveGameId = null;
+  }
   await ensureOutgoingChallenge(ctx);
   const bob = ctx.bob.page;
   await bob.evaluate(async () => {
@@ -393,24 +399,26 @@ async function stateGameCallIdle(page, ctx) {
 
 async function stateGameCallRequestingCaller(page, ctx) {
   await ensureRequestingCall(ctx);
-  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='requesting']");
+  await ctx.alice.page.waitForSelector(".voice-status[data-call-state='requesting']");
 }
 
 async function stateGameCallRequestingRecipient(page, ctx) {
   await ensureRequestingCall(ctx);
-  await ctx.bob.page.waitForSelector(".voice-bar[data-call-state='requesting']");
+  await ctx.bob.page.waitForSelector(".voice-status[data-call-state='requesting']");
   return ctx.bob.page;
 }
 
 async function stateGameCallConnected(page, ctx) {
   await ensureConnectedCall(ctx);
-  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='connected']");
+  await ctx.alice.page.waitForSelector(".call-inline-button[data-call-control-state='unmuted']");
+  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-bar"));
 }
 
 async function stateGameCallConnectedMuted(page, ctx) {
   await ensureConnectedCall(ctx);
-  await ctx.alice.page.locator(".voice-bar").getByRole("button", { name: "MUTE" }).click();
-  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='connected']");
+  await ctx.alice.page.getByRole("button", { name: "Mute call" }).click();
+  await ctx.alice.page.waitForSelector(".call-inline-button[data-call-control-state='muted']");
+  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-bar"));
 }
 
 async function stateGameCallConnectedPeerMuted(page, ctx) {
@@ -424,23 +432,65 @@ async function stateGameCallConnectedPeerMuted(page, ctx) {
 async function stateGameCallReconnecting(page, ctx) {
   const { session } = await ensureConnectedCall(ctx);
   await sendVoice(ctx.alice.page, { type: "peer-ice-disconnected", callSessionId: session.id });
-  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='reconnecting']");
+  await ctx.alice.page.waitForSelector(".voice-status[data-call-state='reconnecting']");
 }
 
 async function stateGameCallPostGameStillActive(page, ctx) {
   const { gameId, session } = await ensureConnectedCall(ctx);
-  await sendVoice(ctx.alice.page, { type: "peer-ice-connected", callSessionId: session.id });
+  await sendVoice(ctx.bob.page, { type: "call-mute", callSessionId: session.id, muted: true });
+  await sendVoice(ctx.bob.page, { type: "call-mute", callSessionId: session.id, muted: false });
+  await ctx.alice.page.waitForFunction(
+    async ({ id, userId }) => {
+      const game = await (await fetch(`/api/games/${id}/state`)).json();
+      return game.callSession?.muted?.[userId] !== true;
+    },
+    { id: gameId, userId: ctx.bob.id },
+    { timeout: 8000 },
+  );
+  await ctx.alice.page.waitForFunction(() => !document.querySelector(".peer-muted-pill"));
+  await ctx.alice.page.waitForSelector(".call-inline-button[data-call-control-state='unmuted']");
   await ctx.bob.page.evaluate(async (id) => {
     await fetch(`/api/games/${id}/resign`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   }, gameId);
   await ctx.alice.page.waitForSelector(".game-bottom-terminal", { timeout: 8000 });
-  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='connected']");
+  await ctx.alice.page.waitForSelector(".call-inline-button[data-call-control-state='unmuted']");
+  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-bar"));
+  await ctx.alice.page.waitForTimeout(250);
 }
 
 async function stateGameCallEndedPill(page, ctx) {
   const { session } = await ensureConnectedCall(ctx);
   await sendVoice(ctx.alice.page, { type: "call-hangup", callSessionId: session.id });
-  await ctx.alice.page.waitForSelector(".voice-bar[data-call-state='ended']");
+  await ctx.alice.page.waitForSelector(".voice-status[data-call-state='ended']");
+}
+
+async function stateGameCallEndedNoMutedResidue(page, ctx) {
+  const { gameId, session } = await ensureConnectedCall(ctx);
+  await ctx.bob.page.waitForSelector(".call-inline-button[data-call-control-state='unmuted']", { timeout: 8000 });
+  await sendVoice(ctx.alice.page, { type: "call-mute", callSessionId: session.id, muted: false });
+  await ctx.bob.page.waitForFunction(() => !document.querySelector(".peer-muted-pill"));
+  await sendVoice(ctx.alice.page, { type: "call-mute", callSessionId: session.id, muted: true });
+  await ctx.bob.page.waitForFunction(
+    async ({ id, userId }) => {
+      const game = await (await fetch(`/api/games/${id}/state`)).json();
+      return game.callSession?.muted?.[userId] === true;
+    },
+    { id: gameId, userId: ctx.alice.id },
+    { timeout: 8000 },
+  );
+  await ctx.bob.page.waitForSelector(".peer-muted-pill", { timeout: 8000 });
+  await sendVoice(ctx.alice.page, { type: "call-hangup", callSessionId: session.id });
+  await ctx.bob.page.waitForSelector(".voice-status[data-call-state='ended']");
+  await ctx.bob.page.waitForFunction(() => !document.querySelector(".peer-muted-pill"));
+  await ctx.bob.page.waitForFunction(
+    async (id) => {
+      const game = await (await fetch(`/api/games/${id}/state`)).json();
+      return game.callSession?.state === "ended" && Object.keys(game.callSession.muted || {}).length === 0;
+    },
+    gameId,
+    { timeout: 8000 },
+  );
+  return ctx.bob.page;
 }
 
 async function stateDashboardAcceptedSchedule(page, ctx) {
@@ -613,11 +663,14 @@ const CELLS = [
   { group: "alice",  key: "game-call-reconnecting",       label: "game / call reconnecting",                                run: stateGameCallReconnecting },
   { group: "alice",  key: "game-call-post-game-still-active", label: "game / call post-game still active",                  run: stateGameCallPostGameStillActive },
   { group: "alice",  key: "game-call-ended-pill",         label: "game / call ended pill",                                  run: stateGameCallEndedPill },
+  { group: "alice",  key: "game-call-ended-no-muted-residue", label: "game / call ended no muted residue",                  run: stateGameCallEndedNoMutedResidue },
   { group: "alice",  key: "dashboard-accepted-schedule",  label: "dashboard / accepted schedule (Scheduled)",               run: stateDashboardAcceptedSchedule },
   { group: "alice",  key: "dashboard-friend-req-incoming",label: "dashboard / incoming friend request",                     run: stateDashboardIncomingFriendRequest },
   { group: "alice",  key: "dashboard-friend-req-outgoing",label: "dashboard / outgoing friend request",                     run: stateDashboardOutgoingFriendRequest },
   { group: "alice",  key: "dashboard-zero-friends",       label: "dashboard / zero friends (empty state)",                   run: stateDashboardZeroFriends },
 ];
+const CELL_FILTER = (process.env.VISUAL_MATRIX_CELLS || "").split(",").map((item) => item.trim()).filter(Boolean);
+const MATRIX_CELLS = CELL_FILTER.length ? CELLS.filter((cell) => CELL_FILTER.includes(cell.key)) : CELLS;
 
 async function runViewport(browser, viewport) {
   const dir = join(OUT_ROOT, viewport.name);
@@ -634,7 +687,7 @@ async function runViewport(browser, viewport) {
   const unauthPage = await unauthCtx.newPage();
 
   const results = [];
-  for (const cell of CELLS) {
+  for (const cell of MATRIX_CELLS) {
     try {
       const defaultPage = cell.group === "unauth" ? unauthPage : ctx.alice.page;
       // A cell may return an alternate Page — some states live on
@@ -805,11 +858,13 @@ async function main() {
   }
   // Simulator pass — mandatory for mobile truth. Runs after headless
   // so it doesn't block the fast programmatic guards.
-  console.log(`\n[matrix] simulator (real WebKit)`);
-  try {
-    await runSimulator();
-  } catch (e) {
-    console.log(`  [warn] simulator pass failed: ${String(e).slice(0, 200)}`);
+  if (process.env.VISUAL_MATRIX_SKIP_SIMULATOR !== "1") {
+    console.log(`\n[matrix] simulator (real WebKit)`);
+    try {
+      await runSimulator();
+    } catch (e) {
+      console.log(`  [warn] simulator pass failed: ${String(e).slice(0, 200)}`);
+    }
   }
   console.log(`\n[matrix] done. Contact sheets:`);
   for (const v of VIEWPORTS) console.log(`  file://${process.cwd()}/${OUT_ROOT}/${v.name}/contact-sheet.html`);
