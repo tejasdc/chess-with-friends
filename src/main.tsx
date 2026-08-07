@@ -1754,7 +1754,10 @@ function Shell({
       <header className="topbar">
         <button className="wordmark" onClick={() => onNavigateHome ? onNavigateHome() : navigate("/")}>two chairs</button>
         <div className="topbar-right">
-          {home ? <span className="handle">@{home.user.handle}</span> : null}
+          {/* @handle used to render here; moved into the ⋯ menu ("signed
+              in as @X" line above Sign out) so the topbar carries only
+              the wordmark and the menu affordance. Frees up horizontal
+              real estate and reads cleaner. */}
           {/* Universal ⋯ menu — top-right on every screen per team-lead.
               Kept as one pattern so users learn "menu lives here" once.
               Landing suppresses it via hideMenu — signed-out visitors
@@ -1858,6 +1861,12 @@ function MenuSheet({
               Inspirations
             </button>
           </li>
+          {home ? (
+            <li className="menu-account">
+              <span className="menu-account-label">signed in as</span>
+              <span className="menu-account-value">@{home.user.handle}</span>
+            </li>
+          ) : null}
           {home ? (
             <li className="menu-signout">
               <button className="menu-item" onClick={() => { onClose(); void signOut(onSignedOut || (() => undefined)); }}>
@@ -4312,17 +4321,11 @@ function GameScreen({
 
           <CapturedStrip moves={game.moves} color={myColor} />
 
-          {game.status === "active" ? (
-            <div className="game-bottom game-bottom-board-attached">
-              <span className="turn-status">
-                {game.turn === myColor ? "Your move" : "Their move"}
-              </span>
-              <div className="game-bottom-right">
-                <span className="move-count">{activeCount} move{activeCount === 1 ? "" : "s"}</span>
-                <button className="game-bottom-home" onClick={leaveGame} type="button">Home</button>
-              </div>
-            </div>
-          ) : null}
+          {/* No turn line — the active-turn dark-navy player-bar below
+              IS the "your move" signal. Move count + Home + Resign all
+              live in the ⋯ menu now. Tejas 2026-08-07: "why do you need
+              that line?" — killed after five Codex iterations couldn't
+              make it feel attached to the board. */}
 
           <div
             className={`clock-strip bottom ${game.status === "active" && game.turn === myColor ? "active-turn" : ""}`}

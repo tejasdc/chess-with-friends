@@ -162,12 +162,12 @@ a { color: inherit; }
   cursor: pointer;
   white-space: nowrap;
 }
+/* Wordmark stays 15px across all breakpoints (was previously shrunk to
+   13px at ≤480px, which desynced landing/dashboard from the game screen
+   after Codex restored 15px game-only in 04df255 — Tejas 2026-08-07:
+   "when we fix an issue it has to be fixed everywhere"). Account chrome
+   still shrinks on mobile via the .account .ghost rule kept below. */
 @media (max-width: 480px) {
-  .wordmark { font-size: 13px; }
-  /* At mobile keep the topbar to wordmark + Sign out only — the handle
-     lives in the dashboard body; repeating it up top costs real estate
-     and the visual identity mark carries the app's name. */
-  .account .handle { display: none; }
   .account .ghost { padding: 6px 10px; font-size: 12px; }
 }
 .wordmark::before {
@@ -265,6 +265,20 @@ a { color: inherit; }
 }
 .menu-state-label { color: rgba(238, 227, 196, 0.7); }
 .menu-state-value { color: var(--paper); }
+/* Account line — "signed in as @handle" above Sign out. Same visual
+   shape as .menu-state; separate class so it can be tuned independently
+   later (e.g., handle-tap → profile). */
+.menu-account {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.menu-account-label { color: rgba(238, 227, 196, 0.7); }
+.menu-account-value { color: var(--paper); }
 /* Interactive Notifications row — same visual shape as .menu-state but a
    real button that opens the info popover below. Tejas: people must
    feel safe enabling; clicking here shows the confidence promise. */
@@ -2315,7 +2329,15 @@ body[data-screen="landing"] .landing-copy {
   transition: background-color 200ms var(--ease), color 200ms var(--ease), border-color 200ms var(--ease);
 }
 .clock-strip.top    { border-top-color: transparent; }
-.clock-strip.bottom { border-top-color: var(--hair); border-bottom-color: transparent; }
+.clock-strip.bottom {
+  border-top-color: var(--hair);
+  border-bottom-color: transparent;
+  /* iOS Safari home-indicator area was eating the bottom of this bar
+     (Tejas 2026-08-07: "the name bar move below... it's getting cut off,
+     you can see the curves here right"). Extend padding so the strip's
+     background reaches into the safe-area inset. */
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
 
 .clock-strip.active-turn {
   /* Whose-turn strip goes DEEP-INK — Villalba's incision made large,

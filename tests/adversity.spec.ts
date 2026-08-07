@@ -1269,7 +1269,9 @@ test("rapid double-click on the same square does not desync", async ({ browser }
 
     // Sanity: it's bob's turn now. If a phantom second move had gone
     // through it would be alice's turn again.
-    await expect(bob.getByText("Your move")).toBeVisible({ timeout: 5000 });
+    // Turn line ("Your move" / "Their move") was killed 2026-08-07 — the
+    // active-turn dark-ink player-bar is the whose-turn signal now.
+    await expect(bob.locator(".clock-strip.bottom.active-turn")).toBeVisible({ timeout: 5000 });
   } finally {
     await aliceCtx.close();
     await bobCtx.close();
