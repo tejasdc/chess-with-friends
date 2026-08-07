@@ -2817,12 +2817,7 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: SetMe
       return;
     }
     const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription();
-    if (!subscription) {
-      setPushStatus("ready");
-      return;
-    }
-    await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) });
+    await syncGrantedPushSubscription(registration);
     setPushStatus("enabled");
   }
 
@@ -2844,17 +2839,24 @@ function InstallPrompt({ home, setMessage }: { home: HomeData; setMessage: SetMe
         if (permission !== "granted") throw new Error("Notification permission was not granted.");
       }
       const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(home.pushPublicKey),
-      });
-      await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) });
+      await syncGrantedPushSubscription(registration);
       await checkPushStatus();
       setMessage("Notifications enabled for friend requests, challenges, and scheduled games.");
     } catch (error) {
       await checkPushStatus().catch(() => undefined);
       setMessage(error instanceof Error ? error.message : "Notification setup failed.", "error");
     }
+  }
+
+  async function syncGrantedPushSubscription(registration: ServiceWorkerRegistration) {
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(home.pushPublicKey),
+      });
+    }
+    await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) });
   }
 
   // Install guidance and notification enablement are independent. Show

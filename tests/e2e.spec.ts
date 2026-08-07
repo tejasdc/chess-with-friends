@@ -43,6 +43,7 @@ test("notification prompt disappears after permission is granted and sign-out pr
         },
         async subscribe() {
           window.localStorage.setItem("notificationSubscription", "true");
+          window.localStorage.setItem("notificationSubscribeCount", String(Number(window.localStorage.getItem("notificationSubscribeCount") || "0") + 1));
           return subscription;
         },
       },
@@ -82,6 +83,12 @@ test("notification prompt disappears after permission is granted and sign-out pr
   await expect(page.evaluate(() => Notification.permission)).resolves.toBe("granted");
   await expect(page.evaluate(async () => Boolean(await navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription())))).resolves.toBe(true);
   await expect(page.evaluate(() => window.localStorage.getItem("notificationUnsubscribed"))).resolves.toBeNull();
+
+  await page.evaluate(() => window.localStorage.removeItem("notificationSubscription"));
+  await register(page, handle);
+  await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
+  await expect(page.evaluate(async () => Boolean(await navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription())))).resolves.toBe(true);
+  await expect(page.evaluate(() => window.localStorage.getItem("notificationSubscribeCount"))).resolves.toBe("2");
   await shot(page, "00-notifications-enabled-after-reload");
   await context.close();
 });

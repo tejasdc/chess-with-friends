@@ -79,6 +79,7 @@ export function usePwaUpdateHandling() {
 
   React.useEffect(() => {
     maybeApplyRef.current = maybeApply;
+    maybeApply();
   }, [maybeApply]);
 
   React.useEffect(() => {
