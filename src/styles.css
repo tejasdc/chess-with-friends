@@ -642,6 +642,13 @@ body[data-screen="landing"] .landing-copy {
 .game.game-fixed .captured-strip {
   min-height: 30px;
 }
+.game.game-fixed .board-holder + .captured-strip {
+  min-height: 8px;
+  padding-top: 0;
+}
+.game.game-fixed .board-holder + .captured-strip:empty::before {
+  height: 6px;
+}
 .game.game-fixed .game-bottom {
   padding: 8px 4px 6px;
   font-size: 12px;
