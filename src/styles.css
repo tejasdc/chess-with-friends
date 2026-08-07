@@ -610,7 +610,7 @@ body[data-screen="landing"] .landing-copy {
   min-height: 0;
   min-width: 0;
   display: grid;
-  place-items: center;
+  place-items: end center;
   /* Board cap raised to 820 so the board dominates on laptops. Real
      board size ends up min(cqw, cqh, cap) via the board's own sizing
      rule below. */
