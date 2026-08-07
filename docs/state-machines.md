@@ -56,6 +56,15 @@ appended at the next unused number.
   server projection but replaces the single in-call primary control
   with separate mic and hangup icons, and removes the peer-muted
   indicator from the client.
+- **2026-08-07 (disconnection handling)** — Machine 6's game-screen
+  representation now includes quiet connection pills in the player
+  bars: the local player sees `reconnecting...` when their own live
+  WebSocket fails the open + fresh-pong gate, and the opponent row
+  shows `reconnecting...` / `offline` when the peer projection is
+  `reconnecting` / `gone`. Machine 5's `move` event is unchanged on
+  the server, but the client now refuses to dispatch it unless the
+  game socket is open and has a fresh heartbeat pong inside the same
+  25s liveness window.
 - **2026-08-07 (voice bar redesign)** — Machine 8's server states and
   signaling protocol are unchanged, but the client representation now
   uses a single icon slot in the opponent player bar. The below-board
@@ -541,7 +550,11 @@ clear guards, single writer is enforced by the per-game Durable Object.
 - `move` — `POST /move`. Guards: game is `active`, it is this user's turn,
   the move is legal per `chess.js`. Applies clock, applies move, checks
   checkmate/draw, rearms alarm if still active, reports terminal status
-  to AppDO if not.
+  to AppDO if not. Client dispatch guard: before POSTing a UI move,
+  `GameScreen` requires the realtime game WebSocket to be `OPEN` with
+  a heartbeat pong inside the 25s liveness window. If the guard fails,
+  no `move` event is sent and the board remains at the last accepted
+  server snapshot.
 - `resign` — `POST /resign`. Guard: game is `active`. Sets terminal state
   in one atomic step.
 - `clock-alarm` — DO alarm fires at the current mover's expiry. Runs
@@ -648,9 +661,13 @@ snapshot recomputes it.
 
 ### Representation
 
-`GameScreen` renders `opponentRawState` via `presenceLabel(...)` (see
-`src/main.tsx:3187,3244`). Snapshots are broadcast over the WebSocket on
-every game mutation, and each connect primes the freshly-accepted
+`GameScreen` renders `opponentRawState` via `presenceLabel(...)` and the
+opponent clock strip now carries a quiet connection pill for
+`reconnecting` and `gone`. The local clock strip carries the same quiet
+`reconnecting...` pill when the local realtime socket fails the open +
+fresh-pong health gate; that pill clears as soon as the socket reconnects
+and heartbeat pongs resume. Snapshots are broadcast over the WebSocket
+on every game mutation, and each connect primes the freshly-accepted
 socket directly (see "Notes" below). Not represented anywhere off the
 game screen.
 
@@ -667,6 +684,11 @@ the alarm re-arms on every state-changing event via `setNextAlarm`.
   `wrangler dev`; the socket-death adversity regression reproduced it).
   This is a read-your-writes hazard and is documented as a canonical
   pattern in `docs/state-machine-rules.md`.
+- The `webSocketClose` path has the symmetric hazard: during the close
+  callback, `ctx.getWebSockets()` can still include the just-closed socket.
+  Disconnect broadcasts therefore derive `connectionState` with that socket
+  explicitly excluded, so peers see `reconnecting` immediately instead of
+  waiting for the grace alarm.
 - `setNextAlarm(game)` is a single alarm computation shared with the
   game-clock deadline: it takes the minimum of the current mover's
   clock expiry and all `graceExpiresAt` values. One alarm serves both

@@ -2105,10 +2105,10 @@ export class GameDO extends DurableObject<Env> {
     await this.sendToUser(this.otherPlayerId(game, userId), { ...message, fromUserId: userId });
   }
 
-  private async mutateCallSession(game: GameState, next: CallSession, options: { broadcast: boolean }) {
+  private async mutateCallSession(game: GameState, next: CallSession, options: { broadcast: boolean; except?: WebSocket }) {
     await this.ctx.storage.put("callSession", next);
     await this.setNextAlarm(game, next);
-    if (options.broadcast) await this.broadcastFrom(game, next);
+    if (options.broadcast) await this.broadcastFrom(game, next, { except: options.except });
   }
 
   private async endCallSession(
@@ -2204,9 +2204,9 @@ export class GameDO extends DurableObject<Env> {
         state: "reconnecting",
         graceExpiresAt: Date.now() + CALL_GRACE_MS,
       };
-      await this.mutateCallSession(game, next, { broadcast: true });
+      await this.mutateCallSession(game, next, { broadcast: true, except: socket });
     } else {
-      await this.broadcast();
+      await this.broadcastFrom(game, undefined, { except: socket });
       await this.setNextAlarm(game);
     }
   }
@@ -2254,10 +2254,10 @@ export class GameDO extends DurableObject<Env> {
     return await this.snapshotFrom(game);
   }
 
-  private async snapshotFrom(game: GameState, callSession?: CallSession | null) {
+  private async snapshotFrom(game: GameState, callSession?: CallSession | null, opts: { except?: WebSocket } = {}) {
     return {
       ...game,
-      connectionState: await this.computeConnectionState(game),
+      connectionState: await this.computeConnectionState(game, opts),
       callSession: callSession === undefined ? await this.getCallSession() : callSession,
     };
   }
@@ -2265,9 +2265,9 @@ export class GameDO extends DurableObject<Env> {
   // Derive per-player connection state at snapshot time from live
   // sockets + persisted grace. Replaces the in-memory Map that couldn't
   // survive hibernation (state-smith GAP-8).
-  private async computeConnectionState(game: GameState) {
+  private async computeConnectionState(game: GameState, opts: { except?: WebSocket } = {}) {
     const now = Date.now();
-    const active = this.activeUserIds();
+    const active = this.activeUserIds(opts);
     const graces = await this.getGraces();
     const stateFor = (userId: string): "connected" | "reconnecting" | "gone" => {
       if (active.has(userId)) return "connected";
@@ -2370,8 +2370,8 @@ export class GameDO extends DurableObject<Env> {
     await this.broadcastFrom(game);
   }
 
-  private async broadcastFrom(game: GameState, callSession?: CallSession | null) {
-    const message = JSON.stringify({ type: "state", game: await this.snapshotFrom(game, callSession) });
+  private async broadcastFrom(game: GameState, callSession?: CallSession | null, opts: { except?: WebSocket } = {}) {
+    const message = JSON.stringify({ type: "state", game: await this.snapshotFrom(game, callSession, opts) });
     for (const ws of this.ctx.getWebSockets()) {
       try { ws.send(message); } catch { /* dead socket → close event fires */ }
     }

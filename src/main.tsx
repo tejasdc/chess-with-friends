@@ -1504,6 +1504,16 @@ type VoiceSignalMessage =
   | { type: "call-answer"; callSessionId: string; sdp: RTCSessionDescriptionInit; fromUserId?: string }
   | { type: "call-ice-candidate"; callSessionId: string; candidate: RTCIceCandidateInit; fromUserId?: string };
 
+interface RealtimeConnectionHealth {
+  readyState: number | null;
+  lastPongAt: number;
+  live: boolean;
+}
+
+const HEARTBEAT_INTERVAL_MS = 15000;
+const SOCKET_LIVENESS_STALE_MS = 25000;
+const LIVENESS_CHECK_MS = 5000;
+
 const files = [...FILES];
 const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
 const pieceNames: Record<PieceSymbol, string> = {
@@ -1936,21 +1946,27 @@ function useRealtimeGame(
     onSignal,
     onResync,
     sendRef,
+    liveRef,
+    onConnectionHealth,
     enabled,
   }: {
     onGame: (game: GameState) => void;
     onSignal?: (message: VoiceSignalMessage) => void;
     onResync: () => Promise<void> | void;
     sendRef?: React.MutableRefObject<((message: VoiceOutboundMessage) => boolean) | null>;
+    liveRef?: React.MutableRefObject<(() => boolean) | null>;
+    onConnectionHealth?: (health: RealtimeConnectionHealth) => void;
     enabled: boolean;
   },
 ) {
   const onGameRef = React.useRef(onGame);
   const onSignalRef = React.useRef(onSignal);
   const onResyncRef = React.useRef(onResync);
+  const onConnectionHealthRef = React.useRef(onConnectionHealth);
   onGameRef.current = onGame;
   onSignalRef.current = onSignal;
   onResyncRef.current = onResync;
+  onConnectionHealthRef.current = onConnectionHealth;
 
   useEffect(() => {
     if (!enabled) return;
@@ -1961,8 +1977,25 @@ function useRealtimeGame(
     let livenessTimer: number | null = null;
     let disposed = false;
     let lastInboundAt = Date.now();
+    let lastPongAt = 0;
 
     const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/games/${gameId}/socket`;
+
+    function isLiveSocket() {
+      return !!socket && socket.readyState === WebSocket.OPEN && lastPongAt > 0 && Date.now() - lastPongAt <= SOCKET_LIVENESS_STALE_MS;
+    }
+
+    function publishConnectionHealth() {
+      onConnectionHealthRef.current?.({
+        readyState: socket?.readyState ?? null,
+        lastPongAt,
+        live: isLiveSocket(),
+      });
+    }
+
+    if (liveRef) {
+      liveRef.current = isLiveSocket;
+    }
 
     function clearTimers() {
       if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer);
@@ -1986,9 +2019,13 @@ function useRealtimeGame(
       try {
         socket = new WebSocket(wsUrl);
       } catch {
+        socket = null;
+        lastPongAt = 0;
+        publishConnectionHealth();
         scheduleReconnect();
         return;
       }
+      publishConnectionHealth();
       const s = socket;
       s.addEventListener("open", () => {
         if (sendRef) {
@@ -2000,7 +2037,10 @@ function useRealtimeGame(
         }
         backoffMs = 250;
         lastInboundAt = Date.now();
+        lastPongAt = 0;
+        publishConnectionHealth();
         try { s.send("sync"); } catch { /* dead almost immediately */ }
+        try { s.send("ping"); } catch { /* will surface via liveness */ }
         // Belt-and-suspenders REST resync in case a broadcast fired
         // between the last disconnect and this reconnect.
         void onResyncRef.current();
@@ -2008,20 +2048,26 @@ function useRealtimeGame(
         // reply and we can see inbound traffic on a healthy socket.
         heartbeatTimer = window.setInterval(() => {
           try { s.send("ping"); } catch { /* will surface via liveness */ }
-        }, 15000);
+        }, HEARTBEAT_INTERVAL_MS);
         // Liveness: if no inbound frame for 25s during an active game,
         // treat the socket as half-open. Close it (that fires close →
         // scheduleReconnect).
         livenessTimer = window.setInterval(() => {
-          if (Date.now() - lastInboundAt > 25000) {
+          publishConnectionHealth();
+          if (Date.now() - lastInboundAt > SOCKET_LIVENESS_STALE_MS) {
             try { s.close(); } catch { /* ignored */ }
           }
-        }, 5000);
+        }, LIVENESS_CHECK_MS);
       });
       s.addEventListener("message", (event) => {
         lastInboundAt = Date.now();
         const raw = typeof event.data === "string" ? event.data : "";
-        if (!raw || raw === "pong") return;
+        if (!raw) return;
+        if (raw === "pong") {
+          lastPongAt = Date.now();
+          publishConnectionHealth();
+          return;
+        }
         try {
           const payload = JSON.parse(raw);
           if (payload && payload.game) onGameRef.current(payload.game as GameState);
@@ -2030,6 +2076,8 @@ function useRealtimeGame(
       });
       s.addEventListener("close", () => {
         if (sendRef && sendRef.current) sendRef.current = null;
+        if (socket === s) lastPongAt = 0;
+        publishConnectionHealth();
         clearTimers();
         scheduleReconnect();
       });
@@ -2066,9 +2114,12 @@ function useRealtimeGame(
       clearTimers();
       try { socket?.close(); } catch { /* ignored */ }
       if (sendRef) sendRef.current = null;
+      if (liveRef) liveRef.current = null;
+      lastPongAt = 0;
+      publishConnectionHealth();
       socket = null;
     };
-  }, [gameId, enabled, sendRef]);
+  }, [gameId, enabled, sendRef, liveRef]);
 }
 
 function useVoiceCall({
@@ -2312,9 +2363,9 @@ function VoiceCallSlot({
   // Requesting — the "ringing" state. Two directions with distinct motion:
   //   outbound → breathe (concentric ring pulse outward, a Rodchenko circle
   //              study — you initiated, they haven't picked up).
-  //   incoming → handset rocks + aura pulses.  Attention-grabbing but
-  //              honest — the button geometry stays stable so the tap
-  //              target doesn't slide out from under a finger.
+  //   incoming → handset rocks + pill shakes + aura pulses.  Attention-
+  //              grabbing but honest — this is a live incoming call, not a
+  //              subtle affordance.
   if (state === "requesting") {
     const incoming = session?.initiatorId !== selfId;
     return (
@@ -2387,6 +2438,20 @@ function VoiceCallSlot({
       <PhoneIcon />
       <audio ref={voice.remoteAudioRef} autoPlay playsInline />
     </button>
+  );
+}
+
+function ConnectionPill({
+  state,
+  label,
+}: {
+  state: "reconnecting" | "gone";
+  label: string;
+}) {
+  return (
+    <span className={`connection-pill ${state}`} role="status" aria-label={label}>
+      {state === "reconnecting" ? "reconnecting…" : "offline"}
+    </span>
   );
 }
 
@@ -3822,10 +3887,13 @@ function GameScreen({
   const [pendingPromotion, setPendingPromotion] = useState<{ from: Square; to: Square } | null>(null);
   const [confirmResign, setConfirmResign] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [realtimeHealth, setRealtimeHealth] = useState<RealtimeConnectionHealth>({ readyState: null, lastPongAt: 0, live: false });
+  const [localMoveBlocked, setLocalMoveBlocked] = useState(false);
   const myColor = game?.whiteId === home.user.id ? "w" : "b";
   const opponentId = game ? (game.whiteId === home.user.id ? game.blackId : game.whiteId) : "";
   const opponentRawState = game?.connectionState?.[opponentId] || "gone";
   const sendVoiceRef = React.useRef<((message: VoiceOutboundMessage) => boolean) | null>(null);
+  const liveSocketRef = React.useRef<(() => boolean) | null>(null);
   const voice = useVoiceCall({ game, selfId: home.user.id, sendRef: sendVoiceRef, setMessage });
 
   useEffect(() => {
@@ -3873,6 +3941,11 @@ function GameScreen({
       }
     },
     sendRef: sendVoiceRef,
+    liveRef: liveSocketRef,
+    onConnectionHealth: (health) => {
+      setRealtimeHealth(health);
+      if (health.live) setLocalMoveBlocked(false);
+    },
     enabled: !!game,
   });
 
@@ -3918,7 +3991,21 @@ function GameScreen({
     };
   }, []);
 
+  function rejectMoveForReconnect() {
+    setLocalMoveBlocked(true);
+    setSelected(null);
+    setPendingPromotion(null);
+  }
+
+  function canSubmitLiveMove() {
+    return liveSocketRef.current?.() === true;
+  }
+
   async function submitMove(from: Square, to: Square, promotion?: "q" | "r" | "b" | "n") {
+    if (!canSubmitLiveMove()) {
+      rejectMoveForReconnect();
+      return;
+    }
     try {
       const next = await api<GameState>(`/api/games/${gameId}/move`, {
         method: "POST",
@@ -3986,6 +4073,10 @@ function GameScreen({
     const targetRank = square[1];
     if (fromPiece && fromPiece.type === "p" && ((fromPiece.color === "w" && targetRank === "8") || (fromPiece.color === "b" && targetRank === "1"))) {
       if (legalMoves.some((m) => m.to === square && m.promotion)) {
+        if (!canSubmitLiveMove()) {
+          rejectMoveForReconnect();
+          return;
+        }
         setPendingPromotion({ from: selected, to: square });
         return;
       }
@@ -4021,6 +4112,10 @@ function GameScreen({
   const opponentClock = liveClock(game, opponentColor, now);
   const myClock = liveClock(game, myColor, now);
   const opponentPresence = presenceLabel(opponentRawState, opponentHandle);
+  const showSelfReconnect = game.status === "active" && (!realtimeHealth.live || localMoveBlocked);
+  const opponentConnectionPill = opponentRawState === "reconnecting" || opponentRawState === "gone"
+    ? opponentRawState
+    : null;
   const lastMove = game.moves.length ? { from: game.moves[game.moves.length - 1].from, to: game.moves[game.moves.length - 1].to } : null;
 
   // Home + Resign live inside the universal ⋯ menu (team-lead: one menu
@@ -4090,6 +4185,12 @@ function GameScreen({
                 voice={voice}
                 opponentOffline={opponentRawState === "gone"}
               />
+              {opponentConnectionPill ? (
+                <ConnectionPill
+                  state={opponentConnectionPill}
+                  label={`@${opponentHandle} ${opponentConnectionPill === "reconnecting" ? "reconnecting" : "offline"}`}
+                />
+              ) : null}
             </div>
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>
@@ -4117,6 +4218,7 @@ function GameScreen({
                   preserved for a11y (visually clipped). */}
               <span className="handle-line">@{myHandle}</span>
               <span className="you">you</span>
+              {showSelfReconnect ? <ConnectionPill state="reconnecting" label="you reconnecting" /> : null}
             </div>
             <time className="clock">{formatClock(myClock)}</time>
           </div>

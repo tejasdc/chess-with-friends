@@ -222,13 +222,23 @@ async function killAllSockets(page: Page) {
   });
 }
 
+async function blockNewSockets(page: Page, blocked: boolean) {
+  await page.evaluate((nextBlocked) => {
+    (window as unknown as { __blockNewSockets?: boolean }).__blockNewSockets = nextBlocked;
+  }, blocked);
+}
+
 async function installSocketTracker(page: Page) {
   await page.addInitScript(() => {
     const Original = window.WebSocket;
     const bag: WebSocket[] = [];
     (window as unknown as { __sockets?: WebSocket[] }).__sockets = bag;
+    (window as unknown as { __blockNewSockets?: boolean }).__blockNewSockets = false;
     class Tracked extends Original {
       constructor(url: string | URL, protocols?: string | string[]) {
+        if ((window as unknown as { __blockNewSockets?: boolean }).__blockNewSockets) {
+          throw new Error("WebSocket blocked by adversity test");
+        }
         super(url, protocols);
         bag.push(this);
       }
@@ -749,6 +759,39 @@ test("socket death mid-game recovers silently, no lost opponent moves", async ({
     await move(alice, "g1", "f3");
     await expect(bob.locator('[data-square="f3"] .piece')).toBeVisible({ timeout: 15000 });
   } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("subway socket drop rejects mover input and tells the opponent", async ({ browser }) => {
+  const suffix = `subway_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });
+  try {
+    // Warm up so Alice has a legal move while Bob is watching.
+    await move(alice, "e2", "e4");
+    await expect(bob.locator('[data-square="e4"] .piece')).toBeVisible({ timeout: 5000 });
+    await move(bob, "e7", "e5");
+    await expect(alice.locator('[data-square="e5"] .piece')).toBeVisible({ timeout: 5000 });
+
+    // Alice's HTTP path still works, but her game WebSocket dies and
+    // cannot reconnect. This is the subway-tunnel shape: without a
+    // socket-liveness gate, the UI can submit a move into a divergent
+    // picture of the game.
+    await blockNewSockets(alice, true);
+    await killAllSockets(alice);
+
+    await expect(alice.locator(".connection-pill", { hasText: "reconnecting" })).toBeVisible({ timeout: 5000 });
+    await expect(bob.locator(".connection-pill", { hasText: "reconnecting" })).toBeVisible({ timeout: 5000 });
+
+    await move(alice, "g1", "f3");
+
+    await expect(alice.locator('[data-square="g1"] .piece')).toBeVisible();
+    await expect(alice.locator('[data-square="f3"] .piece')).toHaveCount(0);
+    await expect(bob.locator('[data-square="g1"] .piece')).toBeVisible();
+    await expect(bob.locator('[data-square="f3"] .piece')).toHaveCount(0);
+  } finally {
+    await blockNewSockets(alice, false).catch(() => undefined);
     await aliceCtx.close();
     await bobCtx.close();
   }

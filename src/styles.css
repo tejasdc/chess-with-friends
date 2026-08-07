@@ -724,6 +724,22 @@ body[data-screen="landing"] .landing-copy {
 .turn-status .terminal { color: var(--vermillion); }
 .move-count { color: var(--stone); }
 
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  color: var(--stone);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.connection-pill.reconnecting { color: var(--presence-reconnect); }
+.connection-pill.gone { color: var(--presence-offline-ring); }
+.clock-strip.active-turn .connection-pill {
+  color: rgba(238, 227, 196, 0.72);
+}
 /* -------------------------------------------------------------------
    VOICE-CALL BAR
    -------------------------------------------------------------------
@@ -744,7 +760,7 @@ body[data-screen="landing"] .landing-copy {
      .is-idle.offline   — dashed, dimmed, cursor-blocked, no hover
      .is-ended          — rebound-settle animation into idle rest
      .is-requesting-out — dual concentric radar-pulse rings (breathe)
-     .is-requesting-in  — handset rocks + cream aura pulses; pill stable
+     .is-requesting-in  — handset rocks + pill shakes + cream aura pulses
      .is-connecting     — orbit dot revolves around the icon
      .is-connected      — voice-chip (see below)
    ------------------------------------------------------------------- */
