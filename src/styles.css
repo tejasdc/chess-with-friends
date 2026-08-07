@@ -1329,14 +1329,14 @@ body[data-screen="landing"] .landing-copy {
 }
 .puzzle-stage {
   /* Aspect wider-than-tall reserves vertical space for tray zones above
-     and below the board. The board is now vertically centered inside the
-     stage; the top/bottom margins hold the black/white tray rows that
-     previously spilled past the stage box and clipped against the shell's
-     overflow:hidden. Ratio 1/1.18 gives ~9% breath above and below the
-     tray pieces at stageW ≈ tray-piece side, so glyphs render whole. */
+     and below the board. Tightened from 1/1.18 → 1/1.10 (Tejas
+     2026-08-07: "look at that position of your move, it's still 2
+     inches away from the board"). The 5%-each-side breath still fits
+     the small tray silhouettes without clipping; the earlier 9% was
+     leaving a large empty gap between the bottom tray and the CTA. */
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1.18;
+  aspect-ratio: 1 / 1.10;
   overflow: visible;
   -webkit-tap-highlight-color: transparent;
 }
