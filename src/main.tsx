@@ -198,7 +198,6 @@ function LandingPuzzleShelf() {
   const [selected, setSelected] = useState<Square | null>(null);
   const [animating, setAnimating] = useState(false);
   const [orientation, setOrientation] = useState<Color>(shelf[0].sideToMove);
-  const [orientationSwapping, setOrientationSwapping] = useState(false);
   const [metrics, setMetrics] = useState<ShelfMetrics | null>(null);
   // Last-move wash on the from + to squares of the LAST preMove that led
   // to the current puzzle FEN. Set on first mount (position is already
@@ -454,16 +453,11 @@ function LandingPuzzleShelf() {
     const nextPosition = shelf[nextIndex];
     const nextOrientation = nextPosition.sideToMove;
     if (nextOrientation !== orientationRef.current) {
-      setOrientationSwapping(true);
-      await sleep(180);
       orientationRef.current = nextOrientation;
       setOrientation(nextOrientation);
-      positionPiecesForOrientation(nextOrientation, metrics);
-      await nextFrame();
-      setOrientationSwapping(false);
-      await sleep(180);
     }
     setIndex(nextIndex);
+    await nextFrame();
     const setupFen = nextPosition.preMoves?.fen ?? nextPosition.fen;
     setWalkPhase("setup");
     await walkToFen(setupFen, metrics, nextOrientation);
@@ -518,10 +512,6 @@ function LandingPuzzleShelf() {
   function setWalkPhase(phase: "idle" | "setup" | "replay") {
     const layer = piecesLayerRef.current;
     if (layer) layer.dataset.walkPhase = phase;
-  }
-
-  function sleep(ms: number) {
-    return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
   }
 
   function nextFrame() {
@@ -972,7 +962,6 @@ function LandingPuzzleShelf() {
       data-puzzle-id={position.id}
       data-animating={animating ? "true" : "false"}
       data-orientation={orientation}
-      data-orientation-swapping={orientationSwapping ? "true" : "false"}
       data-last-from={lastMove?.from ?? ""}
       data-last-to={lastMove?.to ?? ""}
     >

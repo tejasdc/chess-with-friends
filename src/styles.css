@@ -1410,10 +1410,6 @@ body[data-screen="landing"] .landing-copy {
   pointer-events: none;
   transition: opacity 160ms var(--ease);
 }
-.puzzle-shelf[data-orientation-swapping="true"] .landing-board-frame,
-.puzzle-shelf[data-orientation-swapping="true"] .landing-pieces {
-  opacity: 0;
-}
 .landing-piece {
   position: absolute;
   top: 0;
