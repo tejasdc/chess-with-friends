@@ -789,7 +789,7 @@ body[data-screen="landing"] .landing-copy {
 
 /* --- Icon pill (idle / requesting / connecting / ended) --- */
 .voice-icon-button.voice-pill {
-  --pill-h: 26px;
+  --pill-h: 38px;
   position: relative;
   display: inline-grid;
   place-items: center;
@@ -812,6 +812,10 @@ body[data-screen="landing"] .landing-copy {
 }
 .voice-icon-button.voice-pill.icon-only {
   width: var(--pill-h);
+}
+.voice-icon-button .voice-icon {
+  width: 20px;
+  height: 20px;
 }
 .voice-icon-button.voice-pill:hover:not(:disabled) {
   background: var(--paper);
@@ -892,7 +896,7 @@ body[data-screen="landing"] .landing-copy {
 }
 .voice-spinner-ring.voice-orbit {
   position: absolute;
-  inset: 3px;
+  inset: 5px;
   border: none;
   border-radius: 50%;
   pointer-events: none;
@@ -904,8 +908,8 @@ body[data-screen="landing"] .landing-copy {
   top: -1px;
   left: 50%;
   transform: translateX(-50%);
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--ink);
 }
@@ -915,9 +919,9 @@ body[data-screen="landing"] .landing-copy {
 .voice-connected-chip.voice-chip {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  height: 26px;
-  padding: 2px 3px;
+  gap: 8px;
+  height: 40px;
+  padding: 2px 4px;
   border-radius: 999px;
   background: var(--cream);
   border: 1px solid var(--hair-on-cream);
@@ -926,9 +930,9 @@ body[data-screen="landing"] .landing-copy {
   animation: voice-chip-enter 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 .voice-connected-chip.voice-chip .voice-icon-button.voice-mini {
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
   padding: 0;
   border: 0;
   border-radius: 999px;
@@ -955,9 +959,9 @@ body[data-screen="landing"] .landing-copy {
 }
 .voice-connected-chip.voice-chip .voice-divider {
   width: 1px;
-  height: 12px;
+  height: 20px;
   background: color-mix(in srgb, var(--ink) 18%, transparent);
-  margin: 0 1px;
+  margin: 0 -4px;
 }
 .voice-connected-chip.voice-chip.muted .voice-icon-button.mute-btn {
   color: var(--stone);
