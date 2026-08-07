@@ -197,7 +197,6 @@ function LandingPuzzleShelf() {
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<Square | null>(null);
   const [animating, setAnimating] = useState(false);
-  const [solved, setSolved] = useState(false);
   const [orientation, setOrientation] = useState<Color>(shelf[0].sideToMove);
   const [metrics, setMetrics] = useState<ShelfMetrics | null>(null);
   // Last-move wash on the from + to squares of the LAST preMove that led
@@ -424,13 +423,12 @@ function LandingPuzzleShelf() {
       if (!move) return clearSelection();
       applyLandingMove(selectedSquare, square, metrics, orientationRef.current);
       clearSelection();
-      // Show the "checkmate" moment before advancing. Tejas 2026-08-07:
-      // "after even the pawn may be knocking off the king will be good
-      // to know you won." Reveal the mate for ~1.6s so the moment lands,
-      // then transition.
-      setSolved(true);
+      // Board-native "you won": the mated king topples over on the
+      // board. No text pill — the user's eyes are on the board, not on
+      // captions below (Tejas 2026-08-07: "I'm looking at the fking
+      // board... topple the motherfucking king").
+      window.setTimeout(() => toppleLosingKing(), 240);
       moveTimer.current = window.setTimeout(() => {
-        setSolved(false);
         void transitionToNext();
       }, 1600);
     } catch {
@@ -465,26 +463,30 @@ function LandingPuzzleShelf() {
     }
     setIndex(nextIndex);
     await nextFrame();
-    // Tejas 2026-08-07: "only the opponent 1 pawn should move then my
-    // turn is up. If you keep moving more pawns it feels like game is
-    // being played automatically." Kill the between-puzzles walk (which
-    // walked EVERY piece to its new position) — snap the position
-    // instantly. Then animate ONLY the last preMove so the user sees
-    // "opposite side moved last". Also fixes stale-tray-pieces (snap
-    // wipes everything) and piece-overlap during multi-move setup.
+    // Between-puzzles transition: walk the pieces to the setup FEN (the
+    // position ONE MOVE BEFORE the last preMove). This is the walking
+    // animation Tejas wants preserved. Then animate ONLY the last
+    // preMove — the "opposite side moved last" cue. Snapping the
+    // between-puzzles transition (which I did in the previous commit)
+    // was wrong; Tejas 2026-08-07: "I told you not to remove all of my
+    // animations. What I don't need is multiple previous moves."
     const preMoves = nextPosition.preMoves;
+    let setupFen: string;
     if (preMoves && preMoves.moves.length > 0) {
       const setup = new Chess(preMoves.fen);
       for (let i = 0; i < preMoves.moves.length - 1; i++) {
         try { setup.move(preMoves.moves[i]); } catch { /* skip if illegal */ }
       }
-      const setupFen = setup.fen();
-      snapToFen(setupFen, metrics, nextOrientation);
-      gameRef.current = new Chess(setupFen);
-      setWalkPhase("replay");
-      await playOneMove(preMoves.moves[preMoves.moves.length - 1], metrics, nextOrientation, /* animate */ true);
+      setupFen = setup.fen();
     } else {
-      snapToFen(nextPosition.fen, metrics, nextOrientation);
+      setupFen = nextPosition.fen;
+    }
+    setWalkPhase("setup");
+    await walkToFen(setupFen, metrics, nextOrientation);
+    if (preMoves && preMoves.moves.length > 0) {
+      setWalkPhase("replay");
+      gameRef.current = new Chess(setupFen);
+      await playOneMove(preMoves.moves[preMoves.moves.length - 1], metrics, nextOrientation, /* animate */ true);
     }
     setWalkPhase("idle");
     gameRef.current = new Chess(nextPosition.fen);
@@ -493,22 +495,22 @@ function LandingPuzzleShelf() {
     setLastMove(computeLastMove(nextPosition));
   }
 
-  function snapToFen(fen: string, m: ShelfMetrics, boardOrientation: Color) {
-    setRouteMetrics(m, boardOrientation);
-    // Blow away every DOM piece (board + tray) and every state ref so we
-    // start clean. Stale tray pieces from prior puzzles were leaking as
-    // stray silhouettes outside the board (Tejas 2026-08-07 screenshots).
-    for (const el of pieceEls.current.values()) el.remove();
-    pieceEls.current.clear();
-    piecesRef.current = [];
-    trayRef.current = [];
-    // Rebuild pieces from the target FEN and register their DOM elements.
-    const targetPieces = piecesFromFen(fen, m, boardOrientation);
-    piecesRef.current = targetPieces;
-    for (const piece of targetPieces) {
-      ensurePieceElement(piece, m);
-      syncPieceElement(piece, m);
-    }
+  function toppleLosingKing() {
+    // Find the mated king (opposite color from the side that just played
+    // the solution) and rotate its DOM element to lie down. Board-native
+    // "you won" indicator per Tejas's ask: "Topple the motherfucking king.
+    // That's a very visible indication that you actually won." No text
+    // pill, no caption swap — the king falls over on the board itself.
+    const losingColor = position.sideToMove === "w" ? "b" : "w";
+    const king = piecesRef.current.find((p) => p.type === "k" && p.color === losingColor);
+    if (!king) return;
+    const el = pieceEls.current.get(king.id);
+    if (!el) return;
+    king.rot = losingColor === "w" ? 82 : -82;
+    el.style.transition = "transform 520ms cubic-bezier(0.34, 1.05, 0.64, 1)";
+    el.style.transform = landingPieceTransform(king.x, king.y, king.rot, 1);
+    el.classList.add("toppled");
+    window.setTimeout(() => { if (el) el.style.transition = ""; }, 560);
   }
 
   function applyLandingMove(from: Square, to: Square, m: ShelfMetrics, boardOrientation: Color) {
@@ -1084,20 +1086,11 @@ function LandingPuzzleShelf() {
           a sub-line of the CTA. Source text stays source-only; the
           board orientation carries whose move it is. */}
       <div className="puzzle-caption">
-        {solved ? (
-          <>
-            <span className="puzzle-cta-headline puzzle-cta-solved" role="status">Checkmate</span>
-            <span className="puzzle-cta-reference">{formatPuzzleReference(position)}</span>
-          </>
-        ) : (
-          <>
-            <span className="puzzle-cta-headline">
-              Your move{" "}
-              <span className="puzzle-cta-arrow" aria-hidden="true">↑</span>
-            </span>
-            <span className="puzzle-cta-reference">{formatPuzzleReference(position)}</span>
-          </>
-        )}
+        <span className="puzzle-cta-headline">
+          Your move{" "}
+          <span className="puzzle-cta-arrow" aria-hidden="true">↑</span>
+        </span>
+        <span className="puzzle-cta-reference">{formatPuzzleReference(position)}</span>
       </div>
     </div>
   );
