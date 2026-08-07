@@ -10,7 +10,8 @@
     "deploy": "npm run build && wrangler deploy",
     "test:e2e": "playwright test",
     "test:push": "node scripts/verify-push-policy.mjs && node scripts/verify-push-copy-contract.mjs",
-    "vapid:generate": "node scripts/generate-vapid.mjs"
+    "vapid:generate": "node scripts/generate-vapid.mjs",
+    "postbuild": "node scripts/verify-precache.mjs"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",
@@ -31,6 +32,8 @@
     "@types/react-dom": "^19.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vite-plugin-pwa": "^1.3.0",
+    "workbox-window": "^7.4.1"
   }
 }

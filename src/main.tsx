@@ -8,6 +8,8 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/server";
 import shelfPositions from "./data/positions.json";
+import { activeGameStore } from "./activeGameStore";
+import { usePwaUpdateHandling } from "./pwaUpdateHandling";
 import "./styles.css";
 
 type ShelfPosition = {
@@ -1481,6 +1483,7 @@ function installClientErrorHooks() {
 }
 
 function App() {
+  usePwaUpdateHandling();
   const [home, setHome] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessageState] = useState("");
@@ -1528,7 +1531,6 @@ function App() {
         .then(setHome)
         .catch(() => undefined);
     }, 10000);
-    if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
     return () => window.clearInterval(timer);
   }, [refresh]);
 
@@ -3732,6 +3734,11 @@ function GameScreen({
   const opponentRawState = game?.connectionState?.[opponentId] || "gone";
   const sendVoiceRef = React.useRef<((message: VoiceOutboundMessage) => boolean) | null>(null);
   const voice = useVoiceCall({ game, selfId: home.user.id, opponentId, sendRef: sendVoiceRef, setMessage });
+
+  useEffect(() => {
+    activeGameStore.set(game?.status === "active");
+    return () => activeGameStore.set(false);
+  }, [game?.status]);
 
   useEffect(() => {
     let cancelled = false;

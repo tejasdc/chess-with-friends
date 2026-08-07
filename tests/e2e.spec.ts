@@ -214,6 +214,27 @@ test("service worker fallback titles cover every supported push type", async () 
   }
 });
 
+test("service worker precaches injected manifest and waits for gated skipWaiting message", async () => {
+  const manifest = [
+    { url: "assets/index-test.js", revision: "asset-js" },
+    { url: "manifest.webmanifest", revision: "manifest" },
+  ];
+  const result = await runServiceWorkerLifecycle(manifest);
+
+  expect(result.cacheAddAlls).toEqual([["/", "assets/index-test.js", "manifest.webmanifest"]]);
+  expect(result.skipWaitingCalls).toBe(0);
+
+  await result.dispatchMessage({ type: "NOT_THE_GATE" });
+  expect(result.skipWaitingCalls).toBe(0);
+
+  await result.dispatchMessage({ type: "SKIP_WAITING" });
+  expect(result.skipWaitingCalls).toBe(1);
+
+  await result.dispatchActivate();
+  expect(result.deletedCacheNames).toEqual(["old-precache"]);
+  expect(result.deletedRequests).toEqual(["https://twochairs.club/old.js"]);
+});
+
 test("auth options probes are rate limited per handle", async ({ page }) => {
   await page.goto("/");
   const handle = `probe_${Date.now().toString(36).slice(-6)}`;
@@ -710,7 +731,7 @@ async function runServiceWorkerPush({
   pendingPayload?: unknown;
   eventPayload?: unknown;
 }) {
-  const source = readFileSync("public/sw.js", "utf8");
+  const source = serviceWorkerSource([]);
   const fetches: SwFetchRecord[] = [];
   const notifications: SwNotificationRecord[] = [];
   let pushWait: Promise<void> | undefined;
@@ -729,6 +750,9 @@ async function runServiceWorkerPush({
       async showNotification(title: string, options: NotificationOptions) {
         notifications.push({ title, options });
       },
+    },
+    location: {
+      href: "https://twochairs.club/sw.js",
     },
     addEventListener(type: string, handler: (event: PushEventShape) => void) {
       listeners.set(type, handler);
@@ -776,4 +800,110 @@ async function runServiceWorkerPush({
   });
   await pushWait;
   return { fetches, notifications };
+}
+
+function serviceWorkerSource(manifest: Array<{ url: string; revision: string }>) {
+  return readFileSync("src/sw.js", "utf8").replace("self.__WB_MANIFEST", JSON.stringify(manifest));
+}
+
+async function runServiceWorkerLifecycle(manifest: Array<{ url: string; revision: string }>) {
+  const source = serviceWorkerSource(manifest);
+  type GenericEventShape = {
+    data?: unknown;
+    waitUntil?: (promise: Promise<void>) => void;
+  };
+  const listeners = new Map<string, (event: GenericEventShape) => void>();
+  const cacheAddAlls: string[][] = [];
+  const deletedCacheNames: string[] = [];
+  const deletedRequests: string[] = [];
+  let skipWaitingCalls = 0;
+  const cacheRequests = [
+    new Request("https://twochairs.club/"),
+    new Request("https://twochairs.club/assets/index-test.js"),
+    new Request("https://twochairs.club/old.js"),
+  ];
+  const fakeCache = {
+    async addAll(urls: string[]) {
+      cacheAddAlls.push(urls);
+    },
+    async keys() {
+      return cacheRequests;
+    },
+    async delete(request: Request) {
+      deletedRequests.push(request.url);
+      return true;
+    },
+  };
+  const fakeSelf = {
+    location: {
+      href: "https://twochairs.club/sw.js",
+    },
+    registration: {
+      pushManager: {
+        async getSubscription() {
+          return null;
+        },
+      },
+      async showNotification() {
+        // push path not exercised here
+      },
+    },
+    addEventListener(type: string, handler: (event: GenericEventShape) => void) {
+      listeners.set(type, handler);
+    },
+    skipWaiting() {
+      skipWaitingCalls += 1;
+    },
+    clients: {
+      async claim() {
+        // activation path claims silently
+      },
+      async openWindow() {
+        // notificationclick path not exercised here
+      },
+    },
+  };
+  const fakeCaches = {
+    async open() {
+      return fakeCache;
+    },
+    async keys() {
+      return ["chess-with-friends-precache", "old-precache"];
+    },
+    async delete(name: string) {
+      deletedCacheNames.push(name);
+      return true;
+    },
+    async match() {
+      return undefined;
+    },
+  };
+  const load = new Function("self", "fetch", "caches", source);
+  load(fakeSelf, fetch, fakeCaches);
+  const install = listeners.get("install");
+  if (!install) throw new Error("SW install handler was not registered.");
+  let installWait: Promise<void> | undefined;
+  install({ waitUntil: (promise) => { installWait = promise; } });
+  await installWait;
+
+  return {
+    cacheAddAlls,
+    deletedCacheNames,
+    deletedRequests,
+    get skipWaitingCalls() {
+      return skipWaitingCalls;
+    },
+    async dispatchMessage(data: unknown) {
+      const message = listeners.get("message");
+      if (!message) throw new Error("SW message handler was not registered.");
+      message({ data });
+    },
+    async dispatchActivate() {
+      const activate = listeners.get("activate");
+      if (!activate) throw new Error("SW activate handler was not registered.");
+      let activateWait: Promise<void> | undefined;
+      activate({ waitUntil: (promise) => { activateWait = promise; } });
+      await activateWait;
+    },
+  };
 }

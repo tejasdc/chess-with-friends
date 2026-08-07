@@ -38,6 +38,11 @@ export default defineConfig({
       testMatch: /adversity\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "pwa",
+      testMatch: /pwa-update\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"] },
+    },
     ...(webkitRunnable ? [{
       name: "mobile-webkit",
       testMatch: /e2e\.spec\.ts$/,

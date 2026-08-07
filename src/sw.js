@@ -1,25 +1,34 @@
-// Bumped v2 → v3: added challenge_accepted push type. Clients on the
-// old cache key will pick up the new assets on next update.
-const CACHE_NAME = "chess-with-friends-v3";
+const PRECACHE_MANIFEST = self.__WB_MANIFEST;
+const CACHE_NAME = "chess-with-friends-precache";
 const PUSH_TYPES = new Set(["friend_request", "challenge", "challenge_accepted", "scheduled_start", "call_invite"]);
 
+function precacheUrls() {
+  const urls = PRECACHE_MANIFEST.map((entry) => entry.url);
+  return [...new Set(["/", ...urls])];
+}
+
 self.addEventListener("install", (event) => {
+  // Do not call skipWaiting() here. A waiting SW may only activate after the
+  // client-side active-game gate posts { type: "SKIP_WAITING" }, otherwise a
+  // deploy can silently reload a player mid-move.
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll([
-      "/",
-      "/manifest.webmanifest",
-      "/icon.svg",
-      "/apple-touch-icon.png",
-      "/icon-512.png",
-    ]))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(precacheUrls()))
   );
-  self.skipWaiting();
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys();
     await Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)));
+    const cache = await caches.open(CACHE_NAME);
+    const expected = new Set(precacheUrls().map((url) => new URL(url, self.location.href).href));
+    await Promise.all((await cache.keys()).map((request) => (
+      expected.has(request.url) ? undefined : cache.delete(request)
+    )));
     await self.clients.claim();
   })());
 });
