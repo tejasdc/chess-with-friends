@@ -862,7 +862,7 @@ function LandingPuzzleShelf() {
     return legalPath(move.from, move.to, mover.type, mover.color);
   }
 
-  async function playOneMove(moveStr: string, m: ShelfMetrics, boardOrientation: Color) {
+  async function playOneMove(moveStr: string, m: ShelfMetrics, boardOrientation: Color, animate: boolean = true) {
     setRouteMetrics(m, boardOrientation);
     let move: ChessMove;
     try {
@@ -929,7 +929,9 @@ function LandingPuzzleShelf() {
       }
     }
 
-    await runWalkAnimation(walks, m);
+    if (animate) {
+      await runWalkAnimation(walks, m);
+    }
     if (move.promotion) {
       mover.type = move.promotion;
       mover.char = move.color === "w" ? move.promotion.toUpperCase() : move.promotion;
@@ -937,6 +939,17 @@ function LandingPuzzleShelf() {
     mover.live = true;
     syncPieceElement(mover, m);
     for (const piece of trayRef.current) syncPieceElement(piece, m);
+    // Non-animated snap: ensure any castling rook and captured piece
+    // land at their tray/board destinations too, since we skipped the
+    // walk that would have animated them there.
+    if (!animate) {
+      if (move.flags.includes("k") || move.flags.includes("q")) {
+        const rank = move.color === "w" ? "1" : "8";
+        const rookTo = `${move.flags.includes("k") ? "f" : "d"}${rank}` as Square;
+        const rook = piecesRef.current.find((piece) => piece.sq === rookTo && piece.type === "r" && piece.color === move.color);
+        if (rook) syncPieceElement(rook, m);
+      }
+    }
   }
 
   function castleRookWalk(move: ChessMove, m: ShelfMetrics, now: number) {
@@ -957,11 +970,17 @@ function LandingPuzzleShelf() {
   }
 
   async function replayMoves(moveStrs: string[], m: ShelfMetrics, boardOrientation: Color) {
-    for (let i = 0; i < moveStrs.length; i++) {
-      await playOneMove(moveStrs[i], m, boardOrientation);
-      if (i < moveStrs.length - 1) {
-        await new Promise<void>((resolve) => window.setTimeout(resolve, REPLAY_BEAT_MS));
-      }
+    // Snap through all-but-last moves without animation; animate ONLY
+    // the final move so the viewer sees which side moved last (the
+    // opposite-color cue Tejas asked for). Skipping the multi-move
+    // replay also eliminates the piece-overlap race that happened when
+    // consecutive captures didn't clean up in time (Tejas: "the king
+    // overlapped, he did not remove the pawn").
+    for (let i = 0; i < moveStrs.length - 1; i++) {
+      await playOneMove(moveStrs[i], m, boardOrientation, /* animate */ false);
+    }
+    if (moveStrs.length > 0) {
+      await playOneMove(moveStrs[moveStrs.length - 1], m, boardOrientation, /* animate */ true);
     }
   }
 
@@ -4622,6 +4641,12 @@ async function signOut(onSignedOut: () => void) {
   // with stale home data. Then push the URL so future refresh() sees "/".
   onSignedOut();
   window.history.pushState({}, "", "/");
+  // Dispatch popstate so usePathname() picks up the new location; without
+  // this, sign-out from the game screen leaves the URL at / but the
+  // route hook stuck at /game/:id — GameScreen stays mounted, doesn't
+  // render properly (no home), user is stranded until they click Home
+  // (which fires popstate via navigate()). Tejas hit this 2026-08-07.
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function navigate(path: string, after?: () => void) {
