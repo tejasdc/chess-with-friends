@@ -1378,6 +1378,7 @@ export class AppDO extends DurableObject<Env> {
     }
     if (challenge.status !== "pending") throw new Error("Challenge not available.");
     const game = this.createGame(db, challenge.fromId, challenge.toId, challenge.timeControl, "challenge");
+    await this.initGame(game);
     challenge.status = "accepted";
     challenge.gameId = game.id;
     // Tell the inviter their handshake completed — they invited, went
@@ -1386,7 +1387,6 @@ export class AppDO extends DurableObject<Env> {
     // stayed at the table; the push covers the case where they left.
     const pushIntent = this.enqueuePush(db, challenge.fromId, "challenge_accepted", `@${user.handle} accepted — your game is ready`, `/game/${game.id}`);
     await this.save(db);
-    await this.initGame(game);
     this.ctx.waitUntil(this.deliverPush(pushIntent));
     return json({ game });
   }
