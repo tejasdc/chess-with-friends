@@ -5,12 +5,14 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "worker:dev": "npm run build && wrangler dev --local --persist-to=.wrangler/state --port 8787",
+    "prebuild": "npm run positions:verify",
     "build": "vite build",
     "postbuild": "node scripts/verify-precache.mjs",
     "typecheck": "tsc --noEmit",
     "deploy": "npm run build && wrangler deploy",
     "test:e2e": "playwright test",
     "test:push": "node scripts/verify-push-policy.mjs && node scripts/verify-push-copy-contract.mjs",
+    "positions:verify": "node scripts/verify-positions.mjs",
     "vapid:generate": "node scripts/generate-vapid.mjs"
   },
   "dependencies": {

@@ -708,8 +708,17 @@ function LandingPuzzleShelf() {
         }
       }
       if (bestI >= 0 && bestPath) {
-        target.assigned = pool[bestI];
-        target.path = bestPath;
+        const assigned = pool[bestI];
+        target.assigned = assigned;
+        if (assigned) {
+          const actualStart = { x: assigned.x + m.sqSize / 2, y: assigned.y + m.sqSize / 2 };
+          const plannedStart = bestPath.waypoints[0];
+          const startsAtRenderedPosition = plannedStart
+            && Math.hypot(actualStart.x - plannedStart.x, actualStart.y - plannedStart.y) < 0.5;
+          target.path = startsAtRenderedPosition
+            ? bestPath
+            : { ok: true, waypoints: [actualStart, ...bestPath.waypoints] };
+        }
         pool[bestI] = null;
       }
     }

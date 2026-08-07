@@ -69,6 +69,50 @@ function firstFenPiece(fen: string) {
   throw new Error(`FEN has no pieces: ${fen}`);
 }
 
+function fenPieces(fen: string) {
+  const pieces: Array<{ square: string; piece: string }> = [];
+  let file = 0;
+  let rank = 8;
+  for (const char of fen.split(" ")[0]) {
+    if (char === "/") { rank--; file = 0; continue; }
+    if (/\d/.test(char)) { file += Number(char); continue; }
+    pieces.push({
+      square: `${"abcdefgh"[file]}${rank}`,
+      piece: `${char === char.toUpperCase() ? "w" : "b"}${char.toLowerCase()}`,
+    });
+    file++;
+  }
+  return pieces;
+}
+
+async function expectLandingBoardToMatchFen(page: Page, puzzle: LandingPuzzle) {
+  const expected = fenPieces(puzzle.fen).sort((a, b) => a.square.localeCompare(b.square));
+  const rendered = await page.locator(".landing-piece.live").evaluateAll((elements) =>
+    elements.map((element) => ({
+      square: element.getAttribute("data-square") ?? "",
+      piece: element.getAttribute("data-piece") ?? "",
+    })).sort((a, b) => a.square.localeCompare(b.square)),
+  );
+  expect(rendered, `${puzzle.id}: settled live pieces must equal its FEN exactly`).toEqual(expected);
+
+  const misplaced = await page.locator(".landing-piece.live").evaluateAll((elements) =>
+    elements.flatMap((element) => {
+      const squareName = element.getAttribute("data-square");
+      const square = squareName
+        ? document.querySelector<HTMLElement>(`.landing-square[data-square="${squareName}"]`)
+        : null;
+      if (!square) return [{ square: squareName, reason: "missing-square" }];
+      const pieceRect = element.getBoundingClientRect();
+      const squareRect = square.getBoundingClientRect();
+      const pieceCenter = { x: pieceRect.left + pieceRect.width / 2, y: pieceRect.top + pieceRect.height / 2 };
+      const squareCenter = { x: squareRect.left + squareRect.width / 2, y: squareRect.top + squareRect.height / 2 };
+      const offset = Math.hypot(pieceCenter.x - squareCenter.x, pieceCenter.y - squareCenter.y);
+      return offset <= 2 ? [] : [{ square: squareName, reason: "misplaced", offset }];
+    }),
+  );
+  expect(misplaced, `${puzzle.id}: every live piece must be centered on its declared square`).toEqual([]);
+}
+
 async function solveLandingPuzzle(page: Page, puzzle: LandingPuzzle) {
   await page.locator(`.landing-square[data-square="${puzzle.solution.from}"]`).click({ timeout: 8000 });
   await page.locator(`.landing-square[data-square="${puzzle.solution.to}"]`).click({ timeout: 8000 });
@@ -1669,6 +1713,7 @@ test(`landing shelf survives all ${loadLandingPositions().length} puzzles twice 
   try {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".puzzle-shelf[data-puzzle-id]", { timeout: 15000 });
+    await expectLandingBoardToMatchFen(page, positions[0]);
 
     for (currentRound = 1; currentRound <= rounds; currentRound++) {
       const id = await page.locator(".puzzle-shelf").getAttribute("data-puzzle-id");
@@ -1687,7 +1732,8 @@ test(`landing shelf survives all ${loadLandingPositions().length} puzzles twice 
         id,
         { timeout: 40000 },
       );
-      await page.waitForTimeout(400);   // let the settle beat land
+      await expect(page.locator(".puzzle-shelf")).toHaveAttribute("data-animating", "false", { timeout: 40_000 });
+      await expectLandingBoardToMatchFen(page, positions[currentRound % positions.length]);
     }
 
     expect(errors, `page errors during ${rounds}-solve loop:\n${errors.map((e) => `  round ${e.round} [${e.kind}] ${e.message}`).join("\n")}`).toEqual([]);
@@ -1738,6 +1784,24 @@ test("landing replay animates a capture — captured piece walks to tray during 
   );
 
   await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 15000 });
+});
+
+test("Fool's Mate and Legal's Mate settle with exactly their FEN pieces and no overlaps", async ({ page }) => {
+  test.setTimeout(90_000);
+  const positions = loadLandingPositions();
+  const shelf = page.locator(".puzzle-shelf");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(shelf).toHaveAttribute("data-puzzle-id", positions[0].id);
+  await expectLandingBoardToMatchFen(page, positions[0]);
+
+  for (let index = 0; index < 3; index++) {
+    await solveLandingPuzzle(page, positions[index]);
+    await expect(shelf).toHaveAttribute("data-puzzle-id", positions[index + 1].id, { timeout: 40_000 });
+    await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 40_000 });
+    await expectLandingBoardToMatchFen(page, positions[index + 1]);
+  }
 });
 
 test("invite link is standing consent — five cases all resolve to friendship, idempotent, no request/accept dance", async ({ browser }) => {
