@@ -1493,6 +1493,18 @@ body[data-screen="landing"] .landing-copy {
   white-space: nowrap;
   line-height: 1.2;
 }
+/* Reveal moment after the user plays the correct mate move. Warm teak
+   (matches the CTA arrow) with a soft fade-in. Tejas 2026-08-07:
+   "after even the pawn may be knocking off the king will be good to
+   know you won." Kept subtle — no confetti, just the label shifts. */
+.puzzle-cta-solved {
+  color: var(--teak);
+  animation: puzzle-cta-solved-in 260ms var(--ease) both;
+}
+@keyframes puzzle-cta-solved-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 .puzzle-cta-arrow {
   /* Points UP at the board, not sideways. The nudge is a small
      vertical drift (up, back) so the arrow enacts what it's asking:
