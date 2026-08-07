@@ -197,6 +197,8 @@ function LandingPuzzleShelf() {
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<Square | null>(null);
   const [animating, setAnimating] = useState(false);
+  const [orientation, setOrientation] = useState<Color>(shelf[0].sideToMove);
+  const [orientationSwapping, setOrientationSwapping] = useState(false);
   const [metrics, setMetrics] = useState<ShelfMetrics | null>(null);
   // Last-move wash on the from + to squares of the LAST preMove that led
   // to the current puzzle FEN. Set on first mount (position is already
@@ -211,15 +213,19 @@ function LandingPuzzleShelf() {
   const piecesRef = React.useRef<ShelfPiece[]>([]);
   const trayRef = React.useRef<ShelfPiece[]>([]);
   const gameRef = React.useRef(new Chess(shelf[0].fen));
+  const orientationRef = React.useRef<Color>(shelf[0].sideToMove);
   const selectedRef = React.useRef<Square | null>(null);
   const animatingRef = React.useRef(false);
   const moveTimer = React.useRef<number | null>(null);
   const rafRef = React.useRef<number | null>(null);
 
   const position = shelf[index];
+  const rankList = orientation === "w" ? ranks : [...ranks].reverse();
+  const fileList = orientation === "w" ? files : [...files].reverse();
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
   useEffect(() => { animatingRef.current = animating; }, [animating]);
+  useEffect(() => { orientationRef.current = orientation; }, [orientation]);
 
   useEffect(() => {
     function measure() {
@@ -268,13 +274,13 @@ function LandingPuzzleShelf() {
     // real DOM only).
     while (layer.firstChild) layer.removeChild(layer.firstChild);
     pieceEls.current.clear();
-    const onBoard = piecesFromFen(position.fen, metrics);
+    const onBoard = piecesFromFen(position.fen, metrics, orientation);
     // First-load / non-animated re-seed: populate the trays with the
     // full off-board complement (every piece from a standard 32-piece
     // set not currently on the board) so the initial view of the sparse
     // opener reads with the same visual honesty as later transitions
     // — captured/absent pieces sit BESIDE the board, not missing.
-    const initialTray = offBoardPieces(position.fen, metrics);
+    const initialTray = offBoardPieces(position.fen, metrics, orientation);
     piecesRef.current = onBoard;
     trayRef.current = initialTray;
     gameRef.current = new Chess(position.fen);
@@ -295,19 +301,11 @@ function LandingPuzzleShelf() {
     // fire during a normal transition (guarded by animatingRef above),
     // where transitionToNext manages the wash lifecycle explicitly.
     setLastMove(computeLastMove(position));
-  }, [metrics, index]);
+  }, [metrics, index, orientation]);
 
   useEffect(() => {
     if (!metrics || animatingRef.current) return;
-    for (const piece of [...piecesRef.current, ...trayRef.current]) {
-      if (piece.sq) {
-        const { x, y } = squareToXY(piece.sq, metrics);
-        piece.x = x;
-        piece.y = y;
-      }
-      const el = pieceEls.current.get(piece.id);
-      if (el) sizeAndPlacePiece(el, piece, metrics);
-    }
+    positionPiecesForOrientation(orientationRef.current, metrics);
   }, [metrics]);
 
   useEffect(() => {
@@ -424,7 +422,7 @@ function LandingPuzzleShelf() {
     try {
       const move = chess.move({ from: selectedSquare, to: square, promotion: solution.promotion ?? "q" });
       if (!move) return clearSelection();
-      applyLandingMove(selectedSquare, square, metrics);
+      applyLandingMove(selectedSquare, square, metrics, orientationRef.current);
       clearSelection();
       moveTimer.current = window.setTimeout(() => {
         void transitionToNext();
@@ -454,14 +452,25 @@ function LandingPuzzleShelf() {
     for (const el of pieceEls.current.values()) el.classList.remove("selected");
     const nextIndex = (index + 1) % shelf.length;
     const nextPosition = shelf[nextIndex];
+    const nextOrientation = nextPosition.sideToMove;
+    if (nextOrientation !== orientationRef.current) {
+      setOrientationSwapping(true);
+      await sleep(180);
+      orientationRef.current = nextOrientation;
+      setOrientation(nextOrientation);
+      positionPiecesForOrientation(nextOrientation, metrics);
+      await nextFrame();
+      setOrientationSwapping(false);
+      await sleep(180);
+    }
     setIndex(nextIndex);
     const setupFen = nextPosition.preMoves?.fen ?? nextPosition.fen;
     setWalkPhase("setup");
-    await walkToFen(setupFen, metrics);
+    await walkToFen(setupFen, metrics, nextOrientation);
     if (nextPosition.preMoves) {
       setWalkPhase("replay");
       gameRef.current = new Chess(nextPosition.preMoves.fen);
-      await replayMoves(nextPosition.preMoves.moves, metrics);
+      await replayMoves(nextPosition.preMoves.moves, metrics, nextOrientation);
     }
     setWalkPhase("idle");
     gameRef.current = new Chess(nextPosition.fen);
@@ -470,7 +479,7 @@ function LandingPuzzleShelf() {
     setLastMove(computeLastMove(nextPosition));
   }
 
-  function applyLandingMove(from: Square, to: Square, m: ShelfMetrics) {
+  function applyLandingMove(from: Square, to: Square, m: ShelfMetrics, boardOrientation: Color) {
     const mover = piecesRef.current.find((piece) => piece.sq === from);
     if (!mover) return;
     const captured = piecesRef.current.find((piece) => piece.sq === to && piece !== mover);
@@ -485,7 +494,7 @@ function LandingPuzzleShelf() {
       piecesRef.current = piecesRef.current.filter((piece) => piece !== captured);
     }
     mover.sq = to;
-    const { x, y } = squareToXY(to, m);
+    const { x, y } = squareToXY(to, m, boardOrientation);
     mover.x = x;
     mover.y = y;
     const el = pieceEls.current.get(mover.id);
@@ -509,6 +518,34 @@ function LandingPuzzleShelf() {
   function setWalkPhase(phase: "idle" | "setup" | "replay") {
     const layer = piecesLayerRef.current;
     if (layer) layer.dataset.walkPhase = phase;
+  }
+
+  function sleep(ms: number) {
+    return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function nextFrame() {
+    return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  function positionPiecesForOrientation(boardOrientation: Color, m: ShelfMetrics) {
+    const trayIndexes: Record<Color, number> = { w: 0, b: 0 };
+    const trayGap = m.sqSize * 0.5;
+    const half = m.sqSize / 2;
+    const startX = m.boardX + half;
+    for (const piece of [...piecesRef.current, ...trayRef.current]) {
+      if (piece.sq) {
+        const { x, y } = squareToXY(piece.sq, m, boardOrientation);
+        piece.x = x;
+        piece.y = y;
+      } else {
+        const i = trayIndexes[piece.color]++;
+        piece.x = startX + i * trayGap - half;
+        piece.y = trayCenterYForColor(piece.color, m, boardOrientation) - half;
+      }
+      const el = pieceEls.current.get(piece.id);
+      if (el) sizeAndPlacePiece(el, piece, m);
+    }
   }
 
   function syncPieceElement(piece: ShelfPiece, m: ShelfMetrics) {
@@ -647,14 +684,14 @@ function LandingPuzzleShelf() {
     });
   }
 
-  async function walkToFen(targetFen: string, m: ShelfMetrics) {
-    setRouteMetrics(m);
-    const targets = piecesFromFen(targetFen, m).map((piece) => ({
+  async function walkToFen(targetFen: string, m: ShelfMetrics, boardOrientation: Color) {
+    setRouteMetrics(m, boardOrientation);
+    const targets = piecesFromFen(targetFen, m, boardOrientation).map((piece) => ({
       sq: piece.sq as Square,
       color: piece.color,
       type: piece.type,
       char: piece.char,
-      end: squareCenter(piece.sq as Square, m),
+      end: squareCenter(piece.sq as Square, m, boardOrientation),
       assigned: null as ShelfPiece | null,
       path: null as LegalPathResult | null,
       fadeIn: false,
@@ -720,9 +757,10 @@ function LandingPuzzleShelf() {
       if (target.assigned) continue;
       const entrySq = chooseEntrySquare(target.type, target.color, target.sq);
       const entryCenter = centerSq(entrySq);
-      const trayStart = target.color === "w"
-        ? { x: entryCenter.x, y: m.boardY + m.boardH + m.sqSize * 0.7 }
-        : { x: entryCenter.x, y: m.boardY - m.sqSize * 0.7 };
+      const trayStart = {
+        x: entryCenter.x,
+        y: trayCenterYForColor(target.color, m, boardOrientation) + (target.color === boardOrientation ? m.sqSize * 0.2 : -m.sqSize * 0.15),
+      };
       const spawned: ShelfPiece = {
         id: `landing-piece-${Date.now()}-${Math.random().toString(16).slice(2)}`,
         sq: target.sq,
@@ -772,8 +810,6 @@ function LandingPuzzleShelf() {
     }
 
     const trayGap = m.sqSize * 0.5;
-    const trayYWhite = m.boardY + m.boardH + m.sqSize * 0.5;
-    const trayYBlack = m.boardY - m.sqSize * 0.55;
     stragglers.filter((piece) => piece.color === "w").forEach((piece, i) => {
       const endCX = m.boardX + m.sqSize * 0.5 + i * trayGap;
       const startC = { x: piece.x + m.sqSize / 2, y: piece.y + m.sqSize / 2 };
@@ -782,7 +818,7 @@ function LandingPuzzleShelf() {
       piece.fadeIn = false;
       ensurePieceElement(piece, m);
       syncPieceElement(piece, m);
-      const walk = makeWalk(piece, [startC, { x: endCX, y: trayYWhite }], {
+      const walk = makeWalk(piece, [startC, { x: endCX, y: trayCenterYForColor("w", m, boardOrientation) }], {
         startAt: now + 8 * 90 + Math.random() * 220,
         isTray: true,
       });
@@ -797,7 +833,7 @@ function LandingPuzzleShelf() {
       piece.fadeIn = false;
       ensurePieceElement(piece, m);
       syncPieceElement(piece, m);
-      const walk = makeWalk(piece, [startC, { x: endCX, y: trayYBlack }], {
+      const walk = makeWalk(piece, [startC, { x: endCX, y: trayCenterYForColor("b", m, boardOrientation) }], {
         startAt: now + 8 * 90 + Math.random() * 220,
         isTray: true,
       });
@@ -827,8 +863,8 @@ function LandingPuzzleShelf() {
     return legalPath(move.from, move.to, mover.type, mover.color);
   }
 
-  async function playOneMove(moveStr: string, m: ShelfMetrics) {
-    setRouteMetrics(m);
+  async function playOneMove(moveStr: string, m: ShelfMetrics, boardOrientation: Color) {
+    setRouteMetrics(m, boardOrientation);
     let move: ChessMove;
     try {
       move = gameRef.current.move(moveStr);
@@ -871,9 +907,7 @@ function LandingPuzzleShelf() {
 
     mover.sq = move.to;
     if (captured) {
-      const trayY = captured.color === "w"
-        ? m.boardY + m.boardH + m.sqSize * 0.5
-        : m.boardY - m.sqSize * 0.55;
+      const trayY = trayCenterYForColor(captured.color, m, boardOrientation);
       const trayGap = m.sqSize * 0.5;
       const existing = trayRef.current.filter((piece) => piece.color === captured.color).length;
       const endCX = m.boardX + m.sqSize * 0.5 + existing * trayGap;
@@ -923,9 +957,9 @@ function LandingPuzzleShelf() {
     });
   }
 
-  async function replayMoves(moveStrs: string[], m: ShelfMetrics) {
+  async function replayMoves(moveStrs: string[], m: ShelfMetrics, boardOrientation: Color) {
     for (let i = 0; i < moveStrs.length; i++) {
-      await playOneMove(moveStrs[i], m);
+      await playOneMove(moveStrs[i], m, boardOrientation);
       if (i < moveStrs.length - 1) {
         await new Promise<void>((resolve) => window.setTimeout(resolve, REPLAY_BEAT_MS));
       }
@@ -937,19 +971,21 @@ function LandingPuzzleShelf() {
       className="puzzle-shelf"
       data-puzzle-id={position.id}
       data-animating={animating ? "true" : "false"}
+      data-orientation={orientation}
+      data-orientation-swapping={orientationSwapping ? "true" : "false"}
       data-last-from={lastMove?.from ?? ""}
       data-last-to={lastMove?.to ?? ""}
     >
       <div className="puzzle-stage" ref={stageRef}>
         <div className="landing-board-frame">
           <div className="landing-board" role="grid" aria-label="Landing chess puzzle">
-            {ranks.flatMap((rank) =>
-              files.map((file) => {
+            {rankList.flatMap((rank) =>
+              fileList.map((file) => {
                 const square = `${file}${rank}` as Square;
                 const dark = (files.indexOf(file) + Number(rank)) % 2 === 0;
                 const target = legalTargets.get(square);
-                const showFile = rank === "1";
-                const showRank = file === "a";
+                const showFile = orientation === "w" ? rank === "1" : rank === "8";
+                const showRank = orientation === "w" ? file === "a" : file === "h";
                 const isFromLast = lastMove?.from === square;
                 const isToLast = lastMove?.to === square;
                 return (
@@ -990,12 +1026,11 @@ function LandingPuzzleShelf() {
           the board above, not sideways off the page (right-pointing arrow
           leads the eye AWAY from the affordance). Bottom line — the
           citation, in italic serif so it reads as reference material, not
-          a sub-line of the CTA. Named classics: title, year, and
-          side-to-move all in a single parenthetical citation. Lichess
-          entries: side-to-move only, same italic serif treatment. */}
+          a sub-line of the CTA. Source text stays source-only; the
+          board orientation carries whose move it is. */}
       <div className="puzzle-caption">
         <span className="puzzle-cta-headline">
-          Your move
+          Your move{" "}
           <span className="puzzle-cta-arrow" aria-hidden="true">↑</span>
         </span>
         <span className="puzzle-cta-reference">{formatPuzzleReference(position)}</span>
@@ -1005,17 +1040,14 @@ function LandingPuzzleShelf() {
 }
 
 function formatPuzzleReference(pos: ShelfPosition): string {
-  const side = pos.sideToMove === "w" ? "white" : "black";
   if (pos.id.startsWith("lichess-")) {
-    // Lichess entry, no citation-able source — just the turn cue,
-    // Sentence-cased so the italic serif reads as a caption.
-    return `${side === "white" ? "White" : "Black"} to move`;
+    // Lichess entry, no citation-able source. Keep this as source
+    // reference only; the board orientation carries whose move it is.
+    return pos.credit;
   }
-  // Named classic — full citation. Title, year, side-to-move as a
-  // single scholarly reference. En-dash between title and year; the
-  // side-to-move sits parenthetically at the end so no bare "WHITE"
-  // floats without context.
-  return `${pos.title} — ${extractYear(pos.credit)} (${side} to move)`;
+  // Named classic — title and year only. Side-to-move is game state,
+  // not source citation.
+  return `${formatPuzzleTitle(pos.title)} — ${extractYear(pos.credit)}`;
 }
 
 function extractYear(credit: string): string {
@@ -1023,7 +1055,11 @@ function extractYear(credit: string): string {
   return match ? match[1] : credit;
 }
 
-function piecesFromFen(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
+function formatPuzzleTitle(title: string): string {
+  return title.replace(/\bmate\b/gi, "Mate");
+}
+
+function piecesFromFen(fen: string, metrics: ShelfMetrics, orientation: Color): ShelfPiece[] {
   const placement = fen.split(" ")[0];
   const pieces: ShelfPiece[] = [];
   let fileIndex = 0;
@@ -1040,7 +1076,7 @@ function piecesFromFen(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
     }
     const file = files[fileIndex];
     const sq = `${file}${rank}` as Square;
-    const { x, y } = squareToXY(sq, metrics);
+    const { x, y } = squareToXY(sq, metrics, orientation);
     pieces.push({
       id: `landing-piece-${pieces.length}-${char}-${sq}`,
       sq,
@@ -1063,7 +1099,7 @@ function piecesFromFen(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
 const STANDARD_SET: Record<PieceSymbol, number> = { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 };
 const PIECE_ORDER: PieceSymbol[] = ["q", "r", "b", "n", "p", "k"];
 
-function offBoardPieces(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
+function offBoardPieces(fen: string, metrics: ShelfMetrics, orientation: Color): ShelfPiece[] {
   const board = new Chess(fen).board();
   const present: Record<Color, Partial<Record<PieceSymbol, number>>> = { w: {}, b: {} };
   for (const row of board) {
@@ -1080,8 +1116,6 @@ function offBoardPieces(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
     }
   }
   const trayGap = metrics.sqSize * 0.5;
-  const trayYWhite = metrics.boardY + metrics.boardH + metrics.sqSize * 0.5;
-  const trayYBlack = metrics.boardY - metrics.sqSize * 0.55;
   const half = metrics.sqSize / 2;
   const startX = metrics.boardX + half;
   const pieces: ShelfPiece[] = [];
@@ -1095,7 +1129,7 @@ function offBoardPieces(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
       type: m.type,
       char: m.type.toUpperCase(),
       x: startX + i * trayGap - half,
-      y: trayYWhite - half,
+      y: trayCenterYForColor("w", metrics, orientation) - half,
       rot: 0,
       live: false,
       fadeIn: false,
@@ -1109,7 +1143,7 @@ function offBoardPieces(fen: string, metrics: ShelfMetrics): ShelfPiece[] {
       type: m.type,
       char: m.type,
       x: startX + i * trayGap - half,
-      y: trayYBlack - half,
+      y: trayCenterYForColor("b", metrics, orientation) - half,
       rot: 0,
       live: false,
       fadeIn: false,
@@ -1137,24 +1171,32 @@ function computeLastMove(pos: ShelfPosition): { from: Square; to: Square } | nul
   return last;
 }
 
-function squareToXY(sq: Square, metrics: ShelfMetrics) {
+function trayCenterYForColor(color: Color, metrics: ShelfMetrics, orientation: Color) {
+  return color === orientation
+    ? metrics.boardY + metrics.boardH + metrics.sqSize * 0.5
+    : metrics.boardY - metrics.sqSize * 0.55;
+}
+
+function squareToXY(sq: Square, metrics: ShelfMetrics, orientation: Color) {
   const file = sq.charCodeAt(0) - 97;
   const rank = Number(sq[1]);
+  const visualFile = orientation === "w" ? file : 7 - file;
+  const visualRank = orientation === "w" ? 8 - rank : rank - 1;
   return {
-    x: metrics.boardX + file * metrics.sqSize,
-    y: metrics.boardY + (8 - rank) * metrics.sqSize,
+    x: metrics.boardX + visualFile * metrics.sqSize,
+    y: metrics.boardY + visualRank * metrics.sqSize,
   };
 }
 
-function squareCenter(sq: Square, metrics: ShelfMetrics) {
-  const { x, y } = squareToXY(sq, metrics);
+function squareCenter(sq: Square, metrics: ShelfMetrics, orientation: Color) {
+  const { x, y } = squareToXY(sq, metrics, orientation);
   return { x: x + metrics.sqSize / 2, y: y + metrics.sqSize / 2 };
 }
 
-let routeMetrics: ShelfMetrics | null = null;
+let routeMetrics: (ShelfMetrics & { orientation: Color }) | null = null;
 
-function setRouteMetrics(metrics: ShelfMetrics) {
-  routeMetrics = metrics;
+function setRouteMetrics(metrics: ShelfMetrics, orientation: Color) {
+  routeMetrics = { ...metrics, orientation };
 }
 
 function currentRouteMetrics() {
@@ -1165,10 +1207,12 @@ function currentRouteMetrics() {
 function sqFR(sq: Square) { return { f: sq.charCodeAt(0) - 97, r: Number(sq[1]) }; }
 function frToSq(f: number, r: number) { return `${FILES[f]}${r}` as Square; }
 function centerFR(f: number, r: number) {
-  const { boardX, boardY, sqSize } = currentRouteMetrics();
+  const { boardX, boardY, sqSize, orientation } = currentRouteMetrics();
+  const visualFile = orientation === "w" ? f : 7 - f;
+  const visualRank = orientation === "w" ? 8 - r : r - 1;
   return {
-    x: boardX + f * sqSize + sqSize / 2,
-    y: boardY + (8 - r) * sqSize + sqSize / 2,
+    x: boardX + visualFile * sqSize + sqSize / 2,
+    y: boardY + visualRank * sqSize + sqSize / 2,
   };
 }
 function centerSq(sq: Square) { const c = sqFR(sq); return centerFR(c.f, c.r); }

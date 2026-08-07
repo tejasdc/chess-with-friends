@@ -1313,6 +1313,7 @@ body[data-screen="landing"] .landing-copy {
     inset 0 1px 0 color-mix(in oklab, var(--cream) 18%, transparent),
     inset 0 -2px 0 color-mix(in oklab, var(--ink) 24%, transparent),
     0 10px 22px color-mix(in oklab, var(--ink) 22%, transparent);
+  transition: opacity 160ms var(--ease);
 }
 .landing-board {
   position: relative;
@@ -1392,6 +1393,11 @@ body[data-screen="landing"] .landing-copy {
   inset: 0;
   z-index: 3;
   pointer-events: none;
+  transition: opacity 160ms var(--ease);
+}
+.puzzle-shelf[data-orientation-swapping="true"] .landing-board-frame,
+.puzzle-shelf[data-orientation-swapping="true"] .landing-pieces {
+  opacity: 0;
 }
 .landing-piece {
   position: absolute;
@@ -1448,9 +1454,8 @@ body[data-screen="landing"] .landing-copy {
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--ink);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: inline-block;
+  white-space: nowrap;
   line-height: 1.2;
 }
 .puzzle-cta-arrow {
@@ -1459,6 +1464,7 @@ body[data-screen="landing"] .landing-copy {
      "look up, the board is up there". Not anticipation (no down-first
      wind-up — that reads nervous). Just a slow, purposeful pulse. */
   display: inline-block;
+  margin-left: 8px;
   color: var(--teak);
   transform: translateY(0);
   animation: puzzle-cta-nudge-up 2400ms var(--ease) infinite;
