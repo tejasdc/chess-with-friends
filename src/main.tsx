@@ -2136,7 +2136,9 @@ function useVoiceCall({
   const session = game?.callSession || null;
   const sessionRef = React.useRef<CallSession | null>(null);
   const pcRef = React.useRef<RTCPeerConnection | null>(null);
+  const pcPromiseRef = React.useRef<Promise<RTCPeerConnection> | null>(null);
   const localStreamRef = React.useRef<MediaStream | null>(null);
+  const remoteStreamRef = React.useRef<MediaStream | null>(null);
   const remoteAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const pendingCandidatesRef = React.useRef<RTCIceCandidateInit[]>([]);
   const [localTrackEnabled, setLocalTrackEnabled] = useState(true);
@@ -2155,6 +2157,9 @@ function useVoiceCall({
   const closePeerConnection = React.useCallback(() => {
     pcRef.current?.close();
     pcRef.current = null;
+    pcPromiseRef.current = null;
+    remoteStreamRef.current = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     pendingCandidatesRef.current = [];
     sawIceConnectedRef.current = false;
   }, []);
@@ -2174,37 +2179,59 @@ function useVoiceCall({
     return stream;
   }, []);
 
+  const attachRemoteStream = React.useCallback((element: HTMLAudioElement | null = remoteAudioRef.current) => {
+    const stream = remoteStreamRef.current;
+    if (!element || !stream) return;
+    if (element.srcObject !== stream) element.srcObject = stream;
+    void element.play().catch(() => undefined);
+  }, []);
+
+  const setRemoteAudioElement = React.useCallback((element: HTMLAudioElement | null) => {
+    remoteAudioRef.current = element;
+    attachRemoteStream(element);
+  }, [attachRemoteStream]);
+
   const ensurePeerConnection = React.useCallback(async (callSessionId: string) => {
     if (pcRef.current) return pcRef.current;
-    const stream = await ensureLocalStream();
-    const ice = await api<{ iceServers: RTCIceServer[] }>("/api/voice/ice-servers");
-    const pc = new RTCPeerConnection({ iceServers: ice.iceServers });
-    pcRef.current = pc;
-    for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
-    pc.addEventListener("track", (event) => {
-      if (!remoteAudioRef.current) return;
-      const [remote] = event.streams;
-      if (remote) remoteAudioRef.current.srcObject = remote;
-      void remoteAudioRef.current.play().catch(() => undefined);
-    });
-    pc.addEventListener("icecandidate", (event) => {
-      if (event.candidate) {
-        send({ type: "call-ice-candidate", callSessionId, candidate: event.candidate.toJSON() });
-      }
-    });
-    pc.addEventListener("iceconnectionstatechange", () => {
-      const state = pc.iceConnectionState;
-      if (state === "connected" || state === "completed") {
-        sawIceConnectedRef.current = true;
-        send({ type: "peer-ice-connected", callSessionId });
-      } else if (state === "checking" && sawIceConnectedRef.current) {
-        send({ type: "peer-ice-restart", callSessionId });
-      } else if (state === "disconnected") {
-        send({ type: "peer-ice-disconnected", callSessionId });
-      }
-    });
-    return pc;
-  }, [ensureLocalStream, send]);
+    if (pcPromiseRef.current) return await pcPromiseRef.current;
+    const promise = (async () => {
+      const stream = await ensureLocalStream();
+      const ice = await api<{ iceServers: RTCIceServer[] }>("/api/voice/ice-servers");
+      const pc = new RTCPeerConnection({ iceServers: ice.iceServers });
+      pcRef.current = pc;
+      for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+      pc.addEventListener("track", (event) => {
+        const [remote] = event.streams;
+        if (!remote) return;
+        remoteStreamRef.current = remote;
+        attachRemoteStream();
+      });
+      pc.addEventListener("icecandidate", (event) => {
+        if (event.candidate) {
+          send({ type: "call-ice-candidate", callSessionId, candidate: event.candidate.toJSON() });
+        }
+      });
+      pc.addEventListener("iceconnectionstatechange", () => {
+        const state = pc.iceConnectionState;
+        if (state === "connected" || state === "completed") {
+          sawIceConnectedRef.current = true;
+          send({ type: "peer-ice-connected", callSessionId });
+        } else if (state === "checking" && sawIceConnectedRef.current) {
+          send({ type: "peer-ice-restart", callSessionId });
+        } else if (state === "disconnected") {
+          send({ type: "peer-ice-disconnected", callSessionId });
+        }
+      });
+      return pc;
+    })();
+    pcPromiseRef.current = promise;
+    try {
+      return await promise;
+    } catch (error) {
+      if (pcPromiseRef.current === promise) pcPromiseRef.current = null;
+      throw error;
+    }
+  }, [attachRemoteStream, ensureLocalStream, send]);
 
   const beginAsOfferer = React.useCallback(async (callSessionId: string) => {
     const pc = await ensurePeerConnection(callSessionId);
@@ -2248,13 +2275,15 @@ function useVoiceCall({
       const timer = window.setTimeout(() => setDismissedEndedId(session.id), 5000);
       return () => window.clearTimeout(timer);
     }
-    if (session.state === "connecting" && session.initiatorId === selfId && localStreamRef.current) {
+    if (session.state === "connecting" && session.initiatorId === selfId) {
       void beginAsOfferer(session.id).catch((error) => setMessage(error instanceof Error ? error.message : "Voice connection failed.", "error"));
     }
-  }, [beginAsOfferer, selfId, session, setMessage, stopLocalMedia]);
+    attachRemoteStream();
+  }, [attachRemoteStream, beginAsOfferer, selfId, session, setMessage, stopLocalMedia]);
 
   const initiate = React.useCallback(async () => {
     try {
+      void remoteAudioRef.current?.play().catch(() => undefined);
       await ensureLocalStream();
       send({ type: "call-initiate" });
     } catch (error) {
@@ -2265,6 +2294,7 @@ function useVoiceCall({
   const accept = React.useCallback(async () => {
     if (!session) return;
     try {
+      void remoteAudioRef.current?.play().catch(() => undefined);
       await ensureLocalStream();
       send({ type: "call-accept", callSessionId: session.id });
     } catch (error) {
@@ -2294,7 +2324,7 @@ function useVoiceCall({
     session,
     visibleSession: session?.state === "ended" && dismissedEndedId === session.id ? null : session,
     localTrackEnabled,
-    remoteAudioRef,
+    setRemoteAudioElement,
     handleSignal,
     initiate,
     accept,
@@ -2315,6 +2345,7 @@ function VoiceCallSlot({
 }) {
   const session = voice.visibleSession;
   const state = session?.state || "idle";
+  const remoteAudio = <audio ref={voice.setRemoteAudioElement} autoPlay playsInline />;
 
   // Connected — a pill chip that carries mute + end-call, entering with a
   // scale-in-from-left so the eye tracks handle → chip. Chip class name
@@ -2355,7 +2386,7 @@ function VoiceCallSlot({
             <PhoneHangupIcon />
           </button>
         </div>
-        <audio ref={voice.remoteAudioRef} autoPlay playsInline />
+        {remoteAudio}
       </div>
     );
   }
@@ -2369,19 +2400,22 @@ function VoiceCallSlot({
   if (state === "requesting") {
     const incoming = session?.initiatorId !== selfId;
     return (
-      <button
-        type="button"
-        className={`voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only ${incoming ? "is-requesting-in is-incoming" : "is-requesting-out is-outgoing"}`}
-        data-voice-call-slot="opponent"
-        data-call-state="requesting"
-        data-call-direction={incoming ? "incoming" : "outgoing"}
-        data-call-icon="phone"
-        onClick={incoming ? () => void voice.accept() : () => voice.hangup()}
-        aria-label={incoming ? "Accept voice call" : "Cancel voice call"}
-        title={incoming ? "Accept voice call" : "Cancel voice call"}
-      >
-        <PhoneIcon />
-      </button>
+      <>
+        <button
+          type="button"
+          className={`voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only ${incoming ? "is-requesting-in is-incoming" : "is-requesting-out is-outgoing"}`}
+          data-voice-call-slot="opponent"
+          data-call-state="requesting"
+          data-call-direction={incoming ? "incoming" : "outgoing"}
+          data-call-icon="phone"
+          onClick={incoming ? () => void voice.accept() : () => voice.hangup()}
+          aria-label={incoming ? "Accept voice call" : "Cancel voice call"}
+          title={incoming ? "Accept voice call" : "Cancel voice call"}
+        >
+          <PhoneIcon />
+        </button>
+        {remoteAudio}
+      </>
     );
   }
 
@@ -2391,19 +2425,22 @@ function VoiceCallSlot({
   // orbiting dot styled by that class.
   if (state === "connecting" || state === "reconnecting") {
     return (
-      <button
-        type="button"
-        className="voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only is-connecting"
-        data-voice-call-slot="opponent"
-        data-call-state={state}
-        data-call-icon="phone"
-        disabled
-        aria-label={state === "connecting" ? "Voice call connecting" : "Voice call reconnecting"}
-        title={state === "connecting" ? "Voice call connecting" : "Voice call reconnecting"}
-      >
-        <span className="voice-spinner-ring voice-orbit" aria-hidden="true" />
-        <PhoneIcon />
-      </button>
+      <>
+        <button
+          type="button"
+          className="voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only is-connecting"
+          data-voice-call-slot="opponent"
+          data-call-state={state}
+          data-call-icon="phone"
+          disabled
+          aria-label={state === "connecting" ? "Voice call connecting" : "Voice call reconnecting"}
+          title={state === "connecting" ? "Voice call connecting" : "Voice call reconnecting"}
+        >
+          <span className="voice-spinner-ring voice-orbit" aria-hidden="true" />
+          <PhoneIcon />
+        </button>
+        {remoteAudio}
+      </>
     );
   }
 
@@ -2412,32 +2449,34 @@ function VoiceCallSlot({
   // add an "OFFLINE" text — the presence dot already carries that state.
   const ended = state === "ended";
   return (
-    <button
-      type="button"
-      className={`voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only ${ended ? "is-ended" : "is-idle"} ${opponentOffline ? "offline" : ""}`}
-      data-voice-call-slot="opponent"
-      data-call-state={ended ? "ended" : "idle"}
-      data-call-icon="phone"
-      disabled={opponentOffline}
-      onClick={opponentOffline ? undefined : () => void voice.initiate()}
-      aria-label={
-        opponentOffline
-          ? "Opponent offline — call unavailable"
-          : ended
-            ? "Start voice call again"
-            : "Start voice call"
-      }
-      title={
-        opponentOffline
-          ? "Opponent offline"
-          : ended
-            ? "Start voice call again"
-            : "Start voice call"
-      }
-    >
-      <PhoneIcon />
-      <audio ref={voice.remoteAudioRef} autoPlay playsInline />
-    </button>
+    <>
+      <button
+        type="button"
+        className={`voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only ${ended ? "is-ended" : "is-idle"} ${opponentOffline ? "offline" : ""}`}
+        data-voice-call-slot="opponent"
+        data-call-state={ended ? "ended" : "idle"}
+        data-call-icon="phone"
+        disabled={opponentOffline}
+        onClick={opponentOffline ? undefined : () => void voice.initiate()}
+        aria-label={
+          opponentOffline
+            ? "Opponent offline — call unavailable"
+            : ended
+              ? "Start voice call again"
+              : "Start voice call"
+        }
+        title={
+          opponentOffline
+            ? "Opponent offline"
+            : ended
+              ? "Start voice call again"
+              : "Start voice call"
+        }
+      >
+        <PhoneIcon />
+      </button>
+      {remoteAudio}
+    </>
   );
 }
 

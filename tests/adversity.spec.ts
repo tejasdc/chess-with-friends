@@ -13,6 +13,11 @@ import { readFileSync } from "node:fs";
 import { Chess } from "chess.js";
 
 test.describe.configure({ mode: "serial" });
+test.use({
+  launchOptions: {
+    args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
+  },
+});
 
 type LandingPuzzle = {
   id: string;
@@ -145,11 +150,16 @@ async function peekPendingPushNoAck(page: Page, endpointOverride?: string): Prom
   }, endpointOverride || "");
 }
 
-async function twoClientsInGame(browser: Browser, suffix: string, opts: { instrumentSockets?: boolean; voiceMocks?: boolean } = {}) {
-  const aliceCtx = await browser.newContext();
-  const bobCtx = await browser.newContext();
+async function twoClientsInGame(browser: Browser, suffix: string, opts: { instrumentSockets?: boolean; voiceMocks?: boolean; realVoiceProbe?: boolean; localIceServers?: boolean } = {}) {
+  const contextOptions = opts.localIceServers ? { serviceWorkers: "block" as const } : {};
+  const aliceCtx = await browser.newContext(contextOptions);
+  const bobCtx = await browser.newContext(contextOptions);
   const alice = await aliceCtx.newPage();
   const bob = await bobCtx.newPage();
+  if (opts.localIceServers) {
+    await installLocalIceServers(alice);
+    await installLocalIceServers(bob);
+  }
   if (opts.instrumentSockets) {
     // Wrap WebSocket on both pages BEFORE any navigation so we can
     // reach into the socket bag from within tests.
@@ -159,6 +169,10 @@ async function twoClientsInGame(browser: Browser, suffix: string, opts: { instru
   if (opts.voiceMocks) {
     await installVoiceMocks(alice);
     await installVoiceMocks(bob);
+  }
+  if (opts.realVoiceProbe) {
+    await installRealVoiceProbe(alice);
+    await installRealVoiceProbe(bob);
   }
   await addAuthenticator(alice);
   await addAuthenticator(bob);
@@ -320,6 +334,59 @@ async function installVoiceMocks(page: Page) {
   });
 }
 
+async function installLocalIceServers(page: Page) {
+  await page.route("**/api/voice/ice-servers", async (route) => {
+    await route.fulfill({
+      json: {
+        iceServers: [],
+      },
+    });
+  });
+}
+
+async function installRealVoiceProbe(page: Page) {
+  await page.addInitScript(() => {
+    const Original = window.RTCPeerConnection;
+    type Probe = {
+      pcs: RTCPeerConnection[];
+      iceStates: string[];
+      connectionStates: string[];
+      localDescriptions: Array<{ type: string; sdp: string }>;
+      remoteDescriptions: Array<{ type: string; sdp: string }>;
+      trackEvents: number;
+    };
+    const probe: Probe = {
+      pcs: [],
+      iceStates: [],
+      connectionStates: [],
+      localDescriptions: [],
+      remoteDescriptions: [],
+      trackEvents: 0,
+    };
+    (window as unknown as { __realVoiceProbe?: Probe }).__realVoiceProbe = probe;
+    class TrackedPeerConnection extends Original {
+      constructor(config?: RTCConfiguration) {
+        super(config);
+        probe.pcs.push(this);
+        this.addEventListener("iceconnectionstatechange", () => probe.iceStates.push(this.iceConnectionState));
+        this.addEventListener("connectionstatechange", () => probe.connectionStates.push(this.connectionState));
+        this.addEventListener("track", () => { probe.trackEvents += 1; });
+      }
+      async setLocalDescription(description?: RTCLocalSessionDescriptionInit) {
+        await super.setLocalDescription(description);
+        const current = this.localDescription;
+        if (current) probe.localDescriptions.push({ type: current.type, sdp: current.sdp || "" });
+      }
+      async setRemoteDescription(description: RTCSessionDescriptionInit) {
+        await super.setRemoteDescription(description);
+        const current = this.remoteDescription;
+        if (current) probe.remoteDescriptions.push({ type: current.type, sdp: current.sdp || "" });
+      }
+    }
+    (window as unknown as { RTCPeerConnection: typeof RTCPeerConnection }).RTCPeerConnection = TrackedPeerConnection as unknown as typeof RTCPeerConnection;
+  });
+}
+
 async function sendVoice(page: Page, message: Record<string, unknown>) {
   await page.waitForFunction(() => {
     return ((window as unknown as { __sockets?: WebSocket[] }).__sockets || []).some((socket) => socket.readyState === WebSocket.OPEN);
@@ -367,6 +434,82 @@ async function expectVoiceSlot(page: Page, state: string, icon: string) {
   else await expect(slot.locator(`[data-call-icon='${icon}']`).first()).toBeVisible();
   await expect(page.locator(".voice-status, .voice-ending")).toHaveCount(0);
   await expect(selfVoiceSlot(page)).toHaveCount(0);
+}
+
+type RealVoiceSnapshot = {
+  iceConnectionState: string | null;
+  connectionState: string | null;
+  iceStates: string[];
+  connectionStates: string[];
+  localDescriptions: Array<{ type: string; sdp: string }>;
+  remoteDescriptions: Array<{ type: string; sdp: string }>;
+  trackEvents: number;
+  inboundAudioBytes: number;
+  outboundAudioBytes: number;
+};
+
+async function realVoiceProbe(page: Page): Promise<RealVoiceSnapshot> {
+  return await page.evaluate(async () => {
+    type Probe = {
+      pcs: RTCPeerConnection[];
+      iceStates: string[];
+      connectionStates: string[];
+      localDescriptions: Array<{ type: string; sdp: string }>;
+      remoteDescriptions: Array<{ type: string; sdp: string }>;
+      trackEvents: number;
+    };
+    const probe = (window as unknown as { __realVoiceProbe?: Probe }).__realVoiceProbe;
+    const pc = probe?.pcs.at(-1);
+    let inboundAudioBytes = 0;
+    let outboundAudioBytes = 0;
+    if (pc) {
+      const stats = await pc.getStats();
+      stats.forEach((report) => {
+        const item = report as RTCStats & { kind?: string; mediaType?: string; bytesReceived?: number; bytesSent?: number };
+        if (item.type === "inbound-rtp" && (item.kind === "audio" || item.mediaType === "audio")) {
+          inboundAudioBytes += item.bytesReceived || 0;
+        }
+        if (item.type === "outbound-rtp" && (item.kind === "audio" || item.mediaType === "audio")) {
+          outboundAudioBytes += item.bytesSent || 0;
+        }
+      });
+    }
+    return {
+      iceConnectionState: pc?.iceConnectionState || null,
+      connectionState: pc?.connectionState || null,
+      iceStates: probe?.iceStates || [],
+      connectionStates: probe?.connectionStates || [],
+      localDescriptions: probe?.localDescriptions || [],
+      remoteDescriptions: probe?.remoteDescriptions || [],
+      trackEvents: probe?.trackEvents || 0,
+      inboundAudioBytes,
+      outboundAudioBytes,
+    };
+  });
+}
+
+async function expectRealVoiceMedia(page: Page, label: string) {
+  await expect.poll(async () => {
+    const probe = await realVoiceProbe(page);
+    const iceConnected = probe.iceConnectionState === "connected" || probe.iceConnectionState === "completed";
+    return {
+      label,
+      iceConnected,
+      hasInboundAudio: probe.inboundAudioBytes > 0,
+      hasOutboundAudio: probe.outboundAudioBytes > 0,
+      hasRemoteTrack: probe.trackEvents > 0,
+    };
+  }, { timeout: 5000 }).toMatchObject({
+    label,
+    iceConnected: true,
+    hasInboundAudio: true,
+    hasOutboundAudio: true,
+    hasRemoteTrack: true,
+  });
+  const probe = await realVoiceProbe(page);
+  expect(probe.trackEvents).toBeGreaterThan(0);
+  expect(probe.inboundAudioBytes).toBeGreaterThan(0);
+  expect(probe.outboundAudioBytes).toBeGreaterThan(0);
 }
 
 async function directConnectedCall(alice: Page, bob: Page, gameId: string) {
@@ -475,6 +618,37 @@ test("voice ICE config uses credentialed TURN servers, not STUN-only", async ({ 
     await aliceCtx.close();
     await bobCtx.close();
   }
+});
+
+test.describe("real WebRTC voice media", () => {
+  test("voice call sends audio RTP bytes through real peer connections", async ({ browser }) => {
+    const suffix = `rtc_${Date.now().toString(36).slice(-6)}`;
+    const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, {
+      instrumentSockets: true,
+      realVoiceProbe: true,
+      localIceServers: true,
+    });
+    try {
+      await expectVoiceSlot(alice, "idle", "phone");
+      await voiceSlot(alice).click();
+      const requesting = await waitCallState(alice, gameId, "requesting");
+      await expectVoiceSlot(bob, "requesting", "phone");
+      await bob.getByRole("button", { name: "Accept voice call" }).click();
+      await waitCallState(alice, gameId, "connected");
+      await expectRealVoiceMedia(alice, "alice");
+      await expectRealVoiceMedia(bob, "bob");
+      const aliceProbe = await realVoiceProbe(alice);
+      const bobProbe = await realVoiceProbe(bob);
+      expect(aliceProbe.localDescriptions.some((description) => description.type === "offer" && description.sdp.includes("m=audio"))).toBe(true);
+      expect(bobProbe.localDescriptions.some((description) => description.type === "answer" && description.sdp.includes("m=audio"))).toBe(true);
+      expect(aliceProbe.remoteDescriptions.some((description) => description.type === "answer" && description.sdp.includes("m=audio"))).toBe(true);
+      expect(bobProbe.remoteDescriptions.some((description) => description.type === "offer" && description.sdp.includes("m=audio"))).toBe(true);
+      expect(requesting.id).toBeTruthy();
+    } finally {
+      await aliceCtx.close();
+      await bobCtx.close();
+    }
+  });
 });
 
 test("voice call hangup by initiator reaches ended", async ({ browser }) => {
