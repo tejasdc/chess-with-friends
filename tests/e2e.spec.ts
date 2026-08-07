@@ -14,7 +14,7 @@ type PendingPushPayload = {
 
 test.describe.configure({ mode: "serial" });
 
-test("notification prompt disappears after permission is granted and stays gone on reload", async ({ browser }) => {
+test("notification prompt disappears after permission is granted and sign-out preserves the browser subscription", async ({ browser }) => {
   mkdirSync(screenDir, { recursive: true });
   const suffix = Date.now().toString(36).slice(-6);
   const context = await browser.newContext();
@@ -47,6 +47,11 @@ test("notification prompt disappears after permission is granted and stays gone 
         },
       },
     };
+    (subscription as typeof subscription & { unsubscribe: () => Promise<boolean> }).unsubscribe = async () => {
+      window.localStorage.setItem("notificationUnsubscribed", "true");
+      window.localStorage.removeItem("notificationSubscription");
+      return true;
+    };
     Object.defineProperty(window, "Notification", { configurable: true, value: FakeNotification });
     Object.defineProperty(window, "PushManager", { configurable: true, value: function PushManager() {} });
     Object.defineProperty(navigator, "serviceWorker", {
@@ -71,6 +76,12 @@ test("notification prompt disappears after permission is granted and stays gone 
 
   await page.reload();
   await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByPlaceholder("your_handle")).toBeVisible();
+  await expect(page.evaluate(() => Notification.permission)).resolves.toBe("granted");
+  await expect(page.evaluate(async () => Boolean(await navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription())))).resolves.toBe(true);
+  await expect(page.evaluate(() => window.localStorage.getItem("notificationUnsubscribed"))).resolves.toBeNull();
   await shot(page, "00-notifications-enabled-after-reload");
   await context.close();
 });

@@ -10,6 +10,16 @@ const allowed = ["friend_request", "challenge", "challenge_accepted", "scheduled
 const files = ["src/worker.ts", "src/sw.js"];
 const found = new Set();
 const violations = [];
+const main = readFileSync("src/main.tsx", "utf8");
+
+if (/subscription\.unsubscribe\s*\(/.test(main)) {
+  violations.push("src/main.tsx: automatic browser PushSubscription.unsubscribe() is forbidden; logout must preserve OS/browser notification permission.");
+}
+
+const signOutMatch = main.match(/async function signOut[\s\S]*?\n}\n/);
+if (signOutMatch && /\/api\/push\/unsubscribe|endpoint/.test(signOutMatch[0])) {
+  violations.push("src/main.tsx: signOut must not detach or unsubscribe push endpoints.");
+}
 
 for (const file of files) {
   const text = readFileSync(file, "utf8");
