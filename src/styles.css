@@ -646,6 +646,9 @@ body[data-screen="landing"] .landing-copy {
   min-height: 8px;
   padding-top: 0;
 }
+.game.game-fixed .board-holder + .captured-strip:empty {
+  margin-top: -16px;
+}
 .game.game-fixed .board-holder + .captured-strip:empty::before {
   height: 6px;
 }
