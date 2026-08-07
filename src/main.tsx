@@ -465,6 +465,21 @@ function LandingPuzzleShelf() {
     }
     for (const piece of piecesRef.current) piece.rot = 0;
     for (const piece of trayRef.current) piece.rot = 0;
+    // Clear residual tray pieces from prior puzzles so walkToFen only
+    // has to account for THIS transition's stragglers. Without this,
+    // pieces the previous puzzle sent to the tray persist across
+    // transitions and end up rendered above/below the board on
+    // subsequent puzzles as visual noise (Tejas 2026-08-07 on Legal's
+    // Mate: 5 tray pieces where FEN says only 3 should be off-board;
+    // the extras crowd the visual area near the kings and read as
+    // "kings hiding behind pawns"). Board pieces stay live in
+    // piecesRef so walkToFen can walk them to new targets.
+    for (const piece of trayRef.current) {
+      const el = pieceEls.current.get(piece.id);
+      if (el) el.remove();
+      pieceEls.current.delete(piece.id);
+    }
+    trayRef.current = [];
     const nextIndex = (index + 1) % shelf.length;
     const nextPosition = shelf[nextIndex];
     const nextOrientation = nextPosition.sideToMove;
