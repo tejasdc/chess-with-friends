@@ -453,7 +453,18 @@ function LandingPuzzleShelf() {
     setSelected(null);
     selectedRef.current = null;
     setLastMove(null);
-    for (const el of pieceEls.current.values()) el.classList.remove("selected");
+    for (const el of pieceEls.current.values()) {
+      el.classList.remove("selected");
+      // Wake any king toppled by the previous puzzle's solve. rot state
+      // was persisting on piece.rot, and walkToFen's post-walk
+      // syncPieceElement re-applied it at the new square (Tejas
+      // 2026-08-07: "The Topple King never wakes up"). Clear the class
+      // AND the state ref so no piece carries rotation forward.
+      el.classList.remove("toppled");
+      el.style.transition = "";
+    }
+    for (const piece of piecesRef.current) piece.rot = 0;
+    for (const piece of trayRef.current) piece.rot = 0;
     const nextIndex = (index + 1) % shelf.length;
     const nextPosition = shelf[nextIndex];
     const nextOrientation = nextPosition.sideToMove;
