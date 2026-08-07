@@ -355,18 +355,26 @@ body[data-screen="game"] {
 body[data-screen="game"] .shell {
   height: 100dvh;
   min-height: 100dvh;
-  /* Tighter shell chrome on the game screen so the board can be the
-     dominant object. Horizontal gutters compress hard at mobile so
-     the width constraint doesn't waste half the viewport. */
-  padding-top: 8px;
-  padding-bottom: 8px;
-  padding-left: clamp(6px, 1.5vw, 24px);
-  padding-right: clamp(6px, 1.5vw, 24px);
-  gap: 6px;
+  padding-top: 12px;
+  padding-bottom: 10px;
+  padding-left: clamp(10px, 2vw, 28px);
+  padding-right: clamp(10px, 2vw, 28px);
+  gap: 10px;
   overflow: hidden;
 }
 body[data-screen="game"] .topbar {
-  padding-bottom: 8px;
+  padding-bottom: 12px;
+}
+body[data-screen="game"] .wordmark {
+  font-size: 15px;
+}
+body[data-screen="game"] .wordmark::before {
+  width: 18px;
+  height: 18px;
+}
+body[data-screen="game"] .menu-dot {
+  font-size: 26px;
+  padding: 5px 11px;
 }
 
 /* Landing and Inspirations follow Tejas's general no-scroll law: if the
@@ -567,7 +575,7 @@ body[data-screen="landing"] .landing-copy {
 .game.game-fixed {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex: 1;
   min-height: 0;
   /* Keep the game screen visually calm — nothing scrolls internally either. */
@@ -583,22 +591,19 @@ body[data-screen="landing"] .landing-copy {
 /* Board-column matches the board's max-width so the clock strips and
    bottom bar don't stretch across a huge desktop viewport — the whole
    game-screen composition stays visually locked to the board width.
-   Compressed chrome (see .game-fixed .clock-strip and .clock overrides
-   below) drops the vertical budget: topbar ~44 + shell pad 16 + gap 6
-   + clock strips 2×50 + captured 2×32 + bottom bar 28 + inner gaps ≈
-   280. So board side = min(cap, vw, vh-290). The cap is now large
-   enough on desktop that the board becomes the dominant object like
-   the prototype's — up to 820px, matching prototype-scale presence. */
+   The game chrome now keeps the same visual scale as the base clock
+   strips while the board still fits by using the holder's remaining
+   flex budget. */
 .game.game-fixed .board-column {
   width: 100%;
-  max-width: min(820px, 100%, calc(100dvh - 330px));
+  max-width: min(820px, 100%, calc(100dvh - 350px));
 }
 .game-fixed .board-column {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .game-fixed .board-holder {
   flex: 1;
@@ -624,21 +629,22 @@ body[data-screen="landing"] .landing-copy {
   .game-fixed .board-holder { padding: 4px; }
 }
 
-/* Compress the clock strips + clock font on the game screen so the
-   board can be bigger. Same visual language, tighter proportions. */
+/* Game screen preserves the pre-regression chrome scale: the strips,
+   clocks, handles, and bottom info line should read like the standard
+   app UI, not a shrunken mini-board. */
 .game.game-fixed .clock-strip {
-  padding: 6px 12px;
-  gap: 8px;
+  padding: 12px 16px;
+  gap: 12px;
 }
 .game.game-fixed .clock-strip .clock {
-  font-size: 26px;
+  font-size: 34px;
 }
 .game.game-fixed .captured-strip {
-  min-height: 26px;
+  min-height: 30px;
 }
 .game.game-fixed .game-bottom {
-  padding: 4px 4px 2px;
-  font-size: 11px;
+  padding: 8px 4px 6px;
+  font-size: 12px;
 }
 .game-fixed .board-holder .board {
   /* Board must be STRICTLY SQUARE — no vertical stretching on tall
