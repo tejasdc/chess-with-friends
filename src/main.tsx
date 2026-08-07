@@ -423,16 +423,14 @@ function LandingPuzzleShelf() {
       if (!move) return clearSelection();
       applyLandingMove(selectedSquare, square, metrics, orientationRef.current);
       clearSelection();
-      // Topple-king disabled: end-to-end verification (task #31) showed
-      // that mutating piece.rot on the ShelfPiece then transitioning
-      // via snapToFen was leaving the shelf in a stuck animating=true
-      // state (renderer freeze on transition Scholar's Mate →
-      // Opera-house Mate). Ship the working shelf without a topple
-      // effect for now; re-add via a CSS-only approach later so it
-      // never mutates piece state.
+      // Board-native "you won": the mated king topples over on the
+      // board. No text pill — the user's eyes are on the board, not on
+      // captions below (Tejas 2026-08-07: "I'm looking at the fking
+      // board... topple the motherfucking king").
+      window.setTimeout(() => toppleLosingKing(), 240);
       moveTimer.current = window.setTimeout(() => {
         void transitionToNext();
-      }, 1200);
+      }, 1600);
     } catch {
       clearSelection();
     }
@@ -476,38 +474,33 @@ function LandingPuzzleShelf() {
     }
     setIndex(nextIndex);
     await nextFrame();
-    // Snap directly to the puzzle's final FEN. No animation, no walk,
-    // no last-move replay. Both walkToFen (piece-by-piece walk) and
-    // playOneMove(last preMove, animate=true) proved to hang the
-    // renderer indefinitely on complex between-puzzle transitions
-    // during end-to-end verification (task #31). Snap is the only
-    // thing that actually works reliably across all 24 puzzles.
-    // The board orientation flip already signals which side just moved
-    // (Codex commit 0149fdc), so the "last move animated" cue is not
-    // load-bearing.
-    snapToFen(nextPosition.fen, metrics, nextOrientation);
+    // Between-puzzles transition: walk the pieces to the setup FEN (the
+    // position ONE MOVE BEFORE the last preMove). This is the walking
+    // animation Tejas wants preserved. Then animate ONLY the last
+    // preMove — the "opposite side moved last" cue.
+    const preMoves = nextPosition.preMoves;
+    let setupFen: string;
+    if (preMoves && preMoves.moves.length > 0) {
+      const setup = new Chess(preMoves.fen);
+      for (let i = 0; i < preMoves.moves.length - 1; i++) {
+        try { setup.move(preMoves.moves[i]); } catch { /* skip if illegal */ }
+      }
+      setupFen = setup.fen();
+    } else {
+      setupFen = nextPosition.fen;
+    }
+    setWalkPhase("setup");
+    await walkToFen(setupFen, metrics, nextOrientation);
+    if (preMoves && preMoves.moves.length > 0) {
+      setWalkPhase("replay");
+      gameRef.current = new Chess(setupFen);
+      await playOneMove(preMoves.moves[preMoves.moves.length - 1], metrics, nextOrientation, /* animate */ true);
+    }
     setWalkPhase("idle");
     gameRef.current = new Chess(nextPosition.fen);
     setAnimating(false);
     animatingRef.current = false;
     setLastMove(computeLastMove(nextPosition));
-  }
-
-  function snapToFen(fen: string, m: ShelfMetrics, boardOrientation: Color) {
-    setRouteMetrics(m, boardOrientation);
-    // Wipe every DOM piece (board + tray) + refs. Rebuild fresh from
-    // the target FEN. Kills the walkToFen hang and the stale-tray
-    // pieces bug and any toppled-king residue in one operation.
-    for (const el of pieceEls.current.values()) el.remove();
-    pieceEls.current.clear();
-    piecesRef.current = [];
-    trayRef.current = [];
-    const targetPieces = piecesFromFen(fen, m, boardOrientation);
-    piecesRef.current = targetPieces;
-    for (const piece of targetPieces) {
-      ensurePieceElement(piece, m);
-      syncPieceElement(piece, m);
-    }
   }
 
   function toppleLosingKing() {
