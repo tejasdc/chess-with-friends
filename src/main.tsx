@@ -4299,6 +4299,18 @@ function GameScreen({
 
           <CapturedStrip moves={game.moves} color={myColor} />
 
+          {game.status === "active" ? (
+            <div className="game-bottom game-bottom-board-attached">
+              <span className="turn-status">
+                {game.turn === myColor ? "Your move" : "Their move"}
+              </span>
+              <div className="game-bottom-right">
+                <span className="move-count">{activeCount} move{activeCount === 1 ? "" : "s"}</span>
+                <button className="game-bottom-home" onClick={leaveGame} type="button">Home</button>
+              </div>
+            </div>
+          ) : null}
+
           <div
             className={`clock-strip bottom ${game.status === "active" && game.turn === myColor ? "active-turn" : ""}`}
           >
@@ -4322,24 +4334,11 @@ function GameScreen({
           />
         ) : null}
 
-        {/* Bottom bar — turn status on the left, quiet Home link on the
-            right (Tejas: "no easy way back" from the game; visible Home
-            in the game chrome is acceptable). Move count is subsumed
-            when the game is over — the terminal state upgrades the bar
-            to a prominent action row (Home + Rematch when we have it,
-            not just Home buried in the ⋯ menu). */}
-        <div className={`game-bottom ${game.status !== "active" ? "game-bottom-terminal" : ""}`}>
-          {game.status === "active" ? (
-            <>
-              <span className="turn-status">
-                {game.turn === myColor ? "Your move" : "Their move"}
-              </span>
-              <div className="game-bottom-right">
-                <span className="move-count">{activeCount} move{activeCount === 1 ? "" : "s"}</span>
-                <button className="game-bottom-home" onClick={leaveGame} type="button">Home</button>
-              </div>
-            </>
-          ) : (
+        {/* Terminal state stays below the player bars because it is an
+            action row for a finished game. The live turn line is rendered
+            above the bottom player bar so it hugs the board. */}
+        {game.status !== "active" ? (
+          <div className="game-bottom game-bottom-terminal">
             <>
               <span className="turn-status terminal-status">
                 <span className="terminal">
@@ -4351,8 +4350,8 @@ function GameScreen({
                 <button className="ghost compact" onClick={leaveGame} type="button">Home</button>
               </div>
             </>
-          )}
-        </div>
+          </div>
+        ) : null}
       </section>
     </Shell>
   );
