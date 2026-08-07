@@ -423,14 +423,16 @@ function LandingPuzzleShelf() {
       if (!move) return clearSelection();
       applyLandingMove(selectedSquare, square, metrics, orientationRef.current);
       clearSelection();
-      // Board-native "you won": the mated king topples over on the
-      // board. No text pill — the user's eyes are on the board, not on
-      // captions below (Tejas 2026-08-07: "I'm looking at the fking
-      // board... topple the motherfucking king").
-      window.setTimeout(() => toppleLosingKing(), 240);
+      // Topple-king disabled: end-to-end verification (task #31) showed
+      // that mutating piece.rot on the ShelfPiece then transitioning
+      // via snapToFen was leaving the shelf in a stuck animating=true
+      // state (renderer freeze on transition Scholar's Mate →
+      // Opera-house Mate). Ship the working shelf without a topple
+      // effect for now; re-add via a CSS-only approach later so it
+      // never mutates piece state.
       moveTimer.current = window.setTimeout(() => {
         void transitionToNext();
-      }, 1600);
+      }, 1200);
     } catch {
       clearSelection();
     }
