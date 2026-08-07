@@ -148,6 +148,11 @@ a { color: inherit; }
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  /* Symmetric padding above and below the wordmark. Previously only
+     padding-bottom was set, leaving the wordmark hugging the top of
+     the shell with all the empty space below (Tejas 2026-08-07:
+     "the two chairs on top doesn't look centered"). */
+  padding-top: 20px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--hair);
 }
