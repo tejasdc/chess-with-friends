@@ -986,14 +986,17 @@ function LandingPuzzleShelf() {
             .remove() and NotFoundError kills the shelf on ~round 3. */}
         <div className="landing-pieces" ref={piecesLayerRef} aria-hidden="true" />
       </div>
-      {/* Two lines. Top line — "YOUR MOVE" CTA (reuses in-game language
-          for continuity from landing → gameplay). Bottom line — the
-          citation, visibly subordinate (smaller, quieter). Named classics
-          get the title + year; lichess entries get side-to-move only. */}
+      {/* Two lines. Top line — "YOUR MOVE ↑" CTA — the arrow points UP at
+          the board above, not sideways off the page (right-pointing arrow
+          leads the eye AWAY from the affordance). Bottom line — the
+          citation, in italic serif so it reads as reference material, not
+          a sub-line of the CTA. Named classics: title, year, and
+          side-to-move all in a single parenthetical citation. Lichess
+          entries: side-to-move only, same italic serif treatment. */}
       <div className="puzzle-caption">
         <span className="puzzle-cta-headline">
           Your move
-          <span className="puzzle-cta-arrow" aria-hidden="true">→</span>
+          <span className="puzzle-cta-arrow" aria-hidden="true">↑</span>
         </span>
         <span className="puzzle-cta-reference">{formatPuzzleReference(position)}</span>
       </div>
@@ -1002,9 +1005,17 @@ function LandingPuzzleShelf() {
 }
 
 function formatPuzzleReference(pos: ShelfPosition): string {
-  const side = pos.sideToMove === "w" ? "White" : "Black";
-  if (pos.id.startsWith("lichess-")) return `${side} to move`;
-  return `${side} · ${pos.title} · ${extractYear(pos.credit)}`;
+  const side = pos.sideToMove === "w" ? "white" : "black";
+  if (pos.id.startsWith("lichess-")) {
+    // Lichess entry, no citation-able source — just the turn cue,
+    // Sentence-cased so the italic serif reads as a caption.
+    return `${side === "white" ? "White" : "Black"} to move`;
+  }
+  // Named classic — full citation. Title, year, side-to-move as a
+  // single scholarly reference. En-dash between title and year; the
+  // side-to-move sits parenthetically at the end so no bare "WHITE"
+  // floats without context.
+  return `${pos.title} — ${extractYear(pos.credit)} (${side} to move)`;
 }
 
 function extractYear(credit: string): string {
