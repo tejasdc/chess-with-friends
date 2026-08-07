@@ -36,6 +36,13 @@ type PendingPushPayload = {
   createdAt?: number;
 };
 
+type DbStats = {
+  rawBytes: number;
+  prunedBytes: number;
+  collectionBytes: Record<string, number>;
+  counts: Record<string, number>;
+};
+
 function loadLandingPositions() {
   return JSON.parse(readFileSync("src/data/positions.json", "utf8")) as LandingPuzzle[];
 }
@@ -148,6 +155,21 @@ async function peekPendingPushNoAck(page: Page, endpointOverride?: string): Prom
     if (!response.ok) throw new Error(await response.text());
     return await response.json() as PendingPushPayload | null;
   }, endpointOverride || "");
+}
+
+async function debugDbStats(page: Page): Promise<DbStats> {
+  return await page.evaluate(async () => {
+    const response = await fetch("/api/debug/db-stats", { credentials: "include" });
+    if (!response.ok) throw new Error(await response.text());
+    return await response.json() as DbStats;
+  });
+}
+
+async function debugResetApp(page: Page) {
+  await page.evaluate(async () => {
+    const response = await fetch("/_debug/reset-app", { method: "POST", credentials: "include", body: "{}" });
+    if (!response.ok) throw new Error(await response.text());
+  });
 }
 
 async function twoClientsInGame(browser: Browser, suffix: string, opts: { instrumentSockets?: boolean; voiceMocks?: boolean; realVoiceProbe?: boolean; localIceServers?: boolean } = {}) {
@@ -899,6 +921,73 @@ test("withdrawing requests clears the recipient pending push queue", async ({ br
       if (!response.ok) throw new Error(await response.text());
     }, challenge.challenge.id);
     expect(await peekPendingPushNoAck(bob)).toBeNull();
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("invite churn keeps the AppDO db blob below the storage guardrail", async ({ browser }) => {
+  test.setTimeout(180_000);
+  const suffix = `dbcap_${Date.now().toString(36).slice(-6)}`;
+  const aliceCtx = await browser.newContext({ serviceWorkers: "block" });
+  const bobCtx = await browser.newContext({ serviceWorkers: "block" });
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  try {
+    await alice.goto("/");
+    await debugResetApp(alice);
+    await addAuthenticator(alice);
+    await addAuthenticator(bob);
+    const aH = `dca_${suffix}`;
+    const bH = `dcb_${suffix}`;
+    await register(alice, aH);
+    await register(bob, bH);
+    await fakePushSubscribe(bob, `https://push.invalid/dbcap-${suffix}`);
+    const before = await debugDbStats(alice);
+    expect(before.rawBytes).toBeLessThan(64 * 1024);
+
+    const bobInviteToken = await bob.evaluate(async () => {
+      const me = await (await fetch("/api/me", { credentials: "include" })).json() as { inviteUrl: string };
+      return me.inviteUrl.split("/").at(-1)!;
+    });
+    const friendship = await alice.evaluate(async (token) => {
+      const response = await fetch("/api/friends/invite", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json() as { friend: { id: string } };
+    }, bobInviteToken);
+
+    await alice.evaluate(async (friendId) => {
+      for (let i = 0; i < 420; i += 1) {
+        const created = await fetch("/api/challenges", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ friendId }),
+        });
+        if (!created.ok) throw new Error(await created.text());
+        const { challenge } = await created.json() as { challenge: { id: string } };
+        const withdrawn = await fetch(`/api/challenges/${challenge.id}/withdraw`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        if (!withdrawn.ok) throw new Error(await withdrawn.text());
+      }
+    }, friendship.friend.id);
+
+    const after = await debugDbStats(alice);
+    expect(after.rawBytes).toBeLessThan(64 * 1024);
+    expect(after.prunedBytes).toBeLessThan(64 * 1024);
+    expect(after.counts.challenges).toBeLessThanOrEqual(200);
+    expect(after.counts.pushLog).toBeLessThanOrEqual(50);
+    expect(after.counts.pendingPushesByEndpoint).toBe(0);
   } finally {
     await aliceCtx.close();
     await bobCtx.close();

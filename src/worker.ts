@@ -225,10 +225,12 @@ interface PushDeliveryIntent {
   pushId: string;
 }
 
+type SessionRecord = string | { userId: string; createdAt: number };
+
 interface AppDb {
   users: Record<string, User>;
   handleToUserId: Record<string, string>;
-  sessions: Record<string, string>;
+  sessions: Record<string, SessionRecord>;
   registrationChallenges: Record<string, { handle: string; userId: string; challenge: string; createdAt: number }>;
   authenticationChallenges: Record<string, { userId: string; challenge: string; createdAt: number }>;
   friendRequests: Record<string, FriendRequest>;
@@ -317,9 +319,24 @@ async function readJson<T>(request: Request): Promise<T> {
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
 const MAX_AUTH_CHALLENGES = 200;
 const OP_RESULT_TTL_MS = 24 * 60 * 60 * 1000;
-const MAX_OP_RESULTS = 1_000;
+const MAX_OP_RESULTS = 50;
 const RATE_LIMIT_MAX_BUCKETS = 1_000;
 const CLIENT_ERROR_LIMIT = 500;
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_SESSIONS = 1_000;
+const MAX_PUSH_LOG = 50;
+const MAX_PENDING_PUSH_TARGETS = 250;
+const RELATION_PENDING_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const RELATION_TERMINAL_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_FRIEND_REQUESTS = 200;
+const MAX_CHALLENGES = 200;
+const SCHEDULE_TERMINAL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_SCHEDULES = 250;
+const GAME_TERMINAL_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_GAMES = 500;
+const PRESENCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_PRESENCE_RECORDS = 1_000;
+const MAX_PUSH_SUBSCRIPTION_USERS = 1_000;
 
 function sweepExpiredChallenges(db: AppDb) {
   const cutoff = Date.now() - CHALLENGE_TTL_MS;
@@ -342,29 +359,106 @@ function pruneRecordMap<T extends { createdAt: number }>(record: Record<string, 
     .forEach(([key]) => delete record[key]);
 }
 
+function pruneQueueMap(record: Record<string, PendingPush[]>, max: number) {
+  const entries = Object.entries(record);
+  if (entries.length <= max) return;
+  entries
+    .sort((a, b) => Math.max(...a[1].map((item) => item.createdAt), 0) - Math.max(...b[1].map((item) => item.createdAt), 0))
+    .slice(0, entries.length - max)
+    .forEach(([key]) => delete record[key]);
+}
+
 function normalizeDb(db: AppDb): AppDb {
+  db.users ||= {};
+  db.handleToUserId ||= {};
+  db.sessions ||= {};
+  db.registrationChallenges ||= {};
+  db.authenticationChallenges ||= {};
+  db.friendRequests ||= {};
+  db.friendships ||= {};
+  db.challenges ||= {};
+  db.schedules ||= {};
+  db.games ||= {};
+  db.presence ||= {};
+  db.pushSubscriptions ||= {};
+  db.pendingPushes ||= {};
   db.pendingPushesByEndpoint ||= {};
+  db.pushLog ||= [];
   db.opResults ||= {};
   db.rateLimits ||= {};
   db.clientErrors ||= [];
   return db;
 }
 
+function sessionRecordUserId(record: SessionRecord | undefined): string | undefined {
+  return typeof record === "string" ? record : record?.userId;
+}
+
+function sessionCreatedAt(record: SessionRecord | undefined): number {
+  return typeof record === "string" ? 0 : record?.createdAt || 0;
+}
+
+function pruneSessions(db: AppDb, now = Date.now()) {
+  for (const [token, record] of Object.entries(db.sessions)) {
+    const userId = sessionRecordUserId(record);
+    const createdAt = sessionCreatedAt(record);
+    if (!userId || !db.users[userId] || (createdAt > 0 && now - createdAt > SESSION_TTL_MS)) delete db.sessions[token];
+  }
+  const entries = Object.entries(db.sessions);
+  if (entries.length <= MAX_SESSIONS) return;
+  entries
+    .sort((a, b) => sessionCreatedAt(a[1]) - sessionCreatedAt(b[1]))
+    .slice(0, entries.length - MAX_SESSIONS)
+    .forEach(([token]) => delete db.sessions[token]);
+}
+
+function prunePushSubscriptions(db: AppDb) {
+  for (const userId of Object.keys(db.pushSubscriptions)) {
+    if (!db.users[userId]) {
+      delete db.pushSubscriptions[userId];
+      continue;
+    }
+    db.pushSubscriptions[userId] = (db.pushSubscriptions[userId] || []).filter((subscription) => subscription.endpoint).slice(0, 5);
+    if (!db.pushSubscriptions[userId].length) delete db.pushSubscriptions[userId];
+  }
+  const entries = Object.entries(db.pushSubscriptions);
+  if (entries.length <= MAX_PUSH_SUBSCRIPTION_USERS) return;
+  entries
+    .sort((a, b) => {
+      const newestA = Math.max(...a[1].map((item) => item.expirationTime || 0), 0);
+      const newestB = Math.max(...b[1].map((item) => item.expirationTime || 0), 0);
+      return newestA - newestB;
+    })
+    .slice(0, entries.length - MAX_PUSH_SUBSCRIPTION_USERS)
+    .forEach(([userId]) => delete db.pushSubscriptions[userId]);
+}
+
 function prunePendingPushQueues(db: AppDb, now = Date.now()) {
   db.pendingPushes ||= {};
   db.pendingPushesByEndpoint ||= {};
+  const activeEndpoints = new Set(Object.values(db.pushSubscriptions || {}).flatMap((subscriptions) => subscriptions.map((item) => item.endpoint)));
   for (const [userId, queue] of Object.entries(db.pendingPushes)) {
-    const fresh = queue.filter((pending) => now - pending.createdAt <= PUSH_PENDING_TTL_MS);
+    if (!db.users[userId]) {
+      delete db.pendingPushes[userId];
+      continue;
+    }
+    const fresh = queue.filter((pending) => pending.userId === userId && now - pending.createdAt <= PUSH_PENDING_TTL_MS).slice(-20);
     if (fresh.length) db.pendingPushes[userId] = fresh;
     else delete db.pendingPushes[userId];
   }
+  pruneQueueMap(db.pendingPushes, MAX_PENDING_PUSH_TARGETS);
   for (const [endpoint, queue] of Object.entries(db.pendingPushesByEndpoint)) {
+    if (!activeEndpoints.has(endpoint)) {
+      delete db.pendingPushesByEndpoint[endpoint];
+      continue;
+    }
     // Legacy endpoint entries predate PendingPush.userId and are not safe to
     // show after account switches. Drop them while pruning the durable queue.
-    const fresh = queue.filter((pending) => pending.userId && now - pending.createdAt <= PUSH_PENDING_TTL_MS);
+    const fresh = queue.filter((pending) => pending.userId && db.users[pending.userId] && now - pending.createdAt <= PUSH_PENDING_TTL_MS).slice(-20);
     if (fresh.length) db.pendingPushesByEndpoint[endpoint] = fresh;
     else delete db.pendingPushesByEndpoint[endpoint];
   }
+  pruneQueueMap(db.pendingPushesByEndpoint, MAX_PENDING_PUSH_TARGETS);
 }
 
 function removePendingPushes(db: AppDb, userId: string, predicate: (pending: PendingPush) => boolean) {
@@ -379,6 +473,92 @@ function removePendingPushes(db: AppDb, userId: string, predicate: (pending: Pen
     if (next.length) db.pendingPushesByEndpoint[endpoint] = next;
     else delete db.pendingPushesByEndpoint[endpoint];
   }
+}
+
+function pruneFriendRequests(db: AppDb, now = Date.now()) {
+  const cutoffPending = now - RELATION_PENDING_TTL_MS;
+  const cutoffTerminal = now - RELATION_TERMINAL_TTL_MS;
+  for (const [id, request] of Object.entries(db.friendRequests)) {
+    const hasUsers = db.users[request.fromId] && db.users[request.toId];
+    if (!hasUsers || (request.status === "pending" ? request.createdAt < cutoffPending : request.createdAt < cutoffTerminal)) {
+      delete db.friendRequests[id];
+    }
+  }
+  pruneRecordMap(db.friendRequests, MAX_FRIEND_REQUESTS);
+}
+
+function pruneChallenges(db: AppDb, now = Date.now()) {
+  const cutoffPending = now - RELATION_PENDING_TTL_MS;
+  const cutoffTerminal = now - RELATION_TERMINAL_TTL_MS;
+  for (const [id, challenge] of Object.entries(db.challenges)) {
+    const hasUsers = db.users[challenge.fromId] && db.users[challenge.toId];
+    if (!hasUsers || (challenge.status === "pending" ? challenge.createdAt < cutoffPending : challenge.createdAt < cutoffTerminal)) {
+      delete db.challenges[id];
+    }
+  }
+  pruneRecordMap(db.challenges, MAX_CHALLENGES);
+}
+
+function pruneSchedules(db: AppDb, now = Date.now()) {
+  const pendingCutoff = now - 60_000;
+  const terminalCutoff = now - SCHEDULE_TERMINAL_TTL_MS;
+  for (const schedule of Object.values(db.schedules)) {
+    if (schedule.status === "pending" && schedule.startAt < pendingCutoff) schedule.status = "expired";
+  }
+  for (const [id, schedule] of Object.entries(db.schedules)) {
+    const hasUsers = db.users[schedule.fromId] && db.users[schedule.toId];
+    const terminal = schedule.status === "declined" || schedule.status === "expired" || schedule.status === "cancelled" || schedule.status === "fired";
+    if (!hasUsers || (terminal && schedule.createdAt < terminalCutoff)) delete db.schedules[id];
+  }
+  pruneRecordMap(db.schedules, MAX_SCHEDULES);
+}
+
+function pruneGames(db: AppDb, now = Date.now()) {
+  const terminalCutoff = now - GAME_TERMINAL_TTL_MS;
+  for (const [id, game] of Object.entries(db.games)) {
+    const hasUsers = db.users[game.whiteId] && db.users[game.blackId];
+    if (!hasUsers || (game.status !== "active" && game.createdAt < terminalCutoff)) delete db.games[id];
+  }
+  pruneRecordMap(db.games, MAX_GAMES);
+}
+
+function prunePresence(db: AppDb, now = Date.now()) {
+  const cutoff = now - PRESENCE_TTL_MS;
+  for (const [userId, record] of Object.entries(db.presence)) {
+    if (!db.users[userId] || presenceSeenAt(record) < cutoff) delete db.presence[userId];
+  }
+  const entries = Object.entries(db.presence);
+  if (entries.length <= MAX_PRESENCE_RECORDS) return;
+  entries
+    .sort((a, b) => presenceSeenAt(a[1]) - presenceSeenAt(b[1]))
+    .slice(0, entries.length - MAX_PRESENCE_RECORDS)
+    .forEach(([userId]) => delete db.presence[userId]);
+}
+
+function pruneAppDb(db: AppDb, now = Date.now()) {
+  normalizeDb(db);
+  sweepExpiredChallenges(db);
+  sweepOpResults(db.opResults);
+  sweepRateLimits(db);
+  pruneSessions(db, now);
+  prunePushSubscriptions(db);
+  prunePendingPushQueues(db, now);
+  pruneFriendRequests(db, now);
+  pruneChallenges(db, now);
+  pruneSchedules(db, now);
+  pruneGames(db, now);
+  prunePresence(db, now);
+  db.pushLog = db.pushLog.slice(-MAX_PUSH_LOG);
+  db.clientErrors = db.clientErrors.slice(-CLIENT_ERROR_LIMIT);
+  return db;
+}
+
+function jsonByteLength(value: unknown) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function recordCount(value: unknown) {
+  return Array.isArray(value) ? value.length : value && typeof value === "object" ? Object.keys(value).length : 0;
 }
 
 function detachPushEndpoint(db: AppDb, userId: string, endpoint: string) {
@@ -619,6 +799,8 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname === "/api/auth/login/options" && request.method === "POST") return await this.loginOptions(request);
       if (url.pathname === "/api/auth/login/verify" && request.method === "POST") return await this.loginVerify(request);
       if (url.pathname === "/api/auth/logout" && request.method === "POST") return await this.logout(request);
+      if (url.pathname === "/api/debug/db-stats" && request.method === "GET") return await this.debugDbStats(request);
+      if (url.pathname === "/_debug/reset-app" && request.method === "POST") return await this.debugResetApp(request);
 
       const user = await this.requireUser(request);
       const mutate = (event: string, entity: { kind: string; id: string }, fn: () => Promise<Response>) =>
@@ -674,6 +856,7 @@ export class AppDO extends DurableObject<Env> {
       }
       if (url.pathname === "/api/debug/push-log" && request.method === "GET") return await this.debugPushLog(request);
       if (url.pathname === "/api/debug/client-errors" && request.method === "GET") return await this.debugClientErrors(request);
+      if (url.pathname === "/api/debug/db-stats" && request.method === "GET") return await this.debugDbStats(request);
       if (url.pathname === "/_debug/tick" && request.method === "POST") return await this.debugTick(request);
 
       return json({ error: "Not found" }, { status: 404 });
@@ -746,11 +929,11 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async db() {
-    return normalizeDb(((await this.ctx.storage.get("db")) as AppDb | undefined) || emptyDb());
+    return pruneAppDb(((await this.ctx.storage.get("db")) as AppDb | undefined) || emptyDb());
   }
 
   private save(db: AppDb) {
-    return this.ctx.storage.put("db", db);
+    return this.ctx.storage.put("db", pruneAppDb(db));
   }
 
   private async runMutation(
@@ -830,7 +1013,7 @@ export class AppDO extends DurableObject<Env> {
   private async requireUser(request: Request) {
     const db = await this.db();
     const token = getCookie(request, COOKIE);
-    const userId = token ? db.sessions[token] : undefined;
+    const userId = token ? sessionRecordUserId(db.sessions[token]) : undefined;
     const user = userId ? db.users[userId] : undefined;
     if (!user) throw new Error("Sign in first.");
     return user;
@@ -839,7 +1022,7 @@ export class AppDO extends DurableObject<Env> {
   private async session(request: Request) {
     const db = await this.db();
     const token = getCookie(request, COOKIE);
-    const userId = token ? db.sessions[token] : undefined;
+    const userId = token ? sessionRecordUserId(db.sessions[token]) : undefined;
     const user = userId ? db.users[userId] : undefined;
     if (!user) return json({ error: "No session" }, { status: 401 });
     return json({ id: user.id, handle: user.handle });
@@ -849,7 +1032,7 @@ export class AppDO extends DurableObject<Env> {
     const start = Date.now();
     const db = await this.db();
     const token = getCookie(request, COOKIE);
-    const sessionUserId = token ? db.sessions[token] : undefined;
+    const sessionUserId = token ? sessionRecordUserId(db.sessions[token]) : undefined;
     const body = await readJson<{ url?: string; message?: string; stack?: string; userAgent?: string; userId?: string }>(request)
       .catch(() => ({} as { url?: string; message?: string; stack?: string; userAgent?: string; userId?: string }));
     const userId = body.userId && body.userId === sessionUserId ? body.userId : sessionUserId;
@@ -940,7 +1123,7 @@ export class AppDO extends DurableObject<Env> {
     db.handleToUserId[handle] = user.id;
     delete db.registrationChallenges[handle];
     const token = newId("ses");
-    db.sessions[token] = user.id;
+    db.sessions[token] = { userId: user.id, createdAt: Date.now() };
     await this.save(db);
     this.logMutation({ event: "auth.registration_verify", actor: user.id, entity: { kind: "user", id: user.id }, outcome: "ok", start });
     return json({ user: this.publicUser(user) }, { headers: { "set-cookie": sessionCookie(token, url) } });
@@ -1009,7 +1192,7 @@ export class AppDO extends DurableObject<Env> {
     credential.counter = verification.authenticationInfo.newCounter;
     delete db.authenticationChallenges[user.id];
     const token = newId("ses");
-    db.sessions[token] = user.id;
+    db.sessions[token] = { userId: user.id, createdAt: Date.now() };
     await this.save(db);
     this.logMutation({ event: "auth.login_verify", actor: user.id, entity: { kind: "user", id: user.id }, outcome: "ok", start });
     return json({ user: this.publicUser(user) }, { headers: { "set-cookie": sessionCookie(token, url) } });
@@ -1019,7 +1202,7 @@ export class AppDO extends DurableObject<Env> {
     const start = Date.now();
     const db = await this.db();
     const token = getCookie(request, COOKIE);
-    const userId = token ? db.sessions[token] : undefined;
+    const userId = token ? sessionRecordUserId(db.sessions[token]) : undefined;
     const body = await readJson<{ endpoint?: string }>(request).catch(() => ({} as { endpoint?: string }));
     if (userId && body.endpoint) detachPushEndpoint(db, userId, body.endpoint);
     if (token) delete db.sessions[token];
@@ -1647,6 +1830,34 @@ export class AppDO extends DurableObject<Env> {
     if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
     const db = await this.db();
     return json({ clientErrors: db.clientErrors.slice(-CLIENT_ERROR_LIMIT) });
+  }
+
+  private async debugDbStats(request: Request) {
+    if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
+    const raw = ((await this.ctx.storage.get("db")) as AppDb | undefined) || emptyDb();
+    const pruned = pruneAppDb(JSON.parse(JSON.stringify(raw)) as AppDb);
+    const collectionBytes = Object.fromEntries(Object.entries(pruned).map(([key, value]) => [key, jsonByteLength(value)]));
+    const counts = Object.fromEntries(Object.entries(pruned).map(([key, value]) => [key, recordCount(value)]));
+    return json({
+      rawBytes: jsonByteLength(raw),
+      prunedBytes: jsonByteLength(pruned),
+      collectionBytes,
+      counts,
+      caps: {
+        pushLog: MAX_PUSH_LOG,
+        friendRequests: MAX_FRIEND_REQUESTS,
+        challenges: MAX_CHALLENGES,
+        schedules: MAX_SCHEDULES,
+        games: MAX_GAMES,
+        pendingPushTargets: MAX_PENDING_PUSH_TARGETS,
+      },
+    });
+  }
+
+  private async debugResetApp(request: Request) {
+    if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
+    await this.ctx.storage.put("db", emptyDb());
+    return json({ ok: true });
   }
 
   // Time-warp harness for alarm-driven behaviors (state-smith GAP-16).
@@ -2434,7 +2645,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/games/")) return gameRequest(request, env, url.pathname);
-    if (url.pathname === "/api/debug/push-log" || url.pathname === "/api/debug/client-errors" || url.pathname === "/_debug/tick") {
+    if (url.pathname === "/api/debug/push-log" || url.pathname === "/api/debug/client-errors" || url.pathname === "/api/debug/db-stats" || url.pathname === "/_debug/tick" || url.pathname === "/_debug/reset-app") {
       if (!["127.0.0.1", "localhost"].includes(url.hostname)) return json({ error: "Not found" }, { status: 404 });
       const headers = new Headers(request.headers);
       headers.set("x-debug-local", "true");
