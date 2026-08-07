@@ -513,6 +513,25 @@ function LandingPuzzleShelf() {
     }
     setWalkPhase("idle");
     gameRef.current = new Chess(nextPosition.fen);
+    // Post-transition tray cull. walkToFen refuses to walk pieces via
+    // chess-illegal paths (e.g., pawns backward from f3/g4 to f2/g2
+    // between Fool's Mate and Legal's Mate), so it spawns fresh pieces
+    // for those targets and leaves the immovable predecessors in the
+    // tray as stragglers. That inflates the tray with duplicate pieces
+    // (5 tray pieces where 3 is correct, verified via webkit-pilot on
+    // Legal's Mate). Trim the tray back to (32 - boardCount) by
+    // removing oldest extras first — keeps captured-history readable
+    // without the visual clutter Tejas read as "kings hiding behind
+    // pawns" (2026-08-07).
+    const expectedTrayCount = 32 - piecesRef.current.filter((p) => p.sq).length;
+    while (trayRef.current.length > expectedTrayCount) {
+      const extra = trayRef.current.shift();
+      if (extra) {
+        const el = pieceEls.current.get(extra.id);
+        if (el) el.remove();
+        pieceEls.current.delete(extra.id);
+      }
+    }
     setAnimating(false);
     animatingRef.current = false;
     setLastMove(computeLastMove(nextPosition));
