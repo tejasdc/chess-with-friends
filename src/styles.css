@@ -2607,6 +2607,17 @@ body[data-screen="landing"] .landing-copy {
   user-select: none;
   transform: translateY(-1px); /* optical baseline nudge — pawns don't float */
 }
+.square.move-arrival .piece {
+  animation: last-move-arrival 640ms var(--ease) both;
+}
+@keyframes last-move-arrival {
+  0%   { transform: translateY(-1px) scale(0.78); }
+  58%  { transform: translateY(-1px) scale(1.08); }
+  100% { transform: translateY(-1px) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .square.move-arrival .piece { animation: none; }
+}
 /* Filled glyphs for BOTH sides. Each color gets a contextual contrast
    hairline stroke — buff fill + navy stroke for white; navy fill + cream
    stroke for black. In the mockup palette navy pieces on the teal-dark

@@ -4206,7 +4206,11 @@ function GameScreen({
   const opponentConnectionPill = opponentRawState === "reconnecting" || opponentRawState === "gone"
     ? opponentRawState
     : null;
-  const lastMove = game.moves.length ? { from: game.moves[game.moves.length - 1].from, to: game.moves[game.moves.length - 1].to } : null;
+  const lastMoveEntry = game.moves[game.moves.length - 1] || null;
+  const lastMove = lastMoveEntry ? { from: lastMoveEntry.from, to: lastMoveEntry.to } : null;
+  const lastMoveAnimationKey = lastMoveEntry
+    ? `${game.id}:${game.moves.length}:${lastMoveEntry.at}:${lastMoveEntry.from}:${lastMoveEntry.to}:${lastMoveEntry.san}`
+    : null;
 
   // Home + Resign live inside the universal ⋯ menu (team-lead: one menu
   // pattern, one position). Rendered via Shell's menuExtras hook so the
@@ -4294,6 +4298,7 @@ function GameScreen({
               selected={selected}
               onSquare={choose}
               lastMove={lastMove}
+              lastMoveAnimationKey={lastMoveAnimationKey}
             />
           </div>
 
@@ -4364,6 +4369,7 @@ function Board({
   onSquare,
   interactive = true,
   lastMove,
+  lastMoveAnimationKey,
 }: {
   fen: string;
   orientation: "w" | "b";
@@ -4371,11 +4377,23 @@ function Board({
   onSquare: (square: Square) => void;
   interactive?: boolean;
   lastMove?: { from: string; to: string } | null;
+  lastMoveAnimationKey?: string | null;
 }) {
   const chess = useMemo(() => new Chess(fen), [fen]);
   const board = chess.board();
   const rankList = orientation === "w" ? ranks : [...ranks].reverse();
   const fileList = orientation === "w" ? files : [...files].reverse();
+  const [arrivalSquare, setArrivalSquare] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!interactive || !lastMove || !lastMoveAnimationKey) {
+      setArrivalSquare(null);
+      return;
+    }
+    setArrivalSquare(lastMove.to);
+    const timer = window.setTimeout(() => setArrivalSquare(null), 720);
+    return () => window.clearTimeout(timer);
+  }, [interactive, lastMove?.to, lastMoveAnimationKey]);
 
   // Legal destinations for the currently-selected piece — pulled from
   // chess.js so promotion, castling, and en passant are all included.
@@ -4443,6 +4461,7 @@ function Board({
             selected === square ? "selected" : "",
             isFromLast ? "last-from" : "",
             isToLast ? "last-to" : "",
+            arrivalSquare === square ? "move-arrival" : "",
             isCheck ? "in-check" : "",
           ].filter(Boolean).join(" ");
           return (
