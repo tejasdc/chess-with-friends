@@ -34,6 +34,7 @@ const APP_DO_NAME = "app";
 const PRESENCE_WINDOW_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const CALL_GRACE_MS = 20_000;
+const PUSH_PENDING_TTL_MS = 5 * 60 * 1000;
 
 interface Env {
   APP_NAME: string;
@@ -171,6 +172,7 @@ interface StoredSubscription {
 
 interface PendingPush {
   id: string;
+  userId: string;
   type: PushType;
   body: string;
   url: string;
@@ -346,6 +348,40 @@ function normalizeDb(db: AppDb): AppDb {
   db.rateLimits ||= {};
   db.clientErrors ||= [];
   return db;
+}
+
+function prunePendingPushQueues(db: AppDb, now = Date.now()) {
+  db.pendingPushes ||= {};
+  db.pendingPushesByEndpoint ||= {};
+  for (const [userId, queue] of Object.entries(db.pendingPushes)) {
+    const fresh = queue.filter((pending) => now - pending.createdAt <= PUSH_PENDING_TTL_MS);
+    if (fresh.length) db.pendingPushes[userId] = fresh;
+    else delete db.pendingPushes[userId];
+  }
+  for (const [endpoint, queue] of Object.entries(db.pendingPushesByEndpoint)) {
+    // Legacy endpoint entries predate PendingPush.userId and are not safe to
+    // show after account switches. Drop them while pruning the durable queue.
+    const fresh = queue.filter((pending) => pending.userId && now - pending.createdAt <= PUSH_PENDING_TTL_MS);
+    if (fresh.length) db.pendingPushesByEndpoint[endpoint] = fresh;
+    else delete db.pendingPushesByEndpoint[endpoint];
+  }
+}
+
+function detachPushEndpoint(db: AppDb, userId: string, endpoint: string) {
+  const list = db.pushSubscriptions[userId] || [];
+  const next = list.filter((subscription) => subscription.endpoint !== endpoint);
+  if (next.length) db.pushSubscriptions[userId] = next;
+  else delete db.pushSubscriptions[userId];
+  delete db.pendingPushesByEndpoint[endpoint];
+}
+
+function transferPushEndpoint(db: AppDb, userId: string, subscription: StoredSubscription) {
+  for (const ownerId of Object.keys(db.pushSubscriptions)) {
+    if (ownerId !== userId) detachPushEndpoint(db, ownerId, subscription.endpoint);
+  }
+  delete db.pendingPushesByEndpoint[subscription.endpoint];
+  const list = db.pushSubscriptions[userId] || [];
+  db.pushSubscriptions[userId] = [subscription, ...list.filter((item) => item.endpoint !== subscription.endpoint)].slice(0, 5);
 }
 
 function presenceSeenAt(record: number | PresenceRecord | undefined): number {
@@ -577,6 +613,7 @@ export class AppDO extends DurableObject<Env> {
       if (url.pathname === "/api/presence/heartbeat" && request.method === "POST") return await mutate("presence.heartbeat", { kind: "presence", id: user.id }, () => this.heartbeat(request, user));
       if (url.pathname === "/api/voice/ice-servers" && request.method === "GET") return await this.iceServers();
       if (url.pathname === "/api/push/subscribe" && request.method === "POST") return await mutate("push.subscribe", { kind: "user", id: user.id }, () => this.subscribe(request, user));
+      if (url.pathname === "/api/push/unsubscribe" && request.method === "POST") return await mutate("push.unsubscribe", { kind: "user", id: user.id }, () => this.unsubscribe(request, user));
       if (url.pathname === "/api/push/pending" && request.method === "POST") return await mutate("push.pending", { kind: "user", id: user.id }, () => this.pendingPush(request, user));
       if (url.pathname === "/api/friends/request" && request.method === "POST") return await mutate("friend_request.create", { kind: "user", id: user.id }, () => this.requestFriend(request, user));
       if (url.pathname === "/api/friends/invite" && request.method === "POST") return await mutate("friend_invite.use", { kind: "user", id: user.id }, () => this.requestByInvite(request, user));
@@ -969,6 +1006,8 @@ export class AppDO extends DurableObject<Env> {
     const db = await this.db();
     const token = getCookie(request, COOKIE);
     const userId = token ? db.sessions[token] : undefined;
+    const body = await readJson<{ endpoint?: string }>(request).catch(() => ({} as { endpoint?: string }));
+    if (userId && body.endpoint) detachPushEndpoint(db, userId, body.endpoint);
     if (token) delete db.sessions[token];
     await this.save(db);
     this.logMutation({ event: "auth.logout", actor: userId, entity: { kind: "session", id: token || "(none)" }, outcome: "ok", start });
@@ -1067,10 +1106,22 @@ export class AppDO extends DurableObject<Env> {
     const db = await this.db();
     const body = await readJson<{ subscription: StoredSubscription }>(request);
     if (!body.subscription?.endpoint) throw new Error("Missing push subscription.");
-    const list = db.pushSubscriptions[user.id] || [];
-    db.pushSubscriptions[user.id] = [body.subscription, ...list.filter((item) => item.endpoint !== body.subscription.endpoint)].slice(0, 5);
+    prunePendingPushQueues(db);
+    transferPushEndpoint(db, user.id, body.subscription);
     await this.save(db);
     return json({ ok: true, pushTypes: PUSH_TYPES });
+  }
+
+  private async unsubscribe(request: Request, user: User) {
+    const db = await this.db();
+    const body = await readJson<{ endpoint?: string }>(request).catch(() => ({} as { endpoint?: string }));
+    if (body.endpoint) detachPushEndpoint(db, user.id, body.endpoint);
+    else {
+      for (const subscription of db.pushSubscriptions[user.id] || []) delete db.pendingPushesByEndpoint[subscription.endpoint];
+      delete db.pushSubscriptions[user.id];
+    }
+    await this.save(db);
+    return json({ ok: true });
   }
 
   private async pendingPush(request: Request, user: User) {
@@ -1079,6 +1130,7 @@ export class AppDO extends DurableObject<Env> {
     const body = await readJson<{ endpoint?: string; ackId?: string }>(request).catch(() => ({} as { endpoint?: string; ackId?: string }));
     const endpoint = body.endpoint || "";
     const ownsEndpoint = endpoint && (db.pushSubscriptions[user.id] || []).some((subscription) => subscription.endpoint === endpoint);
+    prunePendingPushQueues(db);
     if (body.ackId) {
       for (const [queuedEndpoint, queue] of Object.entries(db.pendingPushesByEndpoint)) {
         db.pendingPushesByEndpoint[queuedEndpoint] = queue.filter((pending) => pending.id !== body.ackId);
@@ -1089,7 +1141,23 @@ export class AppDO extends DurableObject<Env> {
       await this.save(db);
       return json({ ok: true });
     }
-    const pending = ownsEndpoint ? db.pendingPushesByEndpoint[endpoint]?.[0] || null : db.pendingPushes[user.id]?.[0] || null;
+    if (endpoint && !ownsEndpoint) {
+      await this.save(db);
+      return json(null);
+    }
+    let pending: PendingPush | null = null;
+    if (ownsEndpoint) {
+      const queue = (db.pendingPushesByEndpoint[endpoint] || []).filter((item) => item.userId === user.id);
+      pending = queue.shift() || null;
+      if (queue.length) db.pendingPushesByEndpoint[endpoint] = queue;
+      else delete db.pendingPushesByEndpoint[endpoint];
+    } else {
+      const queue = db.pendingPushes[user.id] || [];
+      pending = queue.shift() || null;
+      if (queue.length) db.pendingPushes[user.id] = queue;
+      else delete db.pendingPushes[user.id];
+    }
+    await this.save(db);
     return json(pending);
   }
 
@@ -1458,7 +1526,8 @@ export class AppDO extends DurableObject<Env> {
 
   private enqueuePush(db: AppDb, userId: string, type: PushType, body: string, url: string): PushDeliveryIntent {
     if (!PUSH_TYPES.includes(type)) throw new Error("Push type is not allowed.");
-    const pending: PendingPush = { id: newId("psh"), type, body, url, createdAt: Date.now() };
+    prunePendingPushQueues(db);
+    const pending: PendingPush = { id: newId("psh"), userId, type, body, url, createdAt: Date.now() };
     db.pendingPushesByEndpoint ||= {};
     const subscriptions = db.pushSubscriptions[userId] || [];
     for (const subscription of subscriptions) {

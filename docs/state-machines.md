@@ -146,6 +146,7 @@ code must keep durable transitions and external effects in that order.
 5. Game
 6. Per-player game-connection state
 7. Push subscription
+7A. Push delivery
 8. Per-game voice call (planned, not yet implemented — see Machine 8)
 
 Presence, the message toast, and the landing puzzle shelf carry state but
@@ -730,6 +731,99 @@ recovery copy (`src/main.tsx:2241-2280`). Absent when `enabled`.
   the log write (was GAP-12, closed 8d7023e). No manual reconciliation
   needed on the client — the next `checkPushStatus()` on the browser
   side will see the subscription missing and re-enter `ready`.
+
+---
+
+## Machine 7A — Push delivery
+
+This is the durable server queue behind the browser push wake. Web Push
+delivery is intentionally zero-byte; the service worker fetches the pending
+payload from `AppDO`, shows the OS notification, then ACKs by push id.
+
+### States
+
+- `queued` — `AppDO.enqueuePush()` created a `PendingPush` with
+  `{ id, userId, type, body, url, createdAt }` and stored it either under
+  the recipient's endpoint queue or, if they have no endpoint, their user
+  fallback queue.
+- `wake-delivered` — `sendWebPush()` posted the zero-byte wake to the
+  browser endpoint and logged the delivery status.
+- `pending-fetched` — `/api/push/pending` returned one pending item to the
+  authenticated current owner of the endpoint. This is consume-on-read:
+  the returned item is removed before the response is saved.
+- `shown` — `public/sw.js` called `showNotification()` using
+  `payload.body` as the title.
+- `acked` — current SWs POST `/api/push/pending` with `{ endpoint, ackId }`;
+  ACK removes matching ids idempotently from any remaining queues.
+- `dropped-by-ttl` — pending entries older than `PUSH_PENDING_TTL_MS`
+  are pruned in `enqueuePush()` and `pendingPush()`. Endpoint entries that
+  predate `PendingPush.userId` are also dropped because they cannot be
+  safely attributed after account switches.
+- `dropped-by-owner-change` — `/api/push/subscribe` transfers endpoint
+  ownership to the current user and deletes that endpoint's pending queue;
+  `/api/push/unsubscribe` and logout detach the endpoint.
+
+### Events
+
+- `enqueue-push` — friend request, challenge, challenge accepted, scheduled
+  start, or call invite calls `enqueuePush()`.
+- `webpush-wake` — `deliverPush()` calls `sendWebPush()`.
+- `sw-fetch-pending` — the SW receives a zero-byte push and POSTs
+  `/api/push/pending` with its endpoint.
+- `sw-ack` — the SW POSTs `ackId` after showing the notification.
+- `ttl-prune` — any enqueue/fetch pass drops stale pending entries.
+- `subscribe-endpoint` — current user registers an endpoint; ownership
+  transfers from every other user.
+- `unsubscribe-endpoint` / `logout` — current user detaches an endpoint.
+
+### Transitions
+
+```mermaid
+stateDiagram-v2
+  [*] --> queued: enqueue-push
+  queued --> wake_delivered: webpush-wake
+  queued --> dropped_by_ttl: ttl-prune
+  queued --> dropped_by_owner_change: subscribe/unsubscribe/logout
+  wake_delivered --> pending_fetched: sw-fetch-pending by endpoint owner
+  wake_delivered --> dropped_by_ttl: old SW never fetches before TTL
+  pending_fetched --> shown: SW showNotification(payload.body)
+  pending_fetched --> dropped_by_ttl: old SW fetches but never ACKs (already consumed)
+  shown --> acked: sw-ack
+  shown --> [*]
+  acked --> [*]
+  dropped_by_ttl --> [*]
+  dropped_by_owner_change --> [*]
+```
+
+### Writer
+
+`AppDO` is the single writer for durable push queues:
+
+- `subscribe()` owns endpoint transfer and deletes stale endpoint queues.
+- `unsubscribe()` and `logout()` detach endpoint ownership.
+- `enqueuePush()` creates `PendingPush` records and prunes stale queues.
+- `pendingPush()` consumes on read, ACKs idempotently, filters by endpoint
+  owner, and refuses reads from endpoints the current user no longer owns.
+- `deliverPush()` only sends the wake and logs delivery; it does not decide
+  notification copy.
+
+### Representation
+
+The OS notification's title is the `PendingPush.body` string. The SW's
+type-based titles are fallback-only for malformed payloads. Copy coverage is
+gated by `scripts/verify-push-copy-contract.mjs`, which requires a
+`copy-contract: <push_type>` assertion marker for every current push type.
+
+### Closure
+
+- `queued` exits through consume-on-read, TTL prune, or endpoint owner
+  change. There is no permanent head item.
+- `pending-fetched` exits immediately because the item has already been
+  removed. Old SWs that do not ACK cannot pin the queue.
+- `shown` exits through ACK when available; missing ACK is harmless because
+  read already consumed the item.
+- Endpoint queues cannot cross accounts: one endpoint belongs to one current
+  user, and endpoint queue entries carry `userId`.
 
 ---
 

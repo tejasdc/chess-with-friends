@@ -69,12 +69,23 @@ no "exactly N" cap:
 - `challenge` — a friend invited you to a game
 - `challenge_accepted` — the friend you invited accepted; your game is ready (completes a user-initiated handshake; explicitly added 2026-08-03)
 - `scheduled_start` — a game you both agreed to a time for is starting
+- `call_invite` — a friend you are playing with wants to talk, and you are
+  not already foreground on that game
 
 Enforcement: `scripts/verify-push-policy.mjs` scans `src/worker.ts` and
 `public/sw.js` — every `enqueuePush` call site must use a type in this
 list, and no notification-like literal may name a re-engagement category.
+`scripts/verify-push-copy-contract.mjs` scans the tests — every current
+push type must have an explicit copy assertion marker.
 The list is not the policy; the principle is. If a future push satisfies
 the principle, add it to both the code and this list in the same change.
+
+Push endpoint invariant: one browser push endpoint belongs to one current
+user. Subscribing an endpoint transfers ownership to that user, removes it
+from every other user, and drops any stale pending endpoint queue. Logout /
+unsubscribe detach the endpoint. Pending endpoint payloads are scoped to
+their `userId`, consumed on read, and TTL-pruned so old service workers
+cannot pin a stale notification forever.
 
 **Anti-addiction invariants**
 - No rating ladder, no ELO, no streaks, no puzzles feed, no daily anything.

@@ -4293,12 +4293,26 @@ function urlBase64ToUint8Array(value: string) {
 }
 
 async function signOut(onSignedOut: () => void) {
-  await api("/api/auth/logout", { method: "POST", body: "{}" });
+  const endpoint = await unsubscribePushEndpoint().catch(() => undefined);
+  await api("/api/auth/logout", { method: "POST", body: JSON.stringify({ endpoint }) });
   // Clear in-memory identity FIRST so the AuthScreen renders immediately —
   // the previous version pushState-only'd and left the dashboard mounted
   // with stale home data. Then push the URL so future refresh() sees "/".
   onSignedOut();
   window.history.pushState({}, "", "/");
+}
+
+async function unsubscribePushEndpoint() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return undefined;
+  const registration = await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<ServiceWorkerRegistration | null>((resolve) => window.setTimeout(() => resolve(null), 500)),
+  ]);
+  const subscription = await registration?.pushManager.getSubscription();
+  if (!subscription) return undefined;
+  await api("/api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint: subscription.endpoint }) });
+  await subscription.unsubscribe().catch(() => false);
+  return subscription.endpoint;
 }
 
 function navigate(path: string, after?: () => void) {

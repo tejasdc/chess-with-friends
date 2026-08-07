@@ -1,7 +1,16 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 
 const screenDir = "tmp/reviews/screens";
+const REQUIRED_PUSH_COPY_TYPES = ["friend_request", "challenge", "challenge_accepted", "scheduled_start", "call_invite"] as const;
+
+type PendingPushPayload = {
+  id: string;
+  type?: string;
+  body?: string;
+  url?: string;
+  createdAt?: number;
+};
 
 test.describe.configure({ mode: "serial" });
 
@@ -66,7 +75,7 @@ test("notification prompt disappears after permission is granted and stays gone 
   await context.close();
 });
 
-test("pending push is POST-only and removed only after explicit ack", async ({ browser }) => {
+test("pending push is POST-only, consume-on-read, and ack is idempotent", async ({ browser }) => {
   const suffix = Date.now().toString(36).slice(-6);
   const alice = await client(browser, `push_a_${suffix}`);
   const bob = await client(browser, `push_b_${suffix}`);
@@ -82,7 +91,7 @@ test("pending push is POST-only and removed only after explicit ack", async ({ b
     const first = await peekPendingPush(bob.page);
     const second = await peekPendingPush(bob.page);
     expect(first?.type).toBe("friend_request");
-    expect(second?.id).toBe(first?.id);
+    expect(second).toBeNull();
 
     const getStatus = await bob.page.evaluate(async () => {
       return (await fetch("/api/push/pending", { method: "GET", credentials: "include" })).status;
@@ -95,6 +104,113 @@ test("pending push is POST-only and removed only after explicit ack", async ({ b
   } finally {
     await alice.context.close();
     await bob.context.close();
+  }
+});
+
+test("push payload copy is asserted for every push type", async ({ browser }) => {
+  const suffix = Date.now().toString(36).slice(-6);
+  const alice = await client(browser, `copy_a_${suffix}`);
+  const bob = await client(browser, `copy_b_${suffix}`);
+  const asserted = new Set<string>();
+  try {
+    await register(alice.page, alice.handle);
+    await register(bob.page, bob.handle);
+    await fakePushSubscribe(alice.page);
+    await fakePushSubscribe(bob.page);
+
+    await alice.page.getByRole("button", { name: "Add a friend" }).click();
+    await alice.page.getByPlaceholder("friend_handle").fill(bob.handle);
+    await alice.page.getByRole("button", { name: "Add", exact: true }).click();
+    const friendRequest = await waitForPushPayload(bob.page, "friend_request");
+    // copy-contract: friend_request
+    expect(friendRequest).toMatchObject({ type: "friend_request", body: `@${alice.handle} sent a friend request`, url: "/" });
+    asserted.add("friend_request");
+
+    await bob.page.reload();
+    await bob.page.getByRole("button", { name: "Accept" }).first().click();
+    await alice.page.reload();
+
+    await alice.page.goto("/");
+    await bob.page.goto("/");
+    await alice.page.getByRole("button", { name: `Invite @${bob.handle}` }).click();
+    const challenge = await waitForPushPayload(bob.page, "challenge");
+    // copy-contract: challenge
+    expect(challenge).toMatchObject({ type: "challenge", body: `@${alice.handle} invited you to a game`, url: "/" });
+    asserted.add("challenge");
+
+    await bob.page.reload();
+    await bob.page.getByRole("button", { name: "Accept" }).first().click();
+    const accepted = await waitForPushPayload(alice.page, "challenge_accepted");
+    // copy-contract: challenge_accepted
+    expect(accepted).toMatchObject({ type: "challenge_accepted", body: `@${bob.handle} accepted — your game is ready` });
+    expect(accepted.url).toMatch(/^\/game\/gam_/);
+    asserted.add("challenge_accepted");
+
+    const gameId = accepted.url!.split("/game/")[1];
+    await installSocketTracker(alice.page);
+    await alice.page.goto(`/game/${gameId}`);
+    await bob.page.goto("/");
+    await bob.page.evaluate(() => fetch("/api/presence/heartbeat", { method: "POST", credentials: "include", body: "{}" }));
+    await sendVoice(alice.page, { type: "call-initiate" });
+    const callInvite = await waitForPushPayload(bob.page, "call_invite");
+    // copy-contract: call_invite
+    expect(callInvite).toMatchObject({ type: "call_invite", body: `@${alice.handle} wants to talk`, url: `/game/${gameId}` });
+    asserted.add("call_invite");
+
+    await alice.page.goto("/");
+    await bob.page.goto("/");
+    await scheduleSoon(alice.page, bob.handle);
+    await bob.page.reload();
+    await bob.page.getByRole("button", { name: "Accept" }).first().click();
+    const scheduledForAlice = await waitForPushPayload(alice.page, "scheduled_start", 15_000);
+    const scheduledForBob = await waitForPushPayload(bob.page, "scheduled_start", 15_000);
+    // copy-contract: scheduled_start
+    expect(scheduledForAlice).toMatchObject({ type: "scheduled_start", body: `Your game with @${bob.handle} is starting` });
+    expect(scheduledForBob).toMatchObject({ type: "scheduled_start", body: `Your game with @${alice.handle} is starting` });
+    asserted.add("scheduled_start");
+
+    expect([...asserted].sort()).toEqual([...REQUIRED_PUSH_COPY_TYPES].sort());
+  } finally {
+    await alice.context.close();
+    await bob.context.close();
+  }
+});
+
+test("service worker shows payload body as title and ACKs pending push", async () => {
+  const endpoint = "https://push.invalid/sw-harness";
+  const pending = {
+    id: "psh_body_title",
+    type: "challenge",
+    body: "@alice invited you to a game",
+    url: "/",
+    createdAt: Date.now(),
+  };
+  const result = await runServiceWorkerPush({ endpoint, pendingPayload: pending });
+
+  expect(result.notifications).toHaveLength(1);
+  expect(result.notifications[0].title).toBe(pending.body);
+  expect("body" in result.notifications[0].options).toBe(false);
+  expect(result.fetches).toHaveLength(2);
+  expect(result.fetches[0]).toMatchObject({ url: "/api/push/pending", body: { endpoint } });
+  expect(result.fetches[1]).toMatchObject({ url: "/api/push/pending", body: { endpoint, ackId: pending.id } });
+});
+
+test("service worker fallback titles cover every supported push type", async () => {
+  const expected: Record<(typeof REQUIRED_PUSH_COPY_TYPES)[number], string> = {
+    friend_request: "Friend request",
+    challenge: "Game challenge",
+    challenge_accepted: "Your game is ready",
+    scheduled_start: "Your game is starting",
+    call_invite: "Your friend wants to talk",
+  };
+
+  for (const type of REQUIRED_PUSH_COPY_TYPES) {
+    const result = await runServiceWorkerPush({
+      endpoint: "https://push.invalid/sw-fallback",
+      eventPayload: { id: `psh_${type}`, type, url: "/", createdAt: Date.now() },
+    });
+    expect(result.notifications).toHaveLength(1);
+    expect(result.notifications[0].title).toBe(expected[type]);
   }
 });
 
@@ -425,12 +541,13 @@ async function register(page: Page, handle: string) {
   await expect(page.locator(".topbar .handle", { hasText: `@${handle}` })).toBeVisible();
 }
 
-async function fakePushSubscribe(page: Page) {
-  await page.evaluate(async () => {
-    const endpoint = `https://push.invalid/${Math.random()}`;
+async function fakePushSubscribe(page: Page, endpointOverride?: string) {
+  return await page.evaluate(async (providedEndpoint) => {
+    const endpoint = providedEndpoint || `https://push.invalid/${Math.random()}`;
     window.localStorage.setItem("testPushEndpoint", endpoint);
     await fetch("/api/push/subscribe", {
       method: "POST",
+      credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         subscription: {
@@ -439,24 +556,26 @@ async function fakePushSubscribe(page: Page) {
         },
       }),
     });
-  });
+    return endpoint;
+  }, endpointOverride || "");
 }
 
-async function pendingPush(page: Page): Promise<{ type?: string } | null> {
+async function pendingPush(page: Page): Promise<PendingPushPayload | null> {
   const pending = await peekPendingPush(page);
   if (pending?.id) await ackPendingPush(page, pending.id);
   return pending;
 }
 
-async function peekPendingPush(page: Page): Promise<{ id: string; type?: string } | null> {
-  return page.evaluate(async (): Promise<{ id: string; type?: string } | null> => {
+async function peekPendingPush(page: Page): Promise<PendingPushPayload | null> {
+  return page.evaluate(async (): Promise<PendingPushPayload | null> => {
     const endpoint = window.localStorage.getItem("testPushEndpoint") || "";
     const response = await fetch("/api/push/pending", {
       method: "POST",
+      credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ endpoint }),
     });
-    return response.json() as Promise<{ id: string; type?: string } | null>;
+    return response.json() as Promise<PendingPushPayload | null>;
   });
 }
 
@@ -480,6 +599,18 @@ async function waitForPush(page: Page, type: string, timeout = 10_000) {
       return pending?.type === type ? type : pending?.type || null;
     }, { timeout })
     .toBe(type);
+}
+
+async function waitForPushPayload(page: Page, type: string, timeout = 10_000) {
+  const deadline = Date.now() + timeout;
+  let lastType: string | null = null;
+  while (Date.now() <= deadline) {
+    const pending = await pendingPush(page);
+    if (pending?.type === type) return pending;
+    if (pending?.type) lastType = pending.type;
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`Timed out waiting for ${type}; last pending type was ${lastType || "none"}`);
 }
 
 async function challengeAndAccept(alice: Page, bob: Page, timeControl: "10|0" | "5|0") {
@@ -532,4 +663,117 @@ async function scheduleSoon(page: Page, friendHandle: string) {
 
 async function shot(page: Page, name: string) {
   await page.screenshot({ path: `${screenDir}/${name}.png`, fullPage: true });
+}
+
+async function installSocketTracker(page: Page) {
+  await page.addInitScript(() => {
+    const Original = window.WebSocket;
+    const bag: WebSocket[] = [];
+    (window as unknown as { __sockets?: WebSocket[] }).__sockets = bag;
+    class Tracked extends Original {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        bag.push(this);
+      }
+    }
+    (window as unknown as { WebSocket: typeof WebSocket }).WebSocket = Tracked as unknown as typeof WebSocket;
+  });
+}
+
+async function sendVoice(page: Page, message: Record<string, unknown>) {
+  await page.waitForFunction(() => {
+    return ((window as unknown as { __sockets?: WebSocket[] }).__sockets || []).some((socket) => socket.readyState === WebSocket.OPEN);
+  }, null, { timeout: 10_000 });
+  await page.evaluate((payload) => {
+    const sockets = ((window as unknown as { __sockets?: WebSocket[] }).__sockets || []).filter((socket) => socket.readyState === WebSocket.OPEN);
+    if (!sockets.length) throw new Error("No open tracked socket.");
+    sockets[sockets.length - 1].send(JSON.stringify(payload));
+  }, message);
+}
+
+type SwFetchRecord = {
+  url: string;
+  body: Record<string, unknown>;
+};
+
+type SwNotificationRecord = {
+  title: string;
+  options: NotificationOptions;
+};
+
+async function runServiceWorkerPush({
+  endpoint,
+  pendingPayload,
+  eventPayload,
+}: {
+  endpoint: string;
+  pendingPayload?: unknown;
+  eventPayload?: unknown;
+}) {
+  const source = readFileSync("public/sw.js", "utf8");
+  const fetches: SwFetchRecord[] = [];
+  const notifications: SwNotificationRecord[] = [];
+  let pushWait: Promise<void> | undefined;
+  type PushEventShape = {
+    data: { json: () => unknown } | null;
+    waitUntil: (promise: Promise<void>) => void;
+  };
+  const listeners = new Map<string, (event: PushEventShape) => void>();
+  const fakeSelf = {
+    registration: {
+      pushManager: {
+        async getSubscription() {
+          return { endpoint };
+        },
+      },
+      async showNotification(title: string, options: NotificationOptions) {
+        notifications.push({ title, options });
+      },
+    },
+    addEventListener(type: string, handler: (event: PushEventShape) => void) {
+      listeners.set(type, handler);
+    },
+    skipWaiting() {
+      // install path not exercised in this harness
+    },
+    clients: {
+      async claim() {
+        // activate path not exercised in this harness
+      },
+      async openWindow() {
+        // notificationclick path not exercised in this harness
+      },
+    },
+  };
+  const fakeCaches = {
+    async open() {
+      return { async addAll() { /* install path not exercised */ } };
+    },
+    async keys() {
+      return [];
+    },
+    async delete() {
+      return true;
+    },
+    async match() {
+      return undefined;
+    },
+  };
+  const fakeFetch = async (url: string, init?: RequestInit) => {
+    const rawBody = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+    fetches.push({ url, body: rawBody });
+    return Response.json(pendingPayload ?? null);
+  };
+  const load = new Function("self", "fetch", "caches", source);
+  load(fakeSelf, fakeFetch, fakeCaches);
+  const push = listeners.get("push");
+  if (!push) throw new Error("SW push handler was not registered.");
+  push({
+    data: eventPayload === undefined ? null : { json: () => eventPayload },
+    waitUntil(promise) {
+      pushWait = promise;
+    },
+  });
+  await pushWait;
+  return { fetches, notifications };
 }

@@ -105,9 +105,16 @@ issues new orders.
 ## Notifications
 - [ ] Policy is the PRINCIPLE (serves the user's own intention; re-engagement
       banned permanently). Current set: friend_request, challenge,
-      challenge_accepted, scheduled_start — descriptive, not a cap.
+      challenge_accepted, scheduled_start, call_invite — descriptive, not a cap.
 - [ ] Waiting room: sending an invite lands sender AT the board ("waiting for @x");
       accept transitions live in place; challenge_accepted push to inviter.
+- [ ] Push endpoint ownership: one endpoint belongs to one current user.
+      Subscribe transfers ownership and drops stale endpoint queues; logout /
+      unsubscribe detach. Pending reads consume by default, ACK remains
+      idempotent, and stale entries are TTL-pruned.
+- [ ] Push copy contract: `npm run test:push` runs both the policy scanner and
+      `scripts/verify-push-copy-contract.mjs`; deploy is blocked if any push
+      type lacks an explicit title/body assertion.
 
 ## Inspirations / attribution
 - [ ] Plain declarative prose only — no AI-slop tells (em-dash chains, clever

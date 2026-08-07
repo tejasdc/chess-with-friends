@@ -23,6 +23,14 @@ type LandingPuzzle = {
   preMoves?: { fen: string; moves: string[] };
 };
 
+type PendingPushPayload = {
+  id: string;
+  type?: string;
+  body?: string;
+  url?: string;
+  createdAt?: number;
+};
+
 function loadLandingPositions() {
   return JSON.parse(readFileSync("src/data/positions.json", "utf8")) as LandingPuzzle[];
 }
@@ -101,6 +109,40 @@ async function expectFriendRequestSent(page: Page, handle: string) {
       return toast + row;
     }, { timeout: 10_000 })
     .toBeGreaterThan(0);
+}
+
+async function fakePushSubscribe(page: Page, endpointOverride?: string) {
+  return await page.evaluate(async (providedEndpoint) => {
+    const endpoint = providedEndpoint || `https://push.invalid/${Math.random()}`;
+    window.localStorage.setItem("testPushEndpoint", endpoint);
+    const response = await fetch("/api/push/subscribe", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        subscription: {
+          endpoint,
+          keys: { p256dh: "test", auth: "test" },
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return endpoint;
+  }, endpointOverride || "");
+}
+
+async function peekPendingPushNoAck(page: Page, endpointOverride?: string): Promise<PendingPushPayload | null> {
+  return await page.evaluate(async (providedEndpoint) => {
+    const endpoint = providedEndpoint || window.localStorage.getItem("testPushEndpoint") || "";
+    const response = await fetch("/api/push/pending", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ endpoint }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return await response.json() as PendingPushPayload | null;
+  }, endpointOverride || "");
 }
 
 async function twoClientsInGame(browser: Browser, suffix: string, opts: { instrumentSockets?: boolean; voiceMocks?: boolean } = {}) {
@@ -478,6 +520,74 @@ test("voice call invite push is gated by foregroundGameId (state-smith GAP-28)",
     await sendVoice(alice, { type: "call-initiate" });
     log = await alice.evaluate(async () => (await (await fetch("/api/debug/push-log")).json()) as { pushLog: Array<{ type: string }> });
     expect(log.pushLog.filter((entry) => entry.type === "call_invite")).toHaveLength(startingCallInvites + 1);
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("push endpoint ownership moves on account switch", async ({ browser }) => {
+  const suffix = `epown_${Date.now().toString(36).slice(-6)}`;
+  const sharedEndpoint = `https://push.invalid/shared-${suffix}`;
+  const accountCtx = await browser.newContext({ serviceWorkers: "block" });
+  const charlieCtx = await browser.newContext({ serviceWorkers: "block" });
+  const account = await accountCtx.newPage();
+  const charlie = await charlieCtx.newPage();
+  try {
+    await addAuthenticator(account);
+    await addAuthenticator(charlie);
+    const oldHandle = `old_${suffix}`;
+    const newHandle = `new_${suffix}`;
+    const senderHandle = `snd_${suffix}`;
+
+    await register(account, oldHandle);
+    await fakePushSubscribe(account, sharedEndpoint);
+    await account.evaluate(async () => {
+      const response = await fetch("/api/auth/logout", { method: "POST", credentials: "include", body: "{}" });
+      if (!response.ok) throw new Error(await response.text());
+    });
+    await register(account, newHandle);
+    await fakePushSubscribe(account, sharedEndpoint);
+
+    await register(charlie, senderHandle);
+    await addFriendByHandle(charlie, oldHandle);
+    await expectFriendRequestSent(charlie, oldHandle);
+
+    const leaked = await peekPendingPushNoAck(account, sharedEndpoint);
+    expect(leaked).toBeNull();
+  } finally {
+    await accountCtx.close();
+    await charlieCtx.close();
+  }
+});
+
+test("legacy push reader without ack does not pin the queue head", async ({ browser }) => {
+  const suffix = `legacy_${Date.now().toString(36).slice(-6)}`;
+  const aliceCtx = await browser.newContext({ serviceWorkers: "block" });
+  const bobCtx = await browser.newContext({ serviceWorkers: "block" });
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  try {
+    await addAuthenticator(alice);
+    await addAuthenticator(bob);
+    const aH = `lega_${suffix}`;
+    const bH = `legb_${suffix}`;
+    await register(alice, aH);
+    await register(bob, bH);
+    await fakePushSubscribe(bob);
+
+    await addFriendByHandle(alice, bH);
+    await expectFriendRequestSent(alice, bH);
+    const first = await peekPendingPushNoAck(bob);
+    expect(first?.type).toBe("friend_request");
+
+    await bob.reload();
+    await bob.getByRole("button", { name: "Accept" }).first().click();
+    await alice.reload();
+    await alice.getByRole("button", { name: `Invite @${bH}` }).click();
+
+    const next = await peekPendingPushNoAck(bob);
+    expect(next).toMatchObject({ type: "challenge", body: `@${aH} invited you to a game` });
   } finally {
     await aliceCtx.close();
     await bobCtx.close();
