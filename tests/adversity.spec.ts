@@ -838,6 +838,73 @@ test("legacy push reader without ack does not pin the queue head", async ({ brow
   }
 });
 
+test("withdrawing requests clears the recipient pending push queue", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const suffix = `wpush_${Date.now().toString(36).slice(-6)}`;
+  const aliceCtx = await browser.newContext({ serviceWorkers: "block" });
+  const bobCtx = await browser.newContext({ serviceWorkers: "block" });
+  const alice = await aliceCtx.newPage();
+  const bob = await bobCtx.newPage();
+  try {
+    await addAuthenticator(alice);
+    await addAuthenticator(bob);
+    const aH = `wpa_${suffix}`;
+    const bH = `wpb_${suffix}`;
+    await register(alice, aH);
+    await register(bob, bH);
+    await fakePushSubscribe(bob, `https://push.invalid/withdraw-${suffix}`);
+
+    const friendRequest = await alice.evaluate(async (handle) => {
+      const response = await fetch("/api/friends/request", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ handle }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json() as { request: { id: string } };
+    }, bH);
+    await alice.evaluate(async (id) => {
+      const response = await fetch(`/api/friends/requests/${id}`, { method: "DELETE", credentials: "include" });
+      if (!response.ok) throw new Error(await response.text());
+    }, friendRequest.request.id);
+    expect(await peekPendingPushNoAck(bob)).toBeNull();
+
+    const bobInviteToken = await bob.evaluate(async () => {
+      const me = await (await fetch("/api/me", { credentials: "include" })).json() as { inviteUrl: string };
+      return me.inviteUrl.split("/").at(-1)!;
+    });
+    const friendship = await alice.evaluate(async (token) => {
+      const response = await fetch("/api/friends/invite", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json() as { friend: { id: string } };
+    }, bobInviteToken);
+    const challenge = await alice.evaluate(async (friendId) => {
+      const response = await fetch("/api/challenges", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ friendId }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json() as { challenge: { id: string } };
+    }, friendship.friend.id);
+    await alice.evaluate(async (id) => {
+      const response = await fetch(`/api/challenges/${id}/withdraw`, { method: "POST", credentials: "include", body: "{}" });
+      if (!response.ok) throw new Error(await response.text());
+    }, challenge.challenge.id);
+    expect(await peekPendingPushNoAck(bob)).toBeNull();
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
 test("voice call state survives socket hibernation adversity (state-smith GAP-29)", async ({ browser }) => {
   const suffix = `hib_${Date.now().toString(36).slice(-6)}`;
   const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true });

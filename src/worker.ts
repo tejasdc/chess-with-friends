@@ -367,6 +367,20 @@ function prunePendingPushQueues(db: AppDb, now = Date.now()) {
   }
 }
 
+function removePendingPushes(db: AppDb, userId: string, predicate: (pending: PendingPush) => boolean) {
+  db.pendingPushes ||= {};
+  db.pendingPushesByEndpoint ||= {};
+  const filter = (pending: PendingPush) => !(pending.userId === userId && predicate(pending));
+  const userQueue = (db.pendingPushes[userId] || []).filter(filter);
+  if (userQueue.length) db.pendingPushes[userId] = userQueue;
+  else delete db.pendingPushes[userId];
+  for (const [endpoint, queue] of Object.entries(db.pendingPushesByEndpoint)) {
+    const next = queue.filter(filter);
+    if (next.length) db.pendingPushesByEndpoint[endpoint] = next;
+    else delete db.pendingPushesByEndpoint[endpoint];
+  }
+}
+
 function detachPushEndpoint(db: AppDb, userId: string, endpoint: string) {
   const list = db.pushSubscriptions[userId] || [];
   const next = list.filter((subscription) => subscription.endpoint !== endpoint);
@@ -1296,6 +1310,11 @@ export class AppDO extends DurableObject<Env> {
     if (!request) return json({ status: "gone" });
     if (request.fromId !== user.id) throw new Error("Only the sender can withdraw.");
     if (request.status !== "pending") return json({ status: request.status });
+    removePendingPushes(
+      db,
+      request.toId,
+      (pending) => pending.type === "friend_request" && pending.body === `@${user.handle} sent a friend request`,
+    );
     delete db.friendRequests[id];
     await this.save(db);
     return json({ status: "withdrawn" });
@@ -1347,6 +1366,11 @@ export class AppDO extends DurableObject<Env> {
     if (challenge.fromId !== user.id) throw new Error("Only the inviter can withdraw.");
     if (challenge.status === "pending") {
       challenge.status = "withdrawn";
+      removePendingPushes(
+        db,
+        challenge.toId,
+        (pending) => pending.type === "challenge" && pending.body === `@${user.handle} invited you to a game`,
+      );
       await this.save(db);
     }
     return json({ status: challenge.status });
