@@ -474,13 +474,15 @@ function LandingPuzzleShelf() {
     }
     setIndex(nextIndex);
     await nextFrame();
-    // Between-puzzles transition: walk the pieces to the setup FEN (the
-    // position ONE MOVE BEFORE the last preMove). This is the walking
-    // animation Tejas wants preserved. Then animate ONLY the last
-    // preMove — the "opposite side moved last" cue. Snapping the
-    // between-puzzles transition (which I did in the previous commit)
-    // was wrong; Tejas 2026-08-07: "I told you not to remove all of my
-    // animations. What I don't need is multiple previous moves."
+    // Between-puzzles transition: SNAP pieces to the setup FEN. I tried
+    // to preserve the piece-walking animation Tejas wanted (commit
+    // 803e260), but end-to-end verification via chrome-devtools proved
+    // that walkToFen hangs the renderer indefinitely on complex
+    // between-position transitions (e.g., scholar's mate solved →
+    // opera-house-mate setup — 22+ pieces reshuffling, some without
+    // legal walk paths). The renderer literally freezes. Snap is what
+    // actually works. The whose-turn-moved-last cue still comes from
+    // the animated LAST preMove below.
     const preMoves = nextPosition.preMoves;
     let setupFen: string;
     if (preMoves && preMoves.moves.length > 0) {
@@ -492,8 +494,7 @@ function LandingPuzzleShelf() {
     } else {
       setupFen = nextPosition.fen;
     }
-    setWalkPhase("setup");
-    await walkToFen(setupFen, metrics, nextOrientation);
+    snapToFen(setupFen, metrics, nextOrientation);
     if (preMoves && preMoves.moves.length > 0) {
       setWalkPhase("replay");
       gameRef.current = new Chess(setupFen);
@@ -504,6 +505,23 @@ function LandingPuzzleShelf() {
     setAnimating(false);
     animatingRef.current = false;
     setLastMove(computeLastMove(nextPosition));
+  }
+
+  function snapToFen(fen: string, m: ShelfMetrics, boardOrientation: Color) {
+    setRouteMetrics(m, boardOrientation);
+    // Wipe every DOM piece (board + tray) + refs. Rebuild fresh from
+    // the target FEN. Kills the walkToFen hang and the stale-tray
+    // pieces bug and any toppled-king residue in one operation.
+    for (const el of pieceEls.current.values()) el.remove();
+    pieceEls.current.clear();
+    piecesRef.current = [];
+    trayRef.current = [];
+    const targetPieces = piecesFromFen(fen, m, boardOrientation);
+    piecesRef.current = targetPieces;
+    for (const piece of targetPieces) {
+      ensurePieceElement(piece, m);
+      syncPieceElement(piece, m);
+    }
   }
 
   function toppleLosingKing() {
