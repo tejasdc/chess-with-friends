@@ -494,7 +494,7 @@ body[data-screen="landing"] .auth-scene {
 body[data-screen="landing"] .auth-form {
   /* Center the form under the board — matches the caption + footer
      center-alignment. Was justify-self:start (left-aligned in grid). */
-  align-self: center;
+  align-self: end;
   justify-self: center;
 }
 body[data-screen="landing"] .landing-copy {
