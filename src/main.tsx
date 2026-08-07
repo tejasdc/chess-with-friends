@@ -474,32 +474,16 @@ function LandingPuzzleShelf() {
     }
     setIndex(nextIndex);
     await nextFrame();
-    // Between-puzzles transition: SNAP pieces to the setup FEN. I tried
-    // to preserve the piece-walking animation Tejas wanted (commit
-    // 803e260), but end-to-end verification via chrome-devtools proved
-    // that walkToFen hangs the renderer indefinitely on complex
-    // between-position transitions (e.g., scholar's mate solved →
-    // opera-house-mate setup — 22+ pieces reshuffling, some without
-    // legal walk paths). The renderer literally freezes. Snap is what
-    // actually works. The whose-turn-moved-last cue still comes from
-    // the animated LAST preMove below.
-    const preMoves = nextPosition.preMoves;
-    let setupFen: string;
-    if (preMoves && preMoves.moves.length > 0) {
-      const setup = new Chess(preMoves.fen);
-      for (let i = 0; i < preMoves.moves.length - 1; i++) {
-        try { setup.move(preMoves.moves[i]); } catch { /* skip if illegal */ }
-      }
-      setupFen = setup.fen();
-    } else {
-      setupFen = nextPosition.fen;
-    }
-    snapToFen(setupFen, metrics, nextOrientation);
-    if (preMoves && preMoves.moves.length > 0) {
-      setWalkPhase("replay");
-      gameRef.current = new Chess(setupFen);
-      await playOneMove(preMoves.moves[preMoves.moves.length - 1], metrics, nextOrientation, /* animate */ true);
-    }
+    // Snap directly to the puzzle's final FEN. No animation, no walk,
+    // no last-move replay. Both walkToFen (piece-by-piece walk) and
+    // playOneMove(last preMove, animate=true) proved to hang the
+    // renderer indefinitely on complex between-puzzle transitions
+    // during end-to-end verification (task #31). Snap is the only
+    // thing that actually works reliably across all 24 puzzles.
+    // The board orientation flip already signals which side just moved
+    // (Codex commit 0149fdc), so the "last move animated" cue is not
+    // load-bearing.
+    snapToFen(nextPosition.fen, metrics, nextOrientation);
     setWalkPhase("idle");
     gameRef.current = new Chess(nextPosition.fen);
     setAnimating(false);
