@@ -2177,6 +2177,7 @@ function useVoiceCall({
   const [localTrackEnabled, setLocalTrackEnabled] = useState(true);
   const [dismissedEndedId, setDismissedEndedId] = useState<string | null>(null);
   const sawIceConnectedRef = React.useRef(false);
+  const iceConnectedTimerRef = React.useRef<number | null>(null);
   sessionRef.current = session;
 
   const send = React.useCallback((message: VoiceOutboundMessage) => sendRef.current?.(message) === true, [sendRef]);
@@ -2195,6 +2196,10 @@ function useVoiceCall({
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     pendingCandidatesRef.current = [];
     sawIceConnectedRef.current = false;
+    if (iceConnectedTimerRef.current !== null) {
+      window.clearTimeout(iceConnectedTimerRef.current);
+      iceConnectedTimerRef.current = null;
+    }
   }, []);
 
   const stopLocalMedia = React.useCallback(() => {
@@ -2247,8 +2252,13 @@ function useVoiceCall({
       pc.addEventListener("iceconnectionstatechange", () => {
         const state = pc.iceConnectionState;
         if (state === "connected" || state === "completed") {
+          if (sawIceConnectedRef.current) return;
           sawIceConnectedRef.current = true;
-          send({ type: "peer-ice-connected", callSessionId });
+          iceConnectedTimerRef.current = window.setTimeout(() => {
+            iceConnectedTimerRef.current = null;
+            if (sessionRef.current?.id !== callSessionId || sessionRef.current.state === "ended") return;
+            send({ type: "peer-ice-connected", callSessionId });
+          }, 120);
         } else if (state === "checking" && sawIceConnectedRef.current) {
           send({ type: "peer-ice-restart", callSessionId });
         } else if (state === "disconnected") {
