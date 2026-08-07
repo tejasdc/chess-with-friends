@@ -986,20 +986,25 @@ function LandingPuzzleShelf() {
             .remove() and NotFoundError kills the shelf on ~round 3. */}
         <div className="landing-pieces" ref={piecesLayerRef} aria-hidden="true" />
       </div>
-      <p className="puzzle-caption">{formatPuzzleCaption(position)}</p>
+      {/* Two lines. Top line — "YOUR MOVE" CTA (reuses in-game language
+          for continuity from landing → gameplay). Bottom line — the
+          citation, visibly subordinate (smaller, quieter). Named classics
+          get the title + year; lichess entries get side-to-move only. */}
+      <div className="puzzle-caption">
+        <span className="puzzle-cta-headline">
+          Your move
+          <span className="puzzle-cta-arrow" aria-hidden="true">→</span>
+        </span>
+        <span className="puzzle-cta-reference">{formatPuzzleReference(position)}</span>
+      </div>
     </div>
   );
 }
 
-// Caption vocabulary:
-//   Lichess entries (id starts with "lichess-") — side-to-move only.
-//     The lichess.org · <id> handle is random-puzzle noise for a landing
-//     audience; CC0 compliance is carried by the /inspirations page.
-//   Named classics — side-to-move · TITLE · YEAR. The name is the point.
-function formatPuzzleCaption(pos: ShelfPosition): string {
-  const side = pos.sideToMove === "w" ? "WHITE TO MOVE" : "BLACK TO MOVE";
-  if (pos.id.startsWith("lichess-")) return side;
-  return `${side} · ${pos.title.toUpperCase()} · ${extractYear(pos.credit)}`;
+function formatPuzzleReference(pos: ShelfPosition): string {
+  const side = pos.sideToMove === "w" ? "White" : "Black";
+  if (pos.id.startsWith("lichess-")) return `${side} to move`;
+  return `${side} · ${pos.title} · ${extractYear(pos.credit)}`;
 }
 
 function extractYear(credit: string): string {
