@@ -14,12 +14,12 @@
     "postbuild": "node scripts/verify-precache.mjs"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.0",
     "@types/three": "^0.185.3",
     "@vitejs/plugin-react": "^5.0.0",
     "chess.js": "^1.4.0",
-    "lucide-react": "^0.468.0",
     "three": "^0.185.1",
     "vite": "^7.0.0",
     "wrangler": "^4.26.0"

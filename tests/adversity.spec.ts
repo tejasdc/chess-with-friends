@@ -324,13 +324,39 @@ async function sendVoice(page: Page, message: Record<string, unknown>) {
 async function gameSnapshot(page: Page, gameId: string) {
   return page.evaluate(async (id) => {
     const response = await fetch(`/api/games/${id}/state`, { credentials: "include" });
-    return await response.json() as { callSession: null | { id: string; state: string; endReason?: string; muted?: Record<string, boolean> }; status: string };
+    return await response.json() as {
+      whiteId: string;
+      blackId: string;
+      whiteHandle: string;
+      blackHandle: string;
+      callSession: null | { id: string; state: string; endReason?: string; muted?: Record<string, boolean> };
+      status: string;
+    };
   }, gameId);
 }
 
 async function waitCallState(page: Page, gameId: string, state: string) {
   await expect.poll(async () => (await gameSnapshot(page, gameId)).callSession?.state || null, { timeout: 10_000 }).toBe(state);
   return (await gameSnapshot(page, gameId)).callSession!;
+}
+
+function voiceSlot(page: Page) {
+  return page.locator(".clock-strip.top [data-voice-call-slot='opponent']");
+}
+
+function selfVoiceSlot(page: Page) {
+  return page.locator(".clock-strip.bottom [data-voice-call-slot='opponent']");
+}
+
+async function expectVoiceSlot(page: Page, state: string, icon: string) {
+  const slot = voiceSlot(page);
+  await expect(slot).toBeVisible({ timeout: 5000 });
+  await expect(slot).toHaveAttribute("data-call-state", state);
+  const rootIcon = await slot.getAttribute("data-call-icon");
+  if (rootIcon) expect(rootIcon).toBe(icon);
+  else await expect(slot.locator(`[data-call-icon='${icon}']`).first()).toBeVisible();
+  await expect(page.locator(".voice-status, .voice-ending")).toHaveCount(0);
+  await expect(selfVoiceSlot(page)).toHaveCount(0);
 }
 
 async function directConnectedCall(alice: Page, bob: Page, gameId: string) {
@@ -345,8 +371,9 @@ async function directConnectedCall(alice: Page, bob: Page, gameId: string) {
 async function uiConnectedCall(alice: Page, bob: Page, gameId: string) {
   await sendVoice(alice, { type: "call-initiate" });
   const requesting = await waitCallState(alice, gameId, "requesting");
-  await expect(bob.locator(".voice-status", { hasText: "wants to talk" })).toBeVisible({ timeout: 5000 });
-  await bob.locator(".voice-status").getByRole("button", { name: "Accept" }).click();
+  await expectVoiceSlot(bob, "requesting", "phone");
+  await expect(voiceSlot(bob)).toHaveAttribute("data-call-direction", "incoming");
+  await bob.getByRole("button", { name: "Accept voice call" }).click();
   await waitCallState(alice, gameId, "connecting");
   await sendVoice(alice, { type: "peer-ice-connected", callSessionId: requesting.id });
   return await waitCallState(alice, gameId, "connected");
@@ -376,8 +403,41 @@ test("voice call happy path reaches connected (state-smith GAP-20/21)", async ({
   const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
   try {
     await uiConnectedCall(alice, bob, gameId);
-    await expect(alice.locator(".call-inline-button[data-call-control-state='unmuted']")).toBeVisible();
-    await expect(bob.locator(".call-inline-button[data-call-control-state='unmuted']")).toBeVisible();
+    await expectVoiceSlot(alice, "connected", "microphone");
+    await expectVoiceSlot(bob, "connected", "microphone");
+    await expect(alice.locator(".voice-connected-chip [data-call-icon='phone-disconnect']")).toBeVisible();
+    await expect(bob.locator(".voice-connected-chip [data-call-icon='phone-disconnect']")).toBeVisible();
+  } finally {
+    await aliceCtx.close();
+    await bobCtx.close();
+  }
+});
+
+test("voice call slot stays in opponent bar and changes icon by state", async ({ browser }) => {
+  const suffix = `voice_ui_${Date.now().toString(36).slice(-6)}`;
+  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
+  try {
+    await expectVoiceSlot(alice, "idle", "phone");
+    await sendVoice(alice, { type: "call-initiate" });
+    const requesting = await waitCallState(alice, gameId, "requesting");
+    await expectVoiceSlot(alice, "requesting", "phone");
+    await expect(voiceSlot(alice)).toHaveAttribute("data-call-direction", "outgoing");
+    await expectVoiceSlot(bob, "requesting", "phone");
+    await expect(voiceSlot(bob)).toHaveAttribute("data-call-direction", "incoming");
+
+    await sendVoice(bob, { type: "call-accept", callSessionId: requesting.id });
+    await waitCallState(alice, gameId, "connecting");
+    await expectVoiceSlot(alice, "connecting", "phone");
+    await expect(voiceSlot(alice).locator(".voice-spinner-ring")).toBeVisible();
+
+    await sendVoice(alice, { type: "peer-ice-connected", callSessionId: requesting.id });
+    await waitCallState(alice, gameId, "connected");
+    await expectVoiceSlot(alice, "connected", "microphone");
+    await expect(alice.locator(".voice-connected-chip [data-call-icon='phone-disconnect']")).toBeVisible();
+
+    await sendVoice(alice, { type: "call-hangup", callSessionId: requesting.id });
+    await waitCallState(alice, gameId, "ended");
+    await expectVoiceSlot(alice, "ended", "phone");
   } finally {
     await aliceCtx.close();
     await bobCtx.close();
@@ -492,7 +552,7 @@ test("voice nav away hangs up before home transition (state-smith GAP-27)", asyn
   try {
     await uiConnectedCall(alice, bob, gameId);
     await alice.getByRole("button", { name: "two chairs" }).click();
-    await expect(alice.getByText("Ending call...")).toBeVisible({ timeout: 5000 });
+    await expect(alice.locator(".voice-ending")).toHaveCount(0);
     await expect(alice).toHaveURL(/\/$/);
     const ended = await waitCallState(bob, gameId, "ended");
     expect(ended.endReason).toMatch(/^hung-up-by-usr_/);
@@ -612,22 +672,27 @@ test("voice call state survives socket hibernation adversity (state-smith GAP-29
   }
 });
 
-test("voice mute then end sequence and peer-mute interruption (state-smith GAP-25)", async ({ browser }) => {
+test("voice mute, unmute, and end controls are local-only (state-smith GAP-25)", async ({ browser }) => {
   const suffix = `mute_${Date.now().toString(36).slice(-6)}`;
   const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
   try {
     const session = await uiConnectedCall(alice, bob, gameId);
     await wakeLocalVoiceTrack(alice, bob, session.id);
     await alice.getByRole("button", { name: "Mute call" }).click();
+    await expectVoiceSlot(alice, "connected", "microphone-slash");
+    await expect(alice.getByRole("button", { name: "Unmute call" })).toBeVisible();
     await expect(alice.getByRole("button", { name: "End call" })).toBeVisible();
     await expect.poll(async () => alice.evaluate(() => (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled)).toBe(false);
     expect((await gameSnapshot(bob, gameId)).callSession?.state).toBe("connected");
 
     await sendVoice(bob, { type: "call-mute", callSessionId: session.id, muted: true });
-    await expect(alice.getByRole("button", { name: "Mute call" })).toBeVisible({ timeout: 5000 });
-    await expect.poll(async () => alice.evaluate(() => (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled)).toBe(true);
+    await expect(alice.locator(".peer-muted-pill")).toHaveCount(0);
+    await expectVoiceSlot(alice, "connected", "microphone-slash");
+    await expect.poll(async () => alice.evaluate(() => (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled)).toBe(false);
 
-    await alice.getByRole("button", { name: "Mute call" }).click();
+    await alice.getByRole("button", { name: "Unmute call" }).click();
+    await expectVoiceSlot(alice, "connected", "microphone");
+    await expect.poll(async () => alice.evaluate(() => (window as unknown as { __voiceTracks?: Array<{ enabled: boolean }> }).__voiceTracks?.at(-1)?.enabled)).toBe(true);
     await alice.getByRole("button", { name: "End call" }).click();
     const ended = await waitCallState(alice, gameId, "ended");
     expect(ended.endReason).toMatch(/^hung-up-by-usr_/);
@@ -639,12 +704,15 @@ test("voice mute then end sequence and peer-mute interruption (state-smith GAP-2
 
 test("voice hangup clears muted projections on ended snapshots", async ({ browser }) => {
   const suffix = `mute_end_${Date.now().toString(36).slice(-6)}`;
-  const { aliceCtx, bobCtx, alice, bob, gameId } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
+  const { aliceCtx, bobCtx, alice, bob, gameId, handles } = await twoClientsInGame(browser, suffix, { instrumentSockets: true, voiceMocks: true });
   try {
     const session = await uiConnectedCall(alice, bob, gameId);
     await wakeLocalVoiceTrack(alice, bob, session.id);
+    const snapshot = await gameSnapshot(alice, gameId);
+    const aliceId = snapshot.whiteHandle === handles.a ? snapshot.whiteId : snapshot.blackId;
     await alice.getByRole("button", { name: "Mute call" }).click();
-    await expect(bob.locator(".peer-muted-pill", { hasText: "muted" })).toBeVisible({ timeout: 5000 });
+    await expect.poll(async () => (await gameSnapshot(bob, gameId)).callSession?.muted?.[aliceId], { timeout: 5000 }).toBe(true);
+    await expect(bob.locator(".peer-muted-pill")).toHaveCount(0);
 
     await alice.getByRole("button", { name: "End call" }).click();
     const [aliceEnded, bobEnded] = await Promise.all([

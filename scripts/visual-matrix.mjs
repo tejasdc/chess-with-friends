@@ -399,40 +399,48 @@ async function stateGameCallIdle(page, ctx) {
 
 async function stateGameCallRequestingCaller(page, ctx) {
   await ensureRequestingCall(ctx);
-  await ctx.alice.page.waitForSelector(".voice-status[data-call-state='requesting']");
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-state='requesting'][data-call-direction='outgoing']");
 }
 
 async function stateGameCallRequestingRecipient(page, ctx) {
   await ensureRequestingCall(ctx);
-  await ctx.bob.page.waitForSelector(".voice-status[data-call-state='requesting']");
+  await ctx.bob.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-state='requesting'][data-call-direction='incoming']");
   return ctx.bob.page;
+}
+
+async function stateGameCallConnecting(page, ctx) {
+  const { gameId, session } = await ensureRequestingCall(ctx);
+  await sendVoice(ctx.bob.page, { type: "call-accept", callSessionId: session.id });
+  await waitCallState(ctx.alice.page, gameId, "connecting");
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-state='connecting'] .voice-spinner-ring");
 }
 
 async function stateGameCallConnected(page, ctx) {
   await ensureConnectedCall(ctx);
-  await ctx.alice.page.waitForSelector(".call-inline-button[data-call-control-state='unmuted']");
-  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-bar"));
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-control-state='unmuted'] [data-call-icon='microphone']");
+  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-status, .voice-ending, .voice-bar"));
 }
 
 async function stateGameCallConnectedMuted(page, ctx) {
   await ensureConnectedCall(ctx);
   await ctx.alice.page.getByRole("button", { name: "Mute call" }).click();
-  await ctx.alice.page.waitForSelector(".call-inline-button[data-call-control-state='muted']");
-  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-bar"));
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-control-state='muted'] [data-call-icon='microphone-slash']");
+  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-status, .voice-ending, .voice-bar"));
 }
 
-async function stateGameCallConnectedPeerMuted(page, ctx) {
+async function stateGameCallPeerMutedHidden(page, ctx) {
   const { gameId, session } = await ensureConnectedCall(ctx);
   await sendVoice(ctx.alice.page, { type: "call-mute", callSessionId: session.id, muted: false });
   await sendVoice(ctx.bob.page, { type: "call-mute", callSessionId: session.id, muted: true });
-  await ctx.alice.page.waitForFunction(() => Boolean(document.querySelector(".peer-muted-pill")), null, { timeout: 8000 });
+  await ctx.alice.page.waitForFunction(() => !document.querySelector(".peer-muted-pill"), null, { timeout: 8000 });
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-control-state='unmuted']");
   await gameSnapshot(ctx.alice.page, gameId);
 }
 
 async function stateGameCallReconnecting(page, ctx) {
   const { session } = await ensureConnectedCall(ctx);
   await sendVoice(ctx.alice.page, { type: "peer-ice-disconnected", callSessionId: session.id });
-  await ctx.alice.page.waitForSelector(".voice-status[data-call-state='reconnecting']");
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-state='reconnecting'] .voice-spinner-ring");
 }
 
 async function stateGameCallPostGameStillActive(page, ctx) {
@@ -448,25 +456,25 @@ async function stateGameCallPostGameStillActive(page, ctx) {
     { timeout: 8000 },
   );
   await ctx.alice.page.waitForFunction(() => !document.querySelector(".peer-muted-pill"));
-  await ctx.alice.page.waitForSelector(".call-inline-button[data-call-control-state='unmuted']");
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-control-state='unmuted']");
   await ctx.bob.page.evaluate(async (id) => {
     await fetch(`/api/games/${id}/resign`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   }, gameId);
   await ctx.alice.page.waitForSelector(".game-bottom-terminal", { timeout: 8000 });
-  await ctx.alice.page.waitForSelector(".call-inline-button[data-call-control-state='unmuted']");
-  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-bar"));
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-control-state='unmuted']");
+  await ctx.alice.page.waitForFunction(() => !document.querySelector(".voice-status, .voice-ending, .voice-bar"));
   await ctx.alice.page.waitForTimeout(250);
 }
 
 async function stateGameCallEndedPill(page, ctx) {
   const { session } = await ensureConnectedCall(ctx);
   await sendVoice(ctx.alice.page, { type: "call-hangup", callSessionId: session.id });
-  await ctx.alice.page.waitForSelector(".voice-status[data-call-state='ended']");
+  await ctx.alice.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-state='ended'][data-call-icon='phone']");
 }
 
 async function stateGameCallEndedNoMutedResidue(page, ctx) {
   const { gameId, session } = await ensureConnectedCall(ctx);
-  await ctx.bob.page.waitForSelector(".call-inline-button[data-call-control-state='unmuted']", { timeout: 8000 });
+  await ctx.bob.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-control-state='unmuted']", { timeout: 8000 });
   await sendVoice(ctx.alice.page, { type: "call-mute", callSessionId: session.id, muted: false });
   await ctx.bob.page.waitForFunction(() => !document.querySelector(".peer-muted-pill"));
   await sendVoice(ctx.alice.page, { type: "call-mute", callSessionId: session.id, muted: true });
@@ -478,9 +486,9 @@ async function stateGameCallEndedNoMutedResidue(page, ctx) {
     { id: gameId, userId: ctx.alice.id },
     { timeout: 8000 },
   );
-  await ctx.bob.page.waitForSelector(".peer-muted-pill", { timeout: 8000 });
+  await ctx.bob.page.waitForFunction(() => !document.querySelector(".peer-muted-pill"), null, { timeout: 8000 });
   await sendVoice(ctx.alice.page, { type: "call-hangup", callSessionId: session.id });
-  await ctx.bob.page.waitForSelector(".voice-status[data-call-state='ended']");
+  await ctx.bob.page.waitForSelector(".clock-strip.top [data-voice-call-slot='opponent'][data-call-state='ended'][data-call-icon='phone']");
   await ctx.bob.page.waitForFunction(() => !document.querySelector(".peer-muted-pill"));
   await ctx.bob.page.waitForFunction(
     async (id) => {
@@ -657,12 +665,13 @@ const CELLS = [
   { group: "alice",  key: "game-call-idle",               label: "game / call idle",                                        run: stateGameCallIdle },
   { group: "alice",  key: "game-call-requesting-caller",  label: "game / call requesting caller",                          run: stateGameCallRequestingCaller },
   { group: "alice",  key: "game-call-requesting-recipient",label: "game / call requesting recipient",                       run: stateGameCallRequestingRecipient },
+  { group: "alice",  key: "game-call-connecting",         label: "game / call connecting",                                  run: stateGameCallConnecting },
   { group: "alice",  key: "game-call-connected",          label: "game / call connected",                                   run: stateGameCallConnected },
   { group: "alice",  key: "game-call-connected-muted",    label: "game / call connected muted",                             run: stateGameCallConnectedMuted },
-  { group: "alice",  key: "game-call-connected-peer-muted",label: "game / call connected peer muted",                       run: stateGameCallConnectedPeerMuted },
+  { group: "alice",  key: "game-call-peer-muted-hidden",  label: "game / call peer muted hidden",                           run: stateGameCallPeerMutedHidden },
   { group: "alice",  key: "game-call-reconnecting",       label: "game / call reconnecting",                                run: stateGameCallReconnecting },
   { group: "alice",  key: "game-call-post-game-still-active", label: "game / call post-game still active",                  run: stateGameCallPostGameStillActive },
-  { group: "alice",  key: "game-call-ended-pill",         label: "game / call ended pill",                                  run: stateGameCallEndedPill },
+  { group: "alice",  key: "game-call-ended-recent",       label: "game / call ended recent",                                run: stateGameCallEndedPill },
   { group: "alice",  key: "game-call-ended-no-muted-residue", label: "game / call ended no muted residue",                  run: stateGameCallEndedNoMutedResidue },
   { group: "alice",  key: "dashboard-accepted-schedule",  label: "dashboard / accepted schedule (Scheduled)",               run: stateDashboardAcceptedSchedule },
   { group: "alice",  key: "dashboard-friend-req-incoming",label: "dashboard / incoming friend request",                     run: stateDashboardIncomingFriendRequest },

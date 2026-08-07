@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Chess, type Color, type Move as ChessMove, type PieceSymbol, type Square } from "chess.js";
-import { MicOff, Phone, PhoneOff } from "lucide-react";
+import { Microphone, MicrophoneSlash, Phone, PhoneDisconnect } from "@phosphor-icons/react";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -1982,13 +1982,11 @@ function useRealtimeGame(
 function useVoiceCall({
   game,
   selfId,
-  opponentId,
   sendRef,
   setMessage,
 }: {
   game: GameState | null;
   selfId: string;
-  opponentId: string;
   sendRef: React.MutableRefObject<((message: VoiceOutboundMessage) => boolean) | null>;
   setMessage: SetMessage;
 }) {
@@ -1999,10 +1997,7 @@ function useVoiceCall({
   const remoteAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const pendingCandidatesRef = React.useRef<RTCIceCandidateInit[]>([]);
   const [localTrackEnabled, setLocalTrackEnabled] = useState(true);
-  const [endArmed, setEndArmed] = useState(false);
   const [dismissedEndedId, setDismissedEndedId] = useState<string | null>(null);
-  const ignoreOwnMuteAckRef = React.useRef(false);
-  const lastSnapshotKeyRef = React.useRef("");
   const sawIceConnectedRef = React.useRef(false);
   sessionRef.current = session;
 
@@ -2026,7 +2021,6 @@ function useVoiceCall({
     for (const track of localStreamRef.current?.getTracks() || []) track.stop();
     localStreamRef.current = null;
     setLocalTrackEnabled(true);
-    setEndArmed(false);
   }, [closePeerConnection]);
 
   const ensureLocalStream = React.useCallback(async () => {
@@ -2104,7 +2098,6 @@ function useVoiceCall({
     if (!session) {
       stopLocalMedia();
       setDismissedEndedId(null);
-      lastSnapshotKeyRef.current = "";
       return;
     }
     if (session.state === "ended") {
@@ -2116,25 +2109,6 @@ function useVoiceCall({
       void beginAsOfferer(session.id).catch((error) => setMessage(error instanceof Error ? error.message : "Voice connection failed.", "error"));
     }
   }, [beginAsOfferer, selfId, session, setMessage, stopLocalMedia]);
-
-  useEffect(() => {
-    if (!session || !endArmed) return;
-    const key = `${session.id}:${session.state}:${JSON.stringify(session.muted)}:${session.graceExpiresAt || ""}`;
-    if (!lastSnapshotKeyRef.current) {
-      lastSnapshotKeyRef.current = key;
-      return;
-    }
-    if (key === lastSnapshotKeyRef.current) return;
-    if (ignoreOwnMuteAckRef.current && session.muted[selfId] === true) {
-      ignoreOwnMuteAckRef.current = false;
-      lastSnapshotKeyRef.current = key;
-      return;
-    }
-    setLocalEnabled(true);
-    if (session.state === "connected" || session.state === "reconnecting") send({ type: "call-mute", callSessionId: session.id, muted: false });
-    setEndArmed(false);
-    lastSnapshotKeyRef.current = key;
-  }, [endArmed, selfId, send, session, setLocalEnabled]);
 
   const initiate = React.useCallback(async () => {
     try {
@@ -2161,139 +2135,133 @@ function useVoiceCall({
     return send({ type: "call-hangup", callSessionId: current.id });
   }, [send]);
 
-  const primary = React.useCallback(() => {
-    if (!session || session.state !== "connected") return;
-    if (endArmed) {
-      hangup();
-      return;
-    }
+  const mute = React.useCallback(() => {
+    if (!session) return;
     setLocalEnabled(false);
-    ignoreOwnMuteAckRef.current = true;
-    lastSnapshotKeyRef.current = `${session.id}:${session.state}:${JSON.stringify(session.muted)}:${session.graceExpiresAt || ""}`;
     send({ type: "call-mute", callSessionId: session.id, muted: true });
-    setEndArmed(true);
-  }, [endArmed, hangup, send, session, setLocalEnabled]);
+  }, [send, session, setLocalEnabled]);
 
   const unmute = React.useCallback(() => {
     if (!session) return;
     setLocalEnabled(true);
     send({ type: "call-mute", callSessionId: session.id, muted: false });
-    setEndArmed(false);
-    ignoreOwnMuteAckRef.current = false;
   }, [send, session, setLocalEnabled]);
 
   return {
     session,
     visibleSession: session?.state === "ended" && dismissedEndedId === session.id ? null : session,
-    endArmed,
     localTrackEnabled,
-    peerMuted: !!session && session.state !== "ended" && !!session.muted?.[opponentId],
     remoteAudioRef,
     handleSignal,
     initiate,
     accept,
-    primary,
+    mute,
     unmute,
     hangup,
   };
 }
 
-function VoiceCallInlineControl({
-  voice,
-}: {
-  voice: ReturnType<typeof useVoiceCall>;
-}) {
-  const session = voice.visibleSession;
-  if (!session || session.state !== "connected") return null;
-  const muted = voice.endArmed || !voice.localTrackEnabled;
-  return (
-    <button
-      type="button"
-      className={`call-inline-button ${muted ? "is-muted" : "is-active"}`}
-      data-call-state="connected"
-      data-call-control-state={muted ? "muted" : "unmuted"}
-      onClick={voice.primary}
-      aria-label={muted ? "End call" : "Mute call"}
-      title={muted ? "End call" : "Mute call"}
-    >
-      {muted ? (
-        <PhoneOff size={17} strokeWidth={2.3} aria-hidden="true" />
-      ) : (
-        <Phone size={17} strokeWidth={2.4} fill="currentColor" aria-hidden="true" />
-      )}
-      <audio ref={voice.remoteAudioRef} autoPlay playsInline />
-    </button>
-  );
-}
-
-function VoiceCallStatus({
+function VoiceCallSlot({
   selfId,
-  opponentHandle,
   voice,
 }: {
   selfId: string;
-  opponentHandle: string;
   voice: ReturnType<typeof useVoiceCall>;
 }) {
   const session = voice.visibleSession;
-  if (!session || session.state === "connected") return null;
-  const isInitiator = session.initiatorId === selfId;
-  if (session.state === "requesting") {
+  const state = session?.state || "idle";
+  if (state === "connected") {
+    const muted = !voice.localTrackEnabled;
     return (
-      <div className="voice-status voice-pill" data-call-state="requesting">
-        <span className="voice-state-icon crossed" aria-hidden="true"><MicOff size={16} strokeWidth={2.2} /></span>
-        <span className="voice-copy">{isInitiator ? `Waiting for @${opponentHandle} to accept` : `@${opponentHandle} wants to talk`}</span>
-        {isInitiator ? (
-          <button type="button" className="voice-link" onClick={() => voice.hangup()}>Cancel</button>
-        ) : (
-          <button type="button" className="voice-action" onClick={() => void voice.accept()}>Accept</button>
-        )}
+      <div
+        className="voice-call-slot is-connected"
+        data-voice-call-slot="opponent"
+        data-call-state="connected"
+        data-call-control-state={muted ? "muted" : "unmuted"}
+      >
+        <div className="voice-connected-chip" aria-label={muted ? "Voice call muted" : "Voice call connected"}>
+          <button
+            type="button"
+            className="voice-icon-button"
+            data-call-icon={muted ? "microphone-slash" : "microphone"}
+            onClick={muted ? voice.unmute : voice.mute}
+            aria-label={muted ? "Unmute call" : "Mute call"}
+            title={muted ? "Unmute call" : "Mute call"}
+          >
+            {muted ? (
+              <MicrophoneSlash size={17} weight="regular" aria-hidden="true" />
+            ) : (
+              <Microphone size={17} weight="regular" aria-hidden="true" />
+            )}
+          </button>
+          <button
+            type="button"
+            className="voice-icon-button"
+            data-call-icon="phone-disconnect"
+            onClick={() => voice.hangup()}
+            aria-label="End call"
+            title="End call"
+          >
+            <PhoneDisconnect size={17} weight="regular" aria-hidden="true" />
+          </button>
+        </div>
+        <audio ref={voice.remoteAudioRef} autoPlay playsInline />
       </div>
     );
   }
-  if (session.state === "connecting") {
-    return (
-      <div className="voice-status voice-pill" data-call-state="connecting">
-        <span className="voice-state-icon" aria-hidden="true"><Phone size={16} strokeWidth={2.2} /></span>
-        <span className="voice-copy">Connecting...</span>
-      </div>
-    );
-  }
-  if (session.state === "reconnecting") {
-    return (
-      <div className="voice-status voice-pill" data-call-state="reconnecting">
-        <span className="voice-state-icon crossed" aria-hidden="true"><MicOff size={16} strokeWidth={2.2} /></span>
-        <span className="voice-copy">Reconnecting call...</span>
-        <button type="button" className="voice-action" disabled>Muted</button>
-      </div>
-    );
-  }
-  if (session.state === "ended") {
-    return (
-      <div className="voice-status voice-ended" data-call-state="ended">
-        <span>Call ended - {formatCallEndReason(session.endReason)}</span>
-      </div>
-    );
-  }
-  return null;
-}
 
-function PeerMutedPill({ muted, handle }: { muted: boolean; handle: string }) {
-  if (!muted) return null;
+  if (state === "requesting") {
+    const incoming = session?.initiatorId !== selfId;
+    return (
+      <button
+        type="button"
+        className={`voice-call-slot voice-icon-button is-requesting ${incoming ? "is-incoming" : "is-outgoing"}`}
+        data-voice-call-slot="opponent"
+        data-call-state="requesting"
+        data-call-direction={incoming ? "incoming" : "outgoing"}
+        data-call-icon="phone"
+        onClick={incoming ? () => void voice.accept() : () => voice.hangup()}
+        aria-label={incoming ? "Accept voice call" : "Cancel voice call"}
+        title={incoming ? "Accept voice call" : "Cancel voice call"}
+      >
+        <Phone size={19} weight="regular" aria-hidden="true" />
+      </button>
+    );
+  }
+
+  if (state === "connecting" || state === "reconnecting") {
+    return (
+      <button
+        type="button"
+        className="voice-call-slot voice-icon-button is-connecting"
+        data-voice-call-slot="opponent"
+        data-call-state={state}
+        data-call-icon="phone"
+        disabled
+        aria-label={state === "connecting" ? "Voice call connecting" : "Voice call reconnecting"}
+        title={state === "connecting" ? "Voice call connecting" : "Voice call reconnecting"}
+      >
+        <span className="voice-spinner-ring" aria-hidden="true" />
+        <Phone size={19} weight="regular" aria-hidden="true" />
+      </button>
+    );
+  }
+
   return (
-    <span className="peer-muted-pill" aria-label={`@${handle} muted`}>
-      <MicOff size={12} strokeWidth={2.4} aria-hidden="true" />
-      <span>@{handle} muted</span>
-    </span>
+    <button
+      type="button"
+      className="voice-call-slot voice-icon-button is-idle"
+      data-voice-call-slot="opponent"
+      data-call-state={state === "ended" ? "ended" : "idle"}
+      data-call-icon="phone"
+      onClick={() => void voice.initiate()}
+      aria-label={state === "ended" ? "Start voice call again" : "Start voice call"}
+      title={state === "ended" ? "Start voice call again" : "Start voice call"}
+    >
+      <Phone size={19} weight="regular" aria-hidden="true" />
+      <audio ref={voice.remoteAudioRef} autoPlay playsInline />
+    </button>
   );
-}
-
-function formatCallEndReason(reason?: CallEndReason): string {
-  if (!reason) return "ended";
-  if (reason === "no-answer-timeout") return "no answer";
-  if (reason === "peer-gone-timeout") return "peer gone";
-  if (reason === "failed") return "failed";
-  return "hung up";
 }
 
 function presenceLabel(state: "connected" | "reconnecting" | "gone", _handle: string): string {
@@ -3727,13 +3695,12 @@ function GameScreen({
   const [selected, setSelected] = useState<Square | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<{ from: Square; to: Square } | null>(null);
   const [confirmResign, setConfirmResign] = useState(false);
-  const [endingCall, setEndingCall] = useState(false);
   const [now, setNow] = useState(Date.now());
   const myColor = game?.whiteId === home.user.id ? "w" : "b";
   const opponentId = game ? (game.whiteId === home.user.id ? game.blackId : game.whiteId) : "";
   const opponentRawState = game?.connectionState?.[opponentId] || "gone";
   const sendVoiceRef = React.useRef<((message: VoiceOutboundMessage) => boolean) | null>(null);
-  const voice = useVoiceCall({ game, selfId: home.user.id, opponentId, sendRef: sendVoiceRef, setMessage });
+  const voice = useVoiceCall({ game, selfId: home.user.id, sendRef: sendVoiceRef, setMessage });
 
   useEffect(() => {
     activeGameStore.set(game?.status === "active");
@@ -3791,7 +3758,6 @@ function GameScreen({
   const hasActiveCall = !!voice.session && voice.session.state !== "ended";
   const leaveGame = React.useCallback(() => {
     if (hasActiveCall) {
-      setEndingCall(true);
       voice.hangup();
       window.setTimeout(() => onHome(), 150);
       return;
@@ -3990,8 +3956,8 @@ function GameScreen({
                 aria-label={opponentPresence}
               />
               <span className="handle-line">@{opponentHandle}</span>
-              <PeerMutedPill muted={voice.peerMuted} handle={opponentHandle} />
             </div>
+            <VoiceCallSlot selfId={home.user.id} voice={voice} />
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>
 
@@ -4019,13 +3985,9 @@ function GameScreen({
               <span className="handle-line">@{myHandle}</span>
               <span className="you">you</span>
             </div>
-            <VoiceCallInlineControl voice={voice} />
             <time className="clock">{formatClock(myClock)}</time>
           </div>
         </div>
-
-        <VoiceCallStatus selfId={home.user.id} opponentHandle={opponentHandle} voice={voice} />
-        {endingCall ? <div className="voice-ending" role="status">Ending call...</div> : null}
 
         {pendingPromotion ? (
           <PromotionPicker

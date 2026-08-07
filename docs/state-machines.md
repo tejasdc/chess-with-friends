@@ -46,22 +46,21 @@ appended at the next unused number.
   cascade no longer exists). Renamed: `unanswered` end reason to
   `no-answer-timeout`; removed `game-ended` end reason. New:
   GAP-26 (post-game transport continuity), GAP-27 (persistent
-  call bar), GAP-28 (not-foreground push gate), GAP-29 (DO
+  voice slot), GAP-28 (not-foreground push gate), GAP-29 (DO
   hibernation adversity for outlived-call sessions). Rules doc:
   the WebRTC subsection extended with a "lifecycle outliving the
   primary socket purpose" note.
-- **2026-08-06 (addendum)** — Tejas set the in-call primary
-  control: single button, `MUTE` in the unmuted state, tap 1
-  mutes and relabels to `END CALL`, tap 2 (consecutive) sends
-  `call-hangup`. Any intervening broadcast drops back to
-  `MUTE` with the track re-enabled. Inline `Unmute` link
-  provides the escape from the end-armed intermediate without
-  fighting iOS long-press semantics. GAP-25 promoted from
-  P4-recommendation to shipped-spec: `muted: {[userId]:
-  boolean}` is required on the session and drives the
-  `@peer muted` pill next to the peer avatar. Machine states
-  unchanged — the muted intermediate is a client-side UI state
-  machine only.
+- **2026-08-06 (addendum, superseded in client UI 2026-08-07)** —
+  `muted: {[userId]: boolean}` was promoted from P4-recommendation
+  to shipped-spec on the session. The 2026-08-07 redesign keeps the
+  server projection but replaces the single in-call primary control
+  with separate mic and hangup icons, and removes the peer-muted
+  indicator from the client.
+- **2026-08-07 (voice bar redesign)** — Machine 8's server states and
+  signaling protocol are unchanged, but the client representation now
+  uses a single icon slot in the opponent player bar. The below-board
+  voice status strip and peer-muted pill were removed; connected calls
+  render as a small warm chip with separate mic and hangup icons.
 
 Remaining: GAP-16-follow-up — a time-warp regression that ticks a
 recurring accepted schedule multiple times, proving `nextFireAt`
@@ -1009,7 +1008,7 @@ both peers. No new HTTP route, no poll.
 
 ### Representation
 
-Only surface: the `/game/:id` screen. The call bar is a persistent
+Only surface: the `/game/:id` screen. The voice slot is a persistent
 element of the game-screen chrome — present during the game
 and equally present after the game reaches a terminal state, so
 the two players can keep talking about the game they just played.
@@ -1019,12 +1018,12 @@ into them.
 
 | Session state | Own view | Peer view |
 |---|---|---|
-| `idle` | Mic icon in the game chrome, tap to initiate. Present in both active and terminal game states. | Same. |
-| `requesting` (own peer initiated) | "Waiting for @peer to accept" pill with a Cancel action. Mic icon shows initiating spinner. **No local audio is transmitted yet** (see GAP-20). | Silent inline pill: "@peer wants to talk" with a single Accept action. **No audible ring.** No Ignore button — ignoring is the null action and the pill decays to `ended` after `REQUEST_TIMEOUT_MS`. Push fires ONLY if the recipient is not-foreground on this game (see GAP-28); a recipient already looking at the game screen sees the pill inline and never receives a push. |
-| `connecting` | "Connecting…" pill; mic icon transitions to live-ready but no track energy yet. | Same. |
-| `connected` | Live-mic indicator (small pulse) and a single primary in-call button. The button is the mute AND end-call control (see "Mute-primary two-tap End" below). Its label reflects the client-side UI intermediate: `MUTE` when the local track is enabled, `END CALL` when the local track is muted. | Same, plus a `@peer muted` pill next to the peer avatar when `session.muted[peerId] === true`. The observer can distinguish a muted peer from a silent-but-live peer at a glance — the pill is the answer to GAP-18's silent-peer question in the muted case. GAP-18 (backgrounded-Safari, unmuted-but-track-suspended) remains deferred. |
-| `reconnecting` | "Reconnecting call…" pill; mute controls disabled. | Same, plus "@peer is away" hint (Machine 6's game-connection grace and Machine 8's grace are surfaced together — one message, not two). |
-| `ended` | "Call ended — <reason>" strip, auto-dismisses in ~5s. Then chrome returns to `idle` affordance. | Same. |
+| `idle` | Opponent player-bar middle slot shows an outline phone icon. Tap starts a call. Present in both active and terminal game states. | Same. |
+| `requesting` (own peer initiated) | Same opponent-bar phone icon with a soft pulse. Tap cancels. **No local audio is transmitted yet** (see GAP-20). | Same opponent-bar phone icon with the stronger incoming animation. Tap accepts. **No audible ring.** No Ignore button — ignoring is the null action and the session decays to `ended` after `REQUEST_TIMEOUT_MS`. Push fires ONLY if the recipient is not-foreground on this game (see GAP-28); a recipient already looking at the game screen sees the inline icon and never receives a push. |
+| `connecting` | Opponent-bar phone icon with a small spinner ring. Disabled while signaling settles. | Same. |
+| `connected` | Opponent-bar connected chip: mic icon plus phone-disconnect icon. Mic toggles local mute; phone-disconnect hangs up. Muted is shown by swapping mic to mic-slash, not by color. | Same. No peer-muted indicator is rendered. |
+| `reconnecting` | Opponent-bar phone icon with the same small spinner ring. Disabled while the call recovers. | Same; Machine 6 connection pills may still indicate game-socket reconnect/offline status separately in the player rows. |
+| `ended` | Opponent-bar slot returns to the outline phone icon immediately. Tap starts a new call. | Same. |
 
 Mute is a media-level projection: `track.enabled = false` on the
 local `RTCPeerConnection`. The machine has no `muted` state. The
@@ -1035,62 +1034,26 @@ explicitly (2026-08-06); it is not optional. GAP-25 tracks its
 implementation and is promoted from P4-recommendation to
 shipped-spec.
 
-**Mute-primary two-tap End.** There is exactly one primary
-in-call button, and it lives on the persistent call bar:
-
-- Initial state after entering `connected`: button labelled
-  `MUTE`, local track enabled.
-- **Tap 1** (`MUTE` labelled) — sets local
-  `track.enabled = false`, broadcasts
-  `{muted: {[selfId]: true}}` mutation to the session, relabels
-  the button to `END CALL`. This is the *end-armed* UI
-  intermediate.
-- **Tap 2** (`END CALL` labelled, consecutive) — sends
-  `call-hangup`. Server transitions the session to `ended` with
-  `endReason = "hung-up-by-<userId>"`.
-- **Any intervening event drops back to `MUTE` labelled with the
-  track re-enabled.** "Intervening" means any state broadcast
-  from the server that changes the snapshot — the peer speaking
-  (audio-energy tick if we surface it), the peer muting or
-  unmuting themselves, an incoming signalling message, a page
-  reload, a transition into `reconnecting`, anything. The
-  end-armed intermediate is *fragile by design* — it exists
-  only across a single quiet moment. This is what keeps the
-  two-tap pattern safe: the second tap must be deliberate,
-  not accidental.
-- **Unmuting without ending** is an inline secondary control
-  next to the `END CALL` label — a small `Unmute` link that
-  re-enables the local track and relabels back to `MUTE`
-  without sending `call-hangup`. Recommended over long-press:
-  long-press on iOS Safari fights the system context menu
-  unless CSS blocks it, and desktop discoverability is poor.
-  An inline link is discoverable, requires no gesture-learning,
-  and reads correctly to screen readers.
-
-The end-armed UI intermediate is a client-side UI state
-machine (`idle → muted-and-armed → (end | unmute | interrupted)`)
-that lives entirely inside the `GameScreen` component. The
-server-side Machine 8 sees mute mutations and end mutations as
-independent events — the two-tap ordering is a UI
-affordance, not a server contract. A determined client can
-send `call-hangup` without ever muting; the server accepts it.
-The two-tap discipline exists to protect the user, not the
-server.
+**Connected chip controls.** The client exposes mute and hangup as two
+separate icon buttons inside the connected chip. `Mic` toggles the local
+track to muted, `MicSlash` toggles it back to unmuted, and
+`PhoneDisconnect` hangs up. The old mute-primary/two-tap-end client
+intermediate is retired; Machine 8 still has no `muted` state.
 
 **No-ring invariant.** The recipient's `requesting` representation
-is a silent visual pill. There is no `<audio>` element playing a
+is a silent animated icon. There is no `<audio>` element playing a
 ringtone anywhere in the machine. If a recipient is not-foreground
 on the game screen, a push notification is enqueued once (subject
 to the same 5-subscription limit and cleanup rules as Machine 7);
-if they are foreground, the pill alone is enough. This is the
+if they are foreground, the icon alone is enough. This is the
 same "never notify when the user is already looking" principle
 Machine 7 uses.
 
-**Persistent-bar invariant.** The mic/hangup control is part of
-the game-screen chrome and remains rendered when `game.status !==
-"active"`. The implementer must not re-mount the call bar inside
-a terminal-only screen and lose it during the transition — one
-mount, always visible on `/game/:id`.
+**Persistent-slot invariant.** The voice slot is part of the
+opponent player bar in the game-screen chrome and remains rendered
+when `game.status !== "active"`. The implementer must not re-mount
+it inside a terminal-only screen and lose it during the transition
+— one mount, always visible on `/game/:id`.
 
 ### Closure
 
@@ -1569,7 +1532,7 @@ untested).
 the DO alarm once. Guarded by `x-debug-local` header. Mirrors
 `debugExpireGrace` at `src/worker.ts:1358`.
 
-### GAP-25 (P1 — Machine 8, promoted from P4-recommendation to shipped-spec 2026-08-06): Muted is per-participant, broadcast, and drives the peer's `@peer muted` pill
+### GAP-25 (P1 — Machine 8, promoted from P4-recommendation to shipped-spec 2026-08-06; UI revised 2026-08-07): Muted is per-participant and broadcast, but no longer rendered for the peer
 **Where:** the `CallSession` record shape and the client mute
 toggle. `session.muted: {[userId]: boolean}` carried on the
 session, broadcast on every mutation via the existing snapshot
@@ -1580,13 +1543,11 @@ signalling message (`{type: "call-mute", muted: boolean}`) that
 mutates `session.muted[callerId]` and rebroadcasts. Machine 8's
 state does not transition on mute events; `connected` stays
 `connected` whether either peer is muted or not.
-**Why it matters (promoted, not deferred):** Tejas ordered
-this explicitly 2026-08-06. A silent-and-muted peer is UX-
-distinguishable from a silent-but-technically-connected peer
-(the GAP-18 case, which stays deferred for the *unmuted*
-silent condition only). Without the broadcast, the observer
-cannot tell "peer chose to be quiet" from "peer's audio
-died" — the most common voice-call frustration.
+**Why it matters (promoted, not deferred):** the broadcast remains
+useful server-side telemetry and keeps the signaling protocol stable,
+but the 2026-08-07 client redesign intentionally stops rendering the
+peer's mute bit. Tejas's current UX rule is that on a real call you
+do not know if the other party muted; silence is the signal.
 **Fix (shipped-spec):**
 - Add `muted: Record<string, boolean>` to `CallSession`,
   initialised to `{}` at `connected`. Absence of a key means
@@ -1595,17 +1556,17 @@ died" — the most common voice-call frustration.
   participant while the session is `connected` or
   `reconnecting`. Mutates and broadcasts. Idempotent — a
   second `call-mute` with the same value is a no-op.
-- Client renders `@peer muted` pill next to the peer's avatar
-  when `session.muted[peerId] === true`.
+- Client does not read or render `session.muted[peerId]`.
 - Self-muted state is derived from the local
   `track.enabled` in the client, NOT from
   `session.muted[selfId]` — the client is the source of truth
   for its own mute. This avoids a self-echo lag if the
   broadcast round-trips.
 
-`session.muted` is thus a projection *for observers only*, not
-a control channel. The local peer never reads their own key
-back from the server.
+`session.muted` is thus a server-side projection and compatibility
+field, not a UI control channel. The local peer never reads their own
+key back from the server, and the remote peer no longer gets a visible
+indicator.
 
 ### GAP-26 (P1, NEW — Machine 8 revision 2026-08-06): Post-game transport continuity
 **Where:** the game WebSocket after `game.status` moves off
@@ -1639,29 +1600,30 @@ work. Add a dedicated adversity case: initiate + accept call,
 reach `connected`, resign, wait 25s (or `debugExpireGrace`),
 assert socket is still open AND call is still `connected`.
 
-### GAP-27 (P1, NEW — Machine 8 revision 2026-08-06): Call bar must remain reachable after game terminal
+### GAP-27 (P1, NEW — Machine 8 revision 2026-08-06; UI revised 2026-08-07): Voice slot must remain reachable after game terminal
 **Where:** `GameScreen` chrome in `src/main.tsx`.
-**What:** the call bar (mic toggle, hangup control, current
-state pill) is part of the game-screen chrome and must stay
-rendered after the game reaches a terminal state. Two failure
+**What:** the opponent-bar voice slot (idle/requesting/connecting
+phone icon, or connected mic + hangup chip) is part of the
+game-screen chrome and must stay rendered after the game reaches
+a terminal state. Two failure
 shapes to guard against: (a) the terminal banner replaces the
-whole game chrome and hides the call bar; (b) a "Rematch?" or
+whole game chrome and hides the voice slot; (b) a "Rematch?" or
 "Back home" screen navigates away from `/game/:id`, dropping
 the socket (GAP-26) and killing the call.
 **Why it matters:** a call the user cannot hang up is worse
 than no call — they'd be stuck listening to their opponent
-until the peer-gone timeout. Even worse, if the bar
+until the peer-gone timeout. Even worse, if the slot
 disappears silently, the user won't realise they're still on
 a live call and might say something private.
-**Fix (recommendation):** the call bar is a persistent element
-in the `GameScreen`'s outer layout, sibling to (not child of)
-the board/terminal display. The terminal banner overlays the
-board area, not the chrome. Any post-game affordance
+**Fix (recommendation):** the voice slot is a persistent element
+in the `GameScreen`'s opponent player-bar row, sibling to the
+opponent handle and clock. The terminal banner overlays the board
+area, not the chrome. Any post-game affordance
 (Rematch, Home, Analyze) that navigates AWAY from `/game/:id`
 must first hang up the call — either implicitly via a client
 `call-hangup` on route change, or explicitly via a confirm
-strip. Recommend the implicit path with a small pill that
-says "Ending call…" during the navigation transition.
+strip. The current client takes the implicit path without rendering
+a separate "Ending call..." strip.
 
 ### GAP-28 (P1, NEW — Machine 8 revision 2026-08-06): Not-foreground push gate for the incoming pill
 **Where:** the `call-initiate` handler and the client's
@@ -1736,16 +1698,17 @@ Revised 2026-08-06 (Tejas): call lifecycle decouples from game;
 no ring; no Ignore action; GAP-18 deferred. Void: GAP-19 and
 GAP-23 (game→call cascade no longer exists). New: GAP-26 through
 GAP-29, covering the invariants the decoupling introduces
-(transport survives game terminal, call bar stays reachable,
+(transport survives game terminal, voice slot stays reachable,
 push fires only when not-foreground, hibernation preserves
 call state).
 
 The active ranking on Machine 8 for implementation planning:
 
 - P1 (block a first-class ship): GAP-20 requesting-mic UX,
-  GAP-25 muted-projected-to-peer (promoted from P4 by Tejas
-  2026-08-06), GAP-26 post-game transport, GAP-27 persistent
-  call bar, GAP-28 not-foreground push gate.
+  GAP-25 muted projection protocol (promoted from P4 by Tejas
+  2026-08-06; peer indicator removed from UI 2026-08-07),
+  GAP-26 post-game transport, GAP-27 persistent voice slot,
+  GAP-28 not-foreground push gate.
 - P2: GAP-21 ICE-restart signalling, GAP-22 paired-machine
   handoff, GAP-29 hibernation adversity.
 - P3: GAP-24 time-warp harness for the call machine.

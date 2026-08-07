@@ -724,125 +724,118 @@ body[data-screen="landing"] .landing-copy {
 .turn-status .terminal { color: var(--vermillion); }
 .move-count { color: var(--stone); }
 
-.voice-status {
-  width: min(820px, 100%);
-  min-height: 34px;
-  margin: 2px auto 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink);
-}
-.voice-action,
-.voice-link {
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-}
-.voice-pill,
-.voice-ended {
-  padding: 3px 0;
-}
-.voice-state-icon,
-.call-inline-button {
-  display: inline-grid;
-  place-items: center;
-}
-.voice-state-icon {
-  width: 18px;
-  height: 18px;
-  color: var(--ink);
-}
-.voice-state-icon.crossed { color: var(--stone); }
-.voice-copy {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.voice-action {
-  border: 1.5px solid var(--ink);
-  background: var(--ink);
-  color: var(--paper);
-  padding: 5px 10px;
-  cursor: pointer;
-}
-.voice-action:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.voice-link {
-  border: 0;
-  background: transparent;
-  color: var(--stone);
-  padding: 4px 0;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-.voice-ending {
-  width: min(820px, 100%);
-  margin: 0 auto;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-align: center;
-  text-transform: uppercase;
-  color: var(--stone);
-}
-.peer-muted-pill {
+.voice-call-slot {
+  flex: 0 0 58px;
+  width: 58px;
+  height: 34px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-width: 0;
-  color: var(--stone);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  justify-content: center;
 }
-.peer-muted-pill span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.call-inline-button {
-  flex: 0 0 34px;
+.voice-icon-button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
   width: 34px;
   height: 34px;
   padding: 0;
-  border: 1.5px solid transparent;
+  border: 1.5px solid color-mix(in srgb, var(--teak) 40%, transparent);
   border-radius: 50%;
   background: transparent;
   color: var(--ink);
   cursor: pointer;
-  transition: background-color 160ms var(--ease), border-color 160ms var(--ease), color 160ms var(--ease), opacity 160ms var(--ease);
+  transition: background-color 160ms var(--ease), border-color 160ms var(--ease), color 160ms var(--ease), opacity 160ms var(--ease), transform 160ms var(--ease);
 }
-.call-inline-button.is-active {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: var(--paper);
+.voice-icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--paper) 22%, transparent);
+  border-color: color-mix(in srgb, var(--teak) 64%, transparent);
 }
-.call-inline-button.is-muted {
-  border-color: var(--hair);
+.voice-icon-button:disabled {
+  cursor: default;
+  opacity: 0.78;
+}
+.voice-call-slot.is-idle[data-call-state="ended"] {
+  animation: voice-ended-fade 900ms var(--ease) 1;
+}
+.voice-call-slot.is-requesting.is-outgoing svg {
+  animation: voice-soft-pulse 1500ms var(--ease) infinite;
+}
+.voice-call-slot.is-requesting.is-incoming svg {
+  transform-origin: center;
+  animation: voice-incoming-ring 820ms var(--ease) infinite;
+}
+.voice-call-slot.is-connecting {
+  cursor: default;
+}
+.voice-spinner-ring {
+  position: absolute;
+  inset: 3px;
+  border: 1.5px solid color-mix(in srgb, var(--teak) 36%, transparent);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: voice-spin 840ms linear infinite;
+}
+.voice-connected-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 30px;
+  padding: 2px 4px;
+  border: 1px solid var(--hair-on-cream);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper) 72%, var(--cream));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cream) 50%, transparent);
+}
+.voice-connected-chip .voice-icon-button {
+  width: 25px;
+  height: 25px;
+  border: 0;
+  color: var(--ink);
+}
+.voice-connected-chip .voice-icon-button[data-call-icon="microphone-slash"] {
   color: var(--stone);
-  opacity: 0.72;
 }
-.clock-strip.active-turn .call-inline-button.is-active {
-  background: var(--paper);
-  border-color: var(--paper);
+.voice-connected-chip .voice-icon-button:hover {
+  background: color-mix(in srgb, var(--teak) 10%, transparent);
+}
+.clock-strip.active-turn .voice-icon-button {
+  color: var(--paper);
+  border-color: color-mix(in srgb, var(--cream) 42%, var(--teak));
+}
+.clock-strip.active-turn .voice-spinner-ring {
+  border-color: rgba(238, 227, 196, 0.36);
+  border-top-color: var(--paper);
+}
+.clock-strip.active-turn .voice-connected-chip {
+  background: color-mix(in srgb, var(--paper) 82%, var(--cream));
+}
+.clock-strip.active-turn .voice-connected-chip .voice-icon-button {
   color: var(--ink-2);
 }
-.clock-strip.active-turn .call-inline-button.is-muted {
-  border-color: rgba(238, 227, 196, 0.48);
-  color: rgba(238, 227, 196, 0.72);
+.clock-strip.active-turn .voice-connected-chip .voice-icon-button[data-call-icon="microphone-slash"] {
+  color: var(--stone);
 }
-.call-inline-button audio { display: none; }
+.voice-call-slot audio { display: none; }
+
+@keyframes voice-soft-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.88; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+@keyframes voice-incoming-ring {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  18% { transform: translateX(-1px) rotate(-7deg); }
+  36% { transform: translateX(1px) rotate(7deg); }
+  54% { transform: translateX(-1px) rotate(-5deg); }
+  72% { transform: translateX(1px) rotate(5deg); }
+}
+@keyframes voice-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes voice-ended-fade {
+  0% { opacity: 0.45; transform: scale(0.94); }
+  100% { opacity: 1; transform: scale(1); }
+}
 
 /* Waiting-room readout — the clock slot on both strips shows a quiet
    text label ("ready" / "10 min") instead of a running clock. Muted
