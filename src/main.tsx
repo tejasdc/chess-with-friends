@@ -2,7 +2,83 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Chess, type Color, type Move as ChessMove, type PieceSymbol, type Square } from "chess.js";
-import { Microphone, MicrophoneSlash, Phone, PhoneDisconnect } from "@phosphor-icons/react";
+// Voice icons live in-file as custom SVG (not a Phosphor / Iconoir kit).
+// The app has its own drawn hand — chess pieces, board frame, clock strip —
+// so parachuting in a UI-kit set makes the voice controls feel foreign.
+// These share the 1.5px stroke, no-fill, monoline geometry the rest of the
+// app carries. Each icon is a 20×20 viewBox and inherits currentColor so
+// the palette flows through active-turn strips and disabled states without
+// per-icon overrides.
+function PhoneIcon({ className = "voice-icon" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4.5 6.2 L7 3.7 A1.2 1.2 0 0 1 8.7 3.7 L10.3 5.3 A1.2 1.2 0 0 1 10.3 7 L9.2 8.1 A9.8 9.8 0 0 0 11.9 10.8 L13 9.7 A1.2 1.2 0 0 1 14.7 9.7 L16.3 11.3 A1.2 1.2 0 0 1 16.3 13 L13.8 15.5 A1.6 1.6 0 0 1 12 15.9 C7.8 15 5 12.2 4.1 8 A1.6 1.6 0 0 1 4.5 6.2 Z" />
+    </svg>
+  );
+}
+function PhoneHangupIcon({ className = "voice-icon" }: { className?: string }) {
+  // Same handset, rotated 135°: reads as the opposite of "pick up".
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <g transform="rotate(135 10 10)">
+        <path d="M4.5 6.2 L7 3.7 A1.2 1.2 0 0 1 8.7 3.7 L10.3 5.3 A1.2 1.2 0 0 1 10.3 7 L9.2 8.1 A9.8 9.8 0 0 0 11.9 10.8 L13 9.7 A1.2 1.2 0 0 1 14.7 9.7 L16.3 11.3 A1.2 1.2 0 0 1 16.3 13 L13.8 15.5 A1.6 1.6 0 0 1 12 15.9 C7.8 15 5 12.2 4.1 8 A1.6 1.6 0 0 1 4.5 6.2 Z" />
+      </g>
+    </svg>
+  );
+}
+function MicIcon({
+  muted = false,
+  className = "voice-icon voice-icon-mic",
+}: {
+  muted?: boolean;
+  className?: string;
+}) {
+  // Slash is always in the DOM so cross-fade can animate its stroke-dashoffset
+  // in and out without a component swap.
+  return (
+    <svg
+      className={className}
+      data-muted={muted ? "true" : "false"}
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="7.5" y="3" width="5" height="9" rx="2.5" />
+      <path d="M5 9.5 A5 5 0 0 0 15 9.5" />
+      <path d="M10 14.5 L10 17.5" />
+      <path d="M7.5 17.5 L12.5 17.5" />
+      <path className="mic-slash" d="M4 4 L16 16" />
+    </svg>
+  );
+}
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -2164,45 +2240,52 @@ function useVoiceCall({
 function VoiceCallSlot({
   selfId,
   voice,
+  opponentOffline = false,
 }: {
   selfId: string;
   voice: ReturnType<typeof useVoiceCall>;
+  opponentOffline?: boolean;
 }) {
   const session = voice.visibleSession;
   const state = session?.state || "idle";
+
+  // Connected — a pill chip that carries mute + end-call, entering with a
+  // scale-in-from-left so the eye tracks handle → chip. Chip class name
+  // preserved for existing test hooks and screen-reader association.
   if (state === "connected") {
     const muted = !voice.localTrackEnabled;
     return (
       <div
-        className="voice-call-slot is-connected"
+        className="voice-call-slot voice-slot-inline is-connected"
         data-voice-call-slot="opponent"
         data-call-state="connected"
         data-call-control-state={muted ? "muted" : "unmuted"}
       >
-        <div className="voice-connected-chip" aria-label={muted ? "Voice call muted" : "Voice call connected"}>
+        <div
+          className={`voice-connected-chip voice-chip ${muted ? "muted" : ""}`}
+          role="group"
+          aria-label={muted ? "Voice call muted" : "Voice call connected"}
+        >
           <button
             type="button"
-            className="voice-icon-button"
+            className="voice-icon-button voice-mini mute-btn"
             data-call-icon={muted ? "microphone-slash" : "microphone"}
             onClick={muted ? voice.unmute : voice.mute}
             aria-label={muted ? "Unmute call" : "Mute call"}
             title={muted ? "Unmute call" : "Mute call"}
           >
-            {muted ? (
-              <MicrophoneSlash size={17} weight="regular" aria-hidden="true" />
-            ) : (
-              <Microphone size={17} weight="regular" aria-hidden="true" />
-            )}
+            <MicIcon muted={muted} />
           </button>
+          <span className="voice-divider" aria-hidden="true" />
           <button
             type="button"
-            className="voice-icon-button"
+            className="voice-icon-button voice-mini end-call"
             data-call-icon="phone-disconnect"
             onClick={() => voice.hangup()}
             aria-label="End call"
             title="End call"
           >
-            <PhoneDisconnect size={17} weight="regular" aria-hidden="true" />
+            <PhoneHangupIcon />
           </button>
         </div>
         <audio ref={voice.remoteAudioRef} autoPlay playsInline />
@@ -2210,12 +2293,18 @@ function VoiceCallSlot({
     );
   }
 
+  // Requesting — the "ringing" state. Two directions with distinct motion:
+  //   outbound → breathe (concentric ring pulse outward, a Rodchenko circle
+  //              study — you initiated, they haven't picked up).
+  //   incoming → handset rocks + aura pulses.  Attention-grabbing but
+  //              honest — the button geometry stays stable so the tap
+  //              target doesn't slide out from under a finger.
   if (state === "requesting") {
     const incoming = session?.initiatorId !== selfId;
     return (
       <button
         type="button"
-        className={`voice-call-slot voice-icon-button is-requesting ${incoming ? "is-incoming" : "is-outgoing"}`}
+        className={`voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only ${incoming ? "is-requesting-in is-incoming" : "is-requesting-out is-outgoing"}`}
         data-voice-call-slot="opponent"
         data-call-state="requesting"
         data-call-direction={incoming ? "incoming" : "outgoing"}
@@ -2224,16 +2313,20 @@ function VoiceCallSlot({
         aria-label={incoming ? "Accept voice call" : "Cancel voice call"}
         title={incoming ? "Accept voice call" : "Cancel voice call"}
       >
-        <Phone size={19} weight="regular" aria-hidden="true" />
+        <PhoneIcon />
       </button>
     );
   }
 
+  // Connecting / reconnecting — a single dot orbits the icon.  Constructivist
+  // rotation, not a stock spinner-ring.  We keep the .voice-spinner-ring
+  // class name because the e2e suite asserts on it; the visual is now the
+  // orbiting dot styled by that class.
   if (state === "connecting" || state === "reconnecting") {
     return (
       <button
         type="button"
-        className="voice-call-slot voice-icon-button is-connecting"
+        className="voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only is-connecting"
         data-voice-call-slot="opponent"
         data-call-state={state}
         data-call-icon="phone"
@@ -2241,24 +2334,41 @@ function VoiceCallSlot({
         aria-label={state === "connecting" ? "Voice call connecting" : "Voice call reconnecting"}
         title={state === "connecting" ? "Voice call connecting" : "Voice call reconnecting"}
       >
-        <span className="voice-spinner-ring" aria-hidden="true" />
-        <Phone size={19} weight="regular" aria-hidden="true" />
+        <span className="voice-spinner-ring voice-orbit" aria-hidden="true" />
+        <PhoneIcon />
       </button>
     );
   }
 
+  // Idle / ended.  When the opponent is offline the button reads inert
+  // (dashed, dimmed, no hover, cursor-blocked).  We deliberately do NOT
+  // add an "OFFLINE" text — the presence dot already carries that state.
+  const ended = state === "ended";
   return (
     <button
       type="button"
-      className="voice-call-slot voice-icon-button is-idle"
+      className={`voice-call-slot voice-slot-inline voice-icon-button voice-pill icon-only ${ended ? "is-ended" : "is-idle"} ${opponentOffline ? "offline" : ""}`}
       data-voice-call-slot="opponent"
-      data-call-state={state === "ended" ? "ended" : "idle"}
+      data-call-state={ended ? "ended" : "idle"}
       data-call-icon="phone"
-      onClick={() => void voice.initiate()}
-      aria-label={state === "ended" ? "Start voice call again" : "Start voice call"}
-      title={state === "ended" ? "Start voice call again" : "Start voice call"}
+      disabled={opponentOffline}
+      onClick={opponentOffline ? undefined : () => void voice.initiate()}
+      aria-label={
+        opponentOffline
+          ? "Opponent offline — call unavailable"
+          : ended
+            ? "Start voice call again"
+            : "Start voice call"
+      }
+      title={
+        opponentOffline
+          ? "Opponent offline"
+          : ended
+            ? "Start voice call again"
+            : "Start voice call"
+      }
     >
-      <Phone size={19} weight="regular" aria-hidden="true" />
+      <PhoneIcon />
       <audio ref={voice.remoteAudioRef} autoPlay playsInline />
     </button>
   );
@@ -3956,8 +4066,15 @@ function GameScreen({
                 aria-label={opponentPresence}
               />
               <span className="handle-line">@{opponentHandle}</span>
+              {/* Voice slot lives ADJACENT to the handle — the button
+                  belongs next to the person you're calling, not floating
+                  between handle and clock. */}
+              <VoiceCallSlot
+                selfId={home.user.id}
+                voice={voice}
+                opponentOffline={opponentRawState === "gone"}
+              />
             </div>
-            <VoiceCallSlot selfId={home.user.id} voice={voice} />
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>
 

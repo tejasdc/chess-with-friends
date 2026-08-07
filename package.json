@@ -6,15 +6,14 @@
     "dev": "vite --host 127.0.0.1",
     "worker:dev": "npm run build && wrangler dev --local --persist-to=.wrangler/state --port 8787",
     "build": "vite build",
+    "postbuild": "node scripts/verify-precache.mjs",
     "typecheck": "tsc --noEmit",
     "deploy": "npm run build && wrangler deploy",
     "test:e2e": "playwright test",
     "test:push": "node scripts/verify-push-policy.mjs && node scripts/verify-push-copy-contract.mjs",
-    "vapid:generate": "node scripts/generate-vapid.mjs",
-    "postbuild": "node scripts/verify-precache.mjs"
+    "vapid:generate": "node scripts/generate-vapid.mjs"
   },
   "dependencies": {
-    "@phosphor-icons/react": "^2.1.10",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.0",
     "@types/three": "^0.185.3",
