@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "worker:dev": "npm run build && wrangler dev --local --persist-to=.wrangler/state --port 8787",
+    "db:migrate:local": "wrangler d1 migrations apply chess-with-friends --local --persist-to=.wrangler/state",
+    "worker:dev": "npm run build && npm run db:migrate:local && wrangler dev --local --persist-to=.wrangler/state --port 8787",
     "prebuild": "npm run positions:verify",
     "build": "vite build",
     "postbuild": "node scripts/verify-precache.mjs",
@@ -23,7 +24,7 @@
     "chess.js": "^1.4.0",
     "three": "^0.185.1",
     "vite": "^7.0.0",
-    "wrangler": "^4.26.0"
+    "wrangler": "4.128.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260801.1",

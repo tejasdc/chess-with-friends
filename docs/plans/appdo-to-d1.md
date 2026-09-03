@@ -1,6 +1,11 @@
 # AppDO to D1 Architecture Plan
 
-Status: **Reviewed plan for approval — planning only. No runtime code or deployment is included.**
+Status: **Implemented locally on 2026-09-03; production configuration and deployment remain intentionally pending.**
+
+The implementation uses the approved zero-migration cutover. No remote D1
+database was created and nothing was deployed because the current unified
+Cloudflare deployment token lacks D1 API permission. See
+`docs/d1-operations.md` for the exact remaining steps.
 
 Independent review outcome: the first pass returned `NO-SHIP` on four bounded gaps. The reviewed version incorporated scheduler recovery, reset safety, presence compatibility, and complete AppDO seam removal, then received **`SHIP` with no remaining plan blockers**. The owner subsequently confirmed that nobody is using the app and explicitly accepted abandoning all current sessions and activity, so the reviewed quiet-window preflight is unnecessary: its safety condition is already known to be true. Runtime correctness still has to be demonstrated by the implementation checks in this document.
 
@@ -112,7 +117,7 @@ The implementation is incomplete until every live singleton dependency is addres
 - `GameDO.init` is idempotent **by value**: an identical immutable game ID, players, handles, and time control succeeds; any mismatch fails loudly.
 - The public Worker allowlists valid game actions. It never proxies `/init` and never forwards or trusts a client-supplied internal-auth header; server-created internal calls construct their own headers.
 - The legacy `AppDO` class/binding remains only so its old data is recoverable. No public or normal internal request routes to it.
-- A repository-wide completion search accounts for all six current `appStub(` references (one definition and five call sites) and all `APP_DO` references; anything retained is documented as rollback-only.
+- A repository-wide completion search confirms that all six pre-cutover `appStub(` references are gone. The retained `APP_DO` binding, legacy class routes, and documentation are accounted for as rollback-only.
 
 ## Global presence design
 

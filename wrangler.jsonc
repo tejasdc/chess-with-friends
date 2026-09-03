@@ -21,14 +21,31 @@
   },
   "durable_objects": {
     "bindings": [
+      // Rollback-only. Normal public and internal traffic no longer routes to AppDO.
       { "name": "APP_DO", "class_name": "AppDO" },
-      { "name": "GAME_DO", "class_name": "GameDO" }
+      { "name": "GAME_DO", "class_name": "GameDO" },
+      { "name": "SCHEDULER_DO", "class_name": "SchedulerDO" }
     ]
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "chess-with-friends",
+      // Local development uses preview_database_id. Replace this placeholder
+      // with the ID returned by `wrangler d1 create chess-with-friends` before deploy.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "preview_database_id": "local-chess-with-friends",
+      "migrations_dir": "migrations"
+    }
+  ],
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["AppDO", "GameDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["SchedulerDO"]
     }
   ]
 }

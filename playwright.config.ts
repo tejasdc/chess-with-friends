@@ -51,7 +51,7 @@ export default defineConfig({
     }] : []),
   ],
   webServer: {
-    command: `npm run build && wrangler dev --local --persist-to=.wrangler/state-${port} --port ${port}`,
+    command: `npm run build && wrangler d1 migrations apply chess-with-friends --local --persist-to=.wrangler/state-${port} && wrangler dev --local --persist-to=.wrangler/state-${port} --port ${port}`,
     url: `http://localhost:${port}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,

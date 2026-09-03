@@ -72,8 +72,8 @@ no "exactly N" cap:
 - `call_invite` — a friend you are playing with wants to talk, and you are
   not already foreground on that game
 
-Enforcement: `scripts/verify-push-policy.mjs` scans `src/worker.ts` and
-`public/sw.js` — every `enqueuePush` call site must use a type in this
+Enforcement: `scripts/verify-push-policy.mjs` scans `src/worker.ts`,
+`src/d1-app.ts`, and `src/sw.js` — every `enqueuePush` call site must use a type in this
 list, and no notification-like literal may name a re-engagement category.
 `scripts/verify-push-copy-contract.mjs` scans the tests — every current
 push type must have an explicit copy assertion marker.
@@ -82,10 +82,12 @@ the principle, add it to both the code and this list in the same change.
 
 Push endpoint invariant: one browser push endpoint belongs to one current
 user. Subscribing an endpoint transfers ownership to that user, removes it
-from every other user, and drops any stale pending endpoint queue. Logout /
-unsubscribe detach the endpoint. Pending endpoint payloads are scoped to
-their `userId`, consumed on read, and TTL-pruned so old service workers
-cannot pin a stale notification forever.
+from every other user, and drops any stale pending endpoint queue. Explicit
+notification disablement and endpoint-scoped legacy logout detach the
+endpoint. Ordinary account sign-out preserves the browser subscription,
+which is reassociated when the user next signs in. Pending endpoint payloads
+are scoped to their `userId`, consumed on read, and TTL-pruned so old service
+workers cannot pin a stale notification forever.
 
 **Anti-addiction invariants**
 - No rating ladder, no ELO, no streaks, no puzzles feed, no daily anything.
@@ -107,10 +109,12 @@ cannot pin a stale notification forever.
 
 ## Infrastructure constraint
 
-Tejas's stack: Cloudflare (Pages/Workers/Durable Objects preferred — a DO per
-game is a natural fit; $5 Workers Paid is acceptable when needed). The app will
-live on a tejas.nyc subdomain (app-like tenants get subdomains per
-chann.app/docs/runbooks/publish-subdomain.md). Zone web-analytics beacon applies.
+Tejas's stack: Cloudflare Worker + D1 for normalized application records,
+one authoritative `GameDO` per game, and one alarm-only `SchedulerDO` for
+exact scheduled starts. WebRTC media remains peer-to-peer through STUN/TURN;
+`GameDO` owns only signaling. The rollback-only legacy `AppDO` namespace stays
+bound but is not part of normal routing. $5 Workers Paid is acceptable when
+needed. The canonical app origin and zone web-analytics beacon stay unchanged.
 
 ## Definition of done (v1)
 

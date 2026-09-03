@@ -70,15 +70,18 @@ appended at the next unused number.
   uses a single icon slot in the opponent player bar. The below-board
   voice status strip and peer-muted pill were removed; connected calls
   render as a small warm chip with separate mic and hangup icons.
+- **2026-09-03 (AppDO to D1 cutover)** — Account, session, social,
+  schedule, presence-lease, notification, and game-directory machines moved
+  from the singleton AppDO blob to normalized D1 tables. Conditional DML,
+  database constraints, and stable operation identities replace global actor
+  serialization. `GameDO` remains authoritative for each live game and call.
+  A narrow `SchedulerDO` owns alarms while D1 occurrence rows own recoverable
+  scheduled-game effects. Legacy AppDO data remains rollback-only.
 
-Remaining: GAP-16-follow-up — a time-warp regression that ticks a
-recurring accepted schedule multiple times, proving `nextFireAt`
-advances by exactly one interval per tick without piling up games. The
-existing real-time test only covers a single firing. Plus the
-active Machine 8 gaps (GAP-20, GAP-21, GAP-22, GAP-24, GAP-25,
-GAP-26, GAP-27, GAP-28, GAP-29); those close as the voice-call
-feature lands, not before. GAP-18 is deferred; GAP-19 and GAP-23
-are void.
+Remaining: GAP-18 is deliberately deferred pending observed iOS silence. GAP-19
+and GAP-23 are void. The D1 recurrence time-warp regression closes GAP-17, and
+the implemented voice protocol plus named adversity checks close GAP-20 through
+GAP-29 except those deferred/void entries.
 
 ## Why this doc exists
 
@@ -112,8 +115,8 @@ or unreachable so an implementing agent can close them one at a time.
   guard fails, the event is rejected; the state doesn't change.
 - **Single writer** — the one place in the system that is allowed to mutate
   the entity's state. Everyone else reads. On this codebase the writer is
-  either `AppDO` (for account-scoped entities) or `GameDO` (for per-game
-  state) — never the client.
+  either a guarded D1 route transition (application records), `SchedulerDO`
+  (alarm ownership only), or `GameDO` (per-game state) — never the client.
 - **Projection** — a client-side view derived from the writer's state.
   Projections are read-only. When they disagree with the writer, the writer
   wins on the next refresh.
@@ -127,23 +130,22 @@ or unreachable so an implementing agent can close them one at a time.
 
 | Scope | Writer | Storage |
 |---|---|---|
-| Accounts, friendships, friend requests, challenges, schedules, game metadata, presence, push subscriptions, push log | `AppDO` (`ctx.storage.get("db")`) | Durable Object storage, single JSON blob keyed `"db"` |
+| Accounts, friendships, friend requests, challenges, schedules, game metadata projections, presence, push subscriptions, push log | stateless Worker D1 transitions | normalized D1 tables with constraints and indexes |
 | Per-game state (FEN, clocks, moves, terminal status, resign) | `GameDO` (`ctx.storage.get("game")`) | one DO per `gameId` |
 | Per-game connection state (WebSocket presence of each player) | `GameDO` (derived from `ctx.getWebSockets()` + persisted `graceExpiresAt`) | not stored as a field |
-| Per-game voice-call session (planned, Machine 8) | `GameDO` (`ctx.storage.get("callSession")`) | one session slot per `GameDO`; media is peer-to-peer and never persisted |
-| Session token | `AppDO.sessions` | Durable Object storage |
-| Push permission and subscription | browser (permission), `AppDO.pushSubscriptions[userId]` (up to 5) | browser + DO |
-| Client `home` | derived from `/api/me` and `/api/presence/heartbeat` | React state, refreshed every 10s and after any action |
+| Per-game voice-call session | `GameDO` (`ctx.storage.get("callSession")`) | one session slot per `GameDO`; media is peer-to-peer and never persisted |
+| Session token | D1 session transition; raw token exists only in the cookie | SHA-256 token digest, expiry, and revocation in D1 |
+| Push permission and subscription | browser (permission), stateless Worker (endpoint ownership) | browser + normalized D1 tables, at most 5 endpoints/user |
+| Scheduled alarm | `SchedulerDO` | one DO alarm; schedule and occurrence workflow remain in D1 |
+| Client `home` | derived from `/api/me` and `/api/presence/heartbeat` | React state, refreshed while visible and after actions |
 
-Cloudflare Durable Objects serialize writes through one object instance, so
-`AppDO` and each `GameDO` remain the only writers for their machines. That
-single-writer guarantee does not mean a handler can mutate in-memory state,
-await arbitrary external I/O, and assume no other event can observe old durable
-storage during the await. Durable state must be persisted before remote side
-effects such as Web Push delivery or cross-DO initialization; retries and
-read-model reconciliation treat those post-save effects as replayable. HTTP
-callers still cannot mutate state except through the DO routes, but handler
-code must keep durable transitions and external effects in that order.
+`GameDO` and `SchedulerDO` retain Durable Object serialization within their
+own boundaries. D1 machines instead admit transitions with uniqueness, check
+constraints, conditional DML, and affected-row checks. Predetermined
+multi-statement units use D1 `batch()`. Durable intent is committed before Web
+Push delivery or cross-DO initialization; occurrence and projection retries
+use stable identity and monotonic updates. HTTP callers can mutate only through
+the owning Worker/DO routes.
 
 ## Machine inventory
 
@@ -155,7 +157,7 @@ code must keep durable transitions and external effects in that order.
 6. Per-player game-connection state
 7. Push subscription
 7A. Push delivery
-8. Per-game voice call (planned, not yet implemented — see Machine 8)
+8. Per-game voice call
 
 Presence, the message toast, and the landing puzzle shelf carry state but
 are not full machines — they are described in "Non-machines" at the end.
@@ -174,8 +176,8 @@ Establish which user is behind a request and let them sign out.
   learn whether the typed handle already has an account.
 - `authenticating` — the browser is inside `startAuthentication` or
   `startRegistration`; a WebAuthn dialog is up.
-- `signed-in` — session cookie resolves to a user; `AppDO.sessions[token]`
-  holds that user's id.
+- `signed-in` — the cookie's raw bearer token hashes to one unexpired,
+  unrevoked D1 session row for that user.
 
 The states after `signed-out` are transient client states (`AuthScreen`);
 `signed-in` is durable and lives in the server session table plus the cookie.
@@ -207,8 +209,9 @@ stateDiagram-v2
 ```
 
 ### Writer
-`AppDO` for the session record. Client owns the ephemeral `flow` / `busy`
-UI state; those are not authoritative.
+The stateless D1 auth routes consume the purpose-bound WebAuthn challenge and
+create/revoke the hashed session with guarded `batch()` mutations. Client owns
+the ephemeral `flow` / `busy` UI state; those are not authoritative.
 
 ### Representation
 - `signed-out` — `AuthScreen`.
@@ -223,13 +226,14 @@ Every state has an explicit exit above. `authenticating` cannot deadlock —
 the browser's WebAuthn API always resolves or rejects.
 
 ### Notes on soundness
-- `AppDO.registrationChallenges` and `AppDO.authenticationChallenges` are
-  written on `/options` and consumed on `/verify`. They are keyed by handle
-  and by userId respectively, so a new `/options` call overwrites the prior
-  one for the same key — no unbounded accumulation.
-- There is no TTL cleanup for challenges that never get a `/verify`. A user
-  who taps `/options`, walks away, and never comes back leaves one entry per
-  handle. Bounded, low priority.
+- `auth_challenges` rows are purpose-bound, expire after ten minutes, and are
+  consumed exactly once by verification. Expiry is indexed and opportunistic
+  cleanup is bounded.
+- Raw bearer tokens are never stored. Logout conditionally marks the digest
+  revoked, removes only that session's presence leases, and clears the cookie.
+- The approved empty D1 cutover makes every legacy AppDO session resolve as the
+  ordinary `signed-out` state. Re-registration does not require reinstalling
+  the PWA.
 
 ---
 
@@ -257,23 +261,22 @@ Two entities, one shared lifecycle. `Friendship` is the terminal state;
 ### Events
 
 - `request-by-handle` — `POST /api/friends/request` with a handle. Server
-  creates a `FriendRequest` if none exists in either direction (dedupe in
-  `createFriendRequest`, `src/worker.ts:752-773`).
+  creates a D1 `FriendRequest` if none exists in either direction; the partial
+  unique pair index settles concurrent duplicates.
 - `use-invite-link` — `POST /api/friends/invite` with the target's
   `inviteToken`. The invite link IS standing consent; using it creates a
   `Friendship` immediately, skipping the request/accept ceremony. Any
   pending request in either direction is flipped to `accepted` in the same
-  call. Idempotent (see `requestByInvite`, `src/worker.ts:702-750`).
+  D1 batch. The friendship primary key makes replay idempotent.
 - `accept-request` — recipient posts `/api/friends/:id/accept`. Status
   → `accepted`, Friendship row created.
-- `decline-request` — recipient posts `/api/friends/:id/decline`
-  (`declineFriendRequest`, `src/worker.ts:842`). Guards: `toId ===
+- `decline-request` — recipient posts `/api/friends/:id/decline`.
+  Guards: `toId ===
   user.id`, `status === "pending"`. Idempotent — decline of an
   already-declined / accepted / withdrawn request returns the current
   status without error. Status → `declined`.
 - `withdraw-request` — sender posts `DELETE
-  /api/friends/requests/:id` (`withdrawFriendRequest`,
-  `src/worker.ts:861`). Guard: `fromId === user.id`. **Hard delete** of
+  /api/friends/requests/:id`. Guard: `fromId === user.id`. **Hard delete** of
   the row rather than a `withdrawn` terminal, chosen because a sender
   who took the request back has no dedicated waiting surface to display
   the outcome on (contrast the challenge machine, where the WaitingRoom
@@ -296,15 +299,17 @@ stateDiagram-v2
   friends --> [*]: (no unfriend in v1)
 ```
 
-The entity-level `declined` state (`src/worker.ts:61`) is now reachable
+The entity-level `declined` state is reachable
 via `decline-request`. The sender does not observe a per-request
 `declined` — from the sender's side, `sentRequests` simply stops
 returning the row (declined requests are filtered out of `sentRequests`
 in `me()`).
 
 ### Writer
-`AppDO`. Reads: `/api/me` returns `friends`, `requests` (inbound pending),
-`sentRequests` (outbound pending).
+The stateless D1 friendship routes. Pair uniqueness lives in the database;
+accept/decline/withdraw mutations guard the current status. Reads from
+`/api/me` return `friends`, `requests` (inbound pending), and `sentRequests`
+(outbound pending).
 
 ### Representation
 
@@ -355,12 +360,10 @@ Friends row doesn't project it.
   `status="accepted"`, sets `gameId`, and enqueues a
   `challenge_accepted` push to the inviter.
 - `withdraw-challenge` — inviter posts
-  `POST /api/challenges/:id/withdraw` (`withdrawChallenge`,
-  `src/worker.ts:911`). Guard: `fromId === user.id`, `status ===
+  `POST /api/challenges/:id/withdraw`. Guard: `fromId === user.id`, `status ===
   "pending"`. Idempotent. Sets `status = "withdrawn"`.
 - `decline-challenge` — recipient posts
-  `POST /api/challenges/:id/decline` (`declineChallenge`,
-  `src/worker.ts:930`). Guard: `toId === user.id`, `status ===
+  `POST /api/challenges/:id/decline`. Guard: `toId === user.id`, `status ===
   "pending"`. Idempotent. Sets `status = "declined"`.
 - `expire` — deliberately not implemented. Challenges persist until one
   of the four transitions fires (accept / decline / withdraw). This is
@@ -380,9 +383,12 @@ stateDiagram-v2
 ```
 
 ### Writer
-`AppDO`. Reads: `/api/me` returns `challenges` (inbound pending) and
-`sentChallenges` (outbound pending). `/api/challenges/:id/state` returns a
-single challenge for either party — this is the WaitingRoom's poll target.
+The stateless D1 challenge routes. A durable stable game id is stored before
+`GameDO` initialization, and conditional status transitions admit only one
+accept/decline/withdraw winner. Reads from `/api/me` return `challenges`
+(inbound pending) and `sentChallenges` (outbound pending).
+`/api/challenges/:id/state` returns one challenge for either party; this is the
+WaitingRoom's poll target.
 
 ### Representation
 
@@ -454,24 +460,25 @@ event. More states, more gaps.
 - `decline-schedule` — recipient posts `POST /api/schedules/:id/decline`
   (`declineSchedule`, near `cancelSchedule` in `src/worker.ts`). Guards:
   `toId === user.id`, `status === "pending"`. Idempotent. Sets `status =
-  "declined"` and calls `setNextScheduleAlarm()` to rearm the sweep.
-- `alarm-fire` — `AppDO.alarm()` runs on the next scheduled time. Two
-  passes per wake:
-  1. **Zombie sweep** (`src/worker.ts:454-466`): every `status ===
-     "pending"` schedule with `startAt + 60_000ms <= now` is transitioned
-     to `expired`. The 60s grace matches the create-endpoint tolerance
-     so an accept landing seconds before `startAt` isn't racy with the
-     sweep.
-  2. **Fire loop**: every `status === "accepted"` schedule with
-     `nextFireAt <= now` creates one fresh Game and enqueues
-     `scheduled_start` pushes to both parties. One-off → `fired`.
-     Recurring → advance `nextFireAt` by one interval, skipping past
-     occurrences so a missed week doesn't fire a stack of catch-up
-     games.
+  "declined"` and asks `SchedulerDO` to canonicalize the next alarm.
+- `alarm-fire` — `SchedulerDO.alarm()` wakes and queries D1. Each pass:
+  1. **Zombie sweep:** conditionally changes every due pending schedule to
+     `expired`. The 60-second grace matches the create tolerance.
+  2. **Claim:** atomically inserts the stable game-directory row and unique
+     `(schedule_id, scheduled_for)` occurrence before advancing the schedule.
+     One-off → `fired`; recurring → remain `accepted` and advance beyond now.
+  3. **Resume effects:** initialize the stable `GameDO`, enqueue each player's
+     stable push event, retry deliveries, and mark each completed effect. A
+     duplicate alarm resumes the same occurrence and cannot create a second
+     game.
 - `startAt-passed` — the zombie-sweep half of `alarm-fire` above.
-- Alarm rearming: `setNextScheduleAlarm()` now considers two wake
-  targets and takes the earlier: (a) accepted schedules' `nextFireAt`,
-  (b) pending schedules' `startAt + grace`. See `src/worker.ts:1108`.
+- Alarm rearming: `SchedulerDO.canonicalize()` chooses the earliest accepted
+  `nextFireAt`, pending `startAt + grace`, unfinished occurrence retry, or
+  scheduled push retry. Candidate deadlines and unique short-lived handoff
+  markers are sent before mutations that could introduce an earlier wake and
+  cleared during canonicalization afterward. If an alarm beats its D1 commit,
+  the marker retains watchdog rechecks; a crash may cause an early wake but
+  cannot lose the new deadline.
 
 ### Transitions
 
@@ -492,8 +499,10 @@ stateDiagram-v2
 ```
 
 ### Writer
-`AppDO`. `AppDO.alarm()` is the only place `nextFireAt` advances and
-`status="fired"` is set. `setNextScheduleAlarm` rearms after every mutation.
+The stateless D1 schedule routes own user transitions with conditional DML.
+`SchedulerDO` is the sole alarm owner; its alarm is the only system path that
+claims a due occurrence, advances recurring `next_fire_at`, or marks a one-off
+schedule `fired`. D1 occurrence rows, not actor memory, own effect recovery.
 
 ### Representation
 
@@ -511,8 +520,7 @@ stateDiagram-v2
 - `cancelled` — bullet remains with status "cancelled" (see
   `scheduleStatus`). Acceptable but not great — cancelled schedules
   accumulate.
-- `declined` — filtered out of `me()` (`src/worker.ts:692`: `status
-  !== "declined" && status !== "expired"`). Both parties simply stop
+- `declined` — filtered out of `me()` together with `expired`. Both parties simply stop
   seeing the row.
 - `expired` — same filter as `declined`. Both parties stop seeing the
   row on the next refresh.
@@ -544,13 +552,15 @@ clear guards, single writer is enforced by the per-game Durable Object.
 
 ### Events
 
-- `init` — the AppDO POSTs `/init` with `x-internal: app` when the game is
-  created. Idempotent: if a game already exists in the DO, `/init` is a
-  no-op (`src/worker.ts:1013-1036`).
+- `init` — the stateless Worker or `SchedulerDO` records the durable game row,
+  then POSTs `/init` with a worker-only header. Initialization is idempotent
+  only when every immutable player/handle/time-control value matches; a
+  mismatch is rejected. The public game proxy never exposes `/init` and strips
+  client-supplied internal headers.
 - `move` — `POST /move`. Guards: game is `active`, it is this user's turn,
   the move is legal per `chess.js`. Applies clock, applies move, checks
-  checkmate/draw, rearms alarm if still active, reports terminal status
-  to AppDO if not. Client dispatch guard: before POSTing a UI move,
+  checkmate/draw, rearms alarm if still active, and reports a terminal D1
+  projection if not. Client dispatch guard: before POSTing a UI move,
   `GameScreen` requires the realtime game WebSocket to be `OPEN` with
   a heartbeat pong inside the 25s liveness window. If the guard fails,
   no `move` event is sent and the board remains at the last accepted
@@ -581,9 +591,9 @@ stateDiagram-v2
 
 ### Writer
 `GameDO`. Move and resign endpoints both call `requirePlayer` which asserts
-the caller is one of `whiteId`/`blackId`. AppDO holds a projection in
-`db.games[id]` maintained by `/_internal/game-status` POSTs from the
-GameDO.
+the caller is one of `whiteId`/`blackId`. The public Worker authorizes the
+session and participant from D1 before proxying only the allowlisted game
+routes. D1 holds a directory projection updated directly by `GameDO`.
 
 ### Representation
 - `active` — Board renders; clocks tick; player-turn styling.
@@ -596,13 +606,13 @@ GameDO.
 All terminal states are true terminals — no revert path. That's correct.
 
 ### Notes
-- The `AppDO.games[id].status` field is a projection of the `GameDO`
-  authoritative status. Reconciliation is via `reportStatus` from the
-  `GameDO` to `POST /_internal/game-status` on the `AppDO`, wrapped in
-  `ctx.waitUntil()` with up to 5 attempts and exponential backoff
-  (250ms → 5s cap). Idempotent — the AppDO write sets the same status
-  twice happily. A transient failure no longer leaves the two sides
-  diverged (was GAP-10, closed 8d7023e).
+- The D1 `games.status` field is a projection of authoritative `GameDO`
+  state. `reportStatus` writes it directly through a monotonic conditional
+  update, wrapped in `ctx.waitUntil()` with bounded exponential retry. A replay
+  is harmless and an older projection timestamp cannot overwrite a newer
+  terminal value.
+- Client snapshots are also monotonic: a delayed REST resync cannot replace a
+  newer WebSocket snapshot with a shorter move history or older `updatedAt`.
 
 ---
 
@@ -738,7 +748,10 @@ stateDiagram-v2
 
 ### Writer
 - Permission — browser only.
-- Subscription — browser SW + `AppDO.pushSubscriptions[userId]`.
+- Subscription ownership — the D1 push routes plus the browser service worker.
+  The endpoint primary key enforces one owner; subscribe atomically transfers
+  ownership, clears stale endpoint payloads, and keeps the newest five
+  endpoints per user.
 
 ### Representation
 `InstallPrompt` shows an install strip, an Enable button, or the blocked
@@ -747,11 +760,10 @@ recovery copy (`src/main.tsx:2241-2280`). Absent when `enabled`.
 ### Closure
 - `enabled` → `revoked` fires automatically. `enqueuePush` inspects
   the response from `sendWebPush`; on `410 Gone` or `404`, the
-  endpoint is removed from both `db.pushSubscriptions[userId]` and
-  `db.pendingPushesByEndpoint[endpoint]` in the same transaction as
-  the log write (was GAP-12, closed 8d7023e). No manual reconciliation
-  needed on the client — the next `checkPushStatus()` on the browser
-  side will see the subscription missing and re-enter `ready`.
+  endpoint is removed from `push_subscriptions` and its pending D1 rows in the
+  same batch as the bounded delivery-log write (was GAP-12, closed 8d7023e).
+  No manual reconciliation is needed on the client; the next subscription sync
+  transfers the endpoint back to the signed-in user.
 
 ---
 
@@ -759,11 +771,11 @@ recovery copy (`src/main.tsx:2241-2280`). Absent when `enabled`.
 
 This is the durable server queue behind the browser push wake. Web Push
 delivery is intentionally zero-byte; the service worker fetches the pending
-payload from `AppDO`, shows the OS notification, then ACKs by push id.
+payload from D1, shows the OS notification, then ACKs by push id.
 
 ### States
 
-- `queued` — `AppDO.enqueuePush()` created a `PendingPush` with
+- `queued` — the D1 enqueue transition created a `PendingPush` with
   `{ id, userId, type, body, url, createdAt }` and stored it either under
   the recipient's endpoint queue or, if they have no endpoint, their user
   fallback queue.
@@ -772,7 +784,7 @@ payload from `AppDO`, shows the OS notification, then ACKs by push id.
 - `pending-fetched` — `/api/push/pending` returned one pending item to the
   authenticated current owner of the endpoint. This is consume-on-read:
   the returned item is removed before the response is saved.
-- `shown` — `public/sw.js` called `showNotification()` using
+- `shown` — `src/sw.js` called `showNotification()` using
   `payload.body` as the title.
 - `acked` — current SWs POST `/api/push/pending` with `{ endpoint, ackId }`;
   ACK removes matching ids idempotently from any remaining queues.
@@ -782,7 +794,8 @@ payload from `AppDO`, shows the OS notification, then ACKs by push id.
   safely attributed after account switches.
 - `dropped-by-owner-change` — `/api/push/subscribe` transfers endpoint
   ownership to the current user and deletes that endpoint's pending queue;
-  `/api/push/unsubscribe` and logout detach the endpoint.
+  `/api/push/unsubscribe` and endpoint-scoped legacy logout detach it. Ordinary
+  account sign-out preserves the browser subscription for reassociation.
 
 ### Events
 
@@ -795,7 +808,8 @@ payload from `AppDO`, shows the OS notification, then ACKs by push id.
 - `ttl-prune` — any enqueue/fetch pass drops stale pending entries.
 - `subscribe-endpoint` — current user registers an endpoint; ownership
   transfers from every other user.
-- `unsubscribe-endpoint` / `logout` — current user detaches an endpoint.
+- `unsubscribe-endpoint` / endpoint-scoped legacy `logout` — current user
+  detaches an endpoint. Ordinary logout only revokes the session and its leases.
 
 ### Transitions
 
@@ -804,7 +818,7 @@ stateDiagram-v2
   [*] --> queued: enqueue-push
   queued --> wake_delivered: webpush-wake
   queued --> dropped_by_ttl: ttl-prune
-  queued --> dropped_by_owner_change: subscribe/unsubscribe/logout
+  queued --> dropped_by_owner_change: subscribe/unsubscribe/endpoint-scoped logout
   wake_delivered --> pending_fetched: sw-fetch-pending by endpoint owner
   wake_delivered --> dropped_by_ttl: old SW never fetches before TTL
   pending_fetched --> shown: SW showNotification(payload.body)
@@ -818,10 +832,12 @@ stateDiagram-v2
 
 ### Writer
 
-`AppDO` is the single writer for durable push queues:
+The stateless D1 push routes are the single transition boundary for durable
+push rows:
 
 - `subscribe()` owns endpoint transfer and deletes stale endpoint queues.
-- `unsubscribe()` and `logout()` detach endpoint ownership.
+- `unsubscribe()` and endpoint-scoped legacy `logout()` detach ownership;
+  ordinary logout does not.
 - `enqueuePush()` creates `PendingPush` records and prunes stale queues.
 - `pendingPush()` consumes on read, ACKs idempotently, filters by endpoint
   owner, and refuses reads from endpoints the current user no longer owns.
@@ -848,11 +864,11 @@ gated by `scripts/verify-push-copy-contract.mjs`, which requires a
 
 ---
 
-## Machine 8 — Per-game voice call (planned)
+## Machine 8 — Per-game voice call
 
-Ordered 2026-08-05. Not yet implemented. Documented here first so the
-invariants are known before the code lands, matching the discipline
-`state-machine-rules.md` rule #1 asks of every lifecycle.
+Ordered 2026-08-05 and implemented on `GameDO` with the documented protocol.
+The lifecycle remains independent from the chess terminal and media remains
+peer-to-peer through STUN/TURN.
 
 ### Purpose
 
@@ -1016,11 +1032,14 @@ stateDiagram-v2
 
 ### Writer
 
-`GameDO`. The session record is written only by handlers on the
-game socket that forward the events above through a single
-`mutateCallSession(next, options)` helper — the same discipline
-Machine 6 keeps for `graceExpiresAt`. AppDO never touches the call
-session; nothing outside the GameDO does. Same DO-serialised
+`GameDO`. Ordinary session transitions pass through
+`mutateCallSession(next, options)`. A fresh initiate atomically stores the new
+session and an actor-local `callInviteEffect` before broadcasting; the GameDO
+alarm retries that stable effect until D1 owns the pending push or the request
+session ends. This is the same discipline Machine 6 keeps for
+`graceExpiresAt`. The D1 application layer and
+rollback-only AppDO never touch the call session; nothing outside the GameDO
+does. Same DO-serialised
 single-writer property that lets us treat every other GameDO state
 as lock-free.
 
@@ -1171,7 +1190,7 @@ reinventing them:
   UX (GAP-25), it is a per-participant attribute, not a
   transition; the machine has no `muted` state and never gates
   on it.
-- **The AppDO does not project this.** Unlike Machine 5, whose
+- **D1 and the AppDO do not project this.** Unlike Machine 5, whose
   status projects to `db.games[id].status` for Dashboard
   filtering, Machine 8 does NOT project outside the GameDO.
   Voice has no cross-game surface. Adding a projection would
@@ -1254,10 +1273,10 @@ touch the call session.
 ## Non-machines (worth naming so nobody treats them as machines)
 
 - **Presence dot on Friends list.** Derived value: `now -
-  db.presence[friend.id] < 30000`. Not a state machine, a debounced
-  boolean. The 30s window is a projection of "the heartbeat happened
-  recently"; no transitions, no writer beyond the heartbeat endpoint. It
-  is deliberately a rendering rule, not a lifecycle.
+  newest D1 lease.last_seen_at < 75000`. Not a state machine, a debounced
+  boolean across all of a user's active tabs. The separate 30-second window
+  applies only to unambiguous `foreground_game_id` call-push suppression.
+  Leases are disposable, expire, and cannot authorize an action.
 - **Toast / message.** Single-slot notification with a 4s auto-dismiss
   timer. Overflow strategy is "last write wins". Fine as a UI primitive;
   don't overload it with lifecycle semantics.
@@ -1287,9 +1306,8 @@ action. Same row shape also projects `Accept` for incoming pending and
 
 ### GAP-2 (P0, CLOSED — commit 7878939): Challenge `pending` had no exit other than accept
 **Was:** No `/withdraw`, no `/decline`. Ledger claimed withdrawal existed.
-**Now:** `POST /api/challenges/:id/withdraw` (`withdrawChallenge`,
-`src/worker.ts:911`) and `POST /api/challenges/:id/decline`
-(`declineChallenge`, `src/worker.ts:930`) both live, both idempotent,
+**Now:** `POST /api/challenges/:id/withdraw` and
+`POST /api/challenges/:id/decline` both live, both idempotent,
 both guarded on the appropriate participant. `Challenge.status` union
 grew a `withdrawn` value.
 
@@ -1303,14 +1321,14 @@ pending inbound challenge instead. Mirrors the friend-request dedupe
 pattern.
 
 ### GAP-4 (P1, CLOSED — commit 9b084a2): FriendRequest `pending` had no decline
-**Now:** `POST /api/friends/:id/decline` (`declineFriendRequest`,
-`src/worker.ts:842`). Guards: `toId === user.id`, `status === "pending"`.
+**Now:** `POST /api/friends/:id/decline`. Guards: `toId === user.id`,
+`status === "pending"`.
 Idempotent. Client: quiet Decline text link in the `IncomingPanel`
 friend-request row.
 
 ### GAP-5 (P1, CLOSED — commit 9b084a2): FriendRequest `pending` had no withdrawal
-**Now:** `DELETE /api/friends/requests/:id` (`withdrawFriendRequest`,
-`src/worker.ts:861`). Guard: `fromId === user.id`. Chosen as a hard
+**Now:** `DELETE /api/friends/requests/:id`. Guard: `fromId === user.id`.
+Chosen as a hard
 delete rather than a `withdrawn` terminal — no dedicated sender waiting
 surface exists, so the record does not need to survive (contrast the
 challenge machine, where the WaitingRoom needs a terminal to render).
@@ -1320,18 +1338,14 @@ link next to the `Friend request sent to @x` bullet in
 
 ### GAP-6 (P2, CLOSED — commit 9b084a2): Schedule `declined` state was unreachable
 **Now:** `POST /api/schedules/:id/decline` (`declineSchedule`).
-Idempotent. Rearms `setNextScheduleAlarm()`. `me()` filter tightened
+Idempotent. Canonicalizes `SchedulerDO` after the D1 transition. `me()` filter tightened
 from `!== "declined"` to `!== "declined" && !== "expired"` so declined
 proposals drop off both dashboards.
 
 ### GAP-7 (P2, CLOSED — commit 9b084a2): Schedule pending past `startAt` was a zombie
-**Now:** `AppDO.alarm()` sweeps `status === "pending"` schedules where
-`startAt + 60_000ms <= now` and transitions them to `expired` (new
-terminal). Preserves the record briefly for the requester's mental
-model; the `me()` filter drops it on next refresh.
-`setNextScheduleAlarm()` now takes the earliest of accepted
-`nextFireAt` and pending `startAt + grace` so the sweep fires promptly
-(`src/worker.ts:1108`).
+**Now:** `SchedulerDO.alarm()` conditionally expires D1 schedules where
+`status = 'pending'` and `start_at + 60_000 <= now`. Canonicalization includes
+that deadline alongside accepted occurrences and unfinished effect retries.
 
 ### GAP-8 (P2, CLOSED — commit 8d7023e): GameDO connection state was not persisted
 **Now:** `connectionState` is no longer a stored field. It is derived at
@@ -1352,11 +1366,10 @@ state is durable too.
 clocks and grace expiries by taking the minimum wake time. No
 `setTimeout` remains in the DO.
 
-### GAP-10 (P2, CLOSED — commit 8d7023e): AppDO projection now retries
-**Now:** `reportStatus` is wrapped in `ctx.waitUntil()` with up to 5
-attempts and exponential backoff (250ms → 5s cap). The AppDO write is
-idempotent so retry is safe. A transient failure no longer strands the
-Dashboard's `In play` section on a stale `active`.
+### GAP-10 (P2, CLOSED — commit 8d7023e): Game projection retries
+**Now:** `reportStatus` is wrapped in `ctx.waitUntil()` with up to five
+attempts and exponential backoff. Its D1 update is idempotent and monotonic, so
+retry is safe and an older report cannot overwrite a newer projection.
 
 ### GAP-11 (P2, CLOSED — commit 8d7023e): GameDO on hibernatable WebSockets
 **Now:** `ctx.acceptWebSocket(server)` + `server.serializeAttachment({
@@ -1369,16 +1382,13 @@ is gone; `ctx.getWebSockets()` is now the socket set of record.
 ### GAP-12 (P3, CLOSED — commit 8d7023e): Dead push endpoints cleaned on 410 / 404
 **Now:** `enqueuePush` inspects the `sendWebPush` response. On `410
 Gone` or `404`, the endpoint is removed from
-`db.pushSubscriptions[userId]` and `db.pendingPushesByEndpoint[endpoint]`
-in the same transaction as the log write. The Machine 7 `revoked`
-transition is automatic — no manual reconciliation.
+`push_subscriptions` and its `pending_pushes` rows in the same D1 batch as the
+bounded log write. The Machine 7 `revoked` transition is automatic.
 
 ### GAP-13 (P3, CLOSED — commit 8d7023e): Auth challenges now TTL-swept
-**Now:** `CHALLENGE_TTL_MS = 10 * 60 * 1000` (`src/worker.ts:256`) and a
-`sweepExpiredChallenges(db)` helper (`src/worker.ts:257`) called from
-`registrationVerify` and `loginVerify`. Records older than 10 minutes
-are dropped from both `registrationChallenges` and
-`authenticationChallenges`. Lazy sweep, no dedicated alarm.
+**Now:** `auth_challenges` stores an indexed `expires_at` and verification
+deletes the one matching unexpired purpose-bound row. Opportunistic cleanup
+deletes expired rows in bounded batches. No dedicated alarm is needed.
 
 ### GAP-14 (P3, CLOSED — commit 7878939): WaitingRoom had no branch for declined / withdrawn
 **Now:** Poll handler at `src/main.tsx:3127` transitions to a terminal
@@ -1393,18 +1403,13 @@ at `src/main.tsx:2856` cites this gap and the distinction between
 invitations).
 
 ### GAP-16 (P3, CLOSED — commit 8d7023e): Time-warp harness for alarm-driven behaviors
-**Now:** `POST /_debug/tick` on the AppDO (`debugTick`, added to the
-outer worker's local-only route list at `src/worker.ts:1621`). Body
-`{now: number}`. Shifts pending zombie-eligible schedules' `startAt`
-into the past and due accepted schedules' `nextFireAt` to now, then
-runs `alarm()`. Idempotent, isolated to schedules — game clocks
-untouched. Guarded by `x-debug-local: true` header, same gate as
-`debugPushLog`. Adversity regression `schedule zombie sweep expires
-pending past startAt via debug tick (state-smith GAP-7/16)` uses it.
+**Now:** local-only `POST /_debug/tick` moves pending expiry and accepted
+fire timestamps in D1, then invokes `SchedulerDO`'s normal alarm workflow.
+Duplicate ticks are idempotent and cannot create another occurrence game.
 
-### GAP-17 (P4, NEW — GAP-16 follow-up): No time-warp coverage for recurring `nextFireAt` advancement
-**Where:** `AppDO.alarm()`'s recurring branch — the `while (next <=
-now) next = advanceFireTime(next, rec)` loop that skips past
+### GAP-17 (P4, CLOSED 2026-09-03): Time-warp coverage for recurring `nextFireAt` advancement
+**Where:** `SchedulerDO`'s recurring branch — the `while (next <=
+now)` advancement that skips past
 occurrences.
 **What:** The existing `recurring schedule creates a game on each
 firing` adversity test covers ONE firing via a real-time sleep
@@ -1415,12 +1420,9 @@ which is the invariant the loop enforces.
 never advances would produce user-visible symptoms (missed weekly
 games or a stack of catch-up notifications), and CI would not catch
 it.
-**Fix:** With `/_debug/tick` already available (GAP-16), add an
-adversity regression that creates a recurring accepted schedule with
-`nextFireAt` a week in the past, ticks once, and asserts (a) exactly
-one new game was created, (b) `nextFireAt` advanced by exactly one
-interval, (c) the next `nextFireAt` is strictly in the future.
-Estimated effort: small — the harness already exists.
+**Closed:** the D1 cutover regression creates a daily accepted schedule,
+warps beyond several missed intervals, ticks once, and asserts exactly one game
+and occurrence plus a `nextFireAt` one interval beyond the actual alarm time.
 
 ### GAP-18 (P0 → Deferred 2026-08-06 — Machine 8): Silent-peer indistinguishable from `connected`
 **Where:** GameScreen's voice representation for the peer, when the
@@ -1463,7 +1465,7 @@ oversight. The revised call outlives the game and requires
 GAP-26 (post-game transport continuity) and GAP-27 (persistent
 call-bar reachability) instead.
 
-### GAP-20 (P1, NEW — Machine 8): `requesting` misrepresents mic state
+### GAP-20 (P1, CLOSED): `requesting` misrepresents mic state
 **Where:** initiator's UI while the session is `requesting`.
 **What:** the naive model shows the initiator "mic on" the moment
 they tap — but there is no `RTCPeerConnection` yet and no track is
@@ -1482,7 +1484,7 @@ but the track is not attached to any PC and the visual reflects
 that. When the state moves to `connecting → connected`, THEN the
 live-mic indicator lights up.
 
-### GAP-21 (P2, NEW — Machine 8): ICE restart silently invisible to the server
+### GAP-21 (P2, CLOSED): ICE restart silently invisible to the server
 **Where:** the `connected → reconnecting` transition, specifically
 the network-hop case (WiFi ↔ LTE).
 **What:** WebRTC handles a network hop by triggering an in-band
@@ -1504,7 +1506,7 @@ Note: this is the same `reconnecting` state and the same alarm
 that Machine 6's game-connection grace uses — one grace period
 covers both concerns.
 
-### GAP-22 (P2, NEW — Machine 8): Navigation-away needs paired-machine handoff
+### GAP-22 (P2, CLOSED): Navigation-away needs paired-machine handoff
 **Where:** `webSocketClose(ws)` inside `GameDO`, which today
 serves Machine 6 only.
 **What:** when a call participant navigates away from
@@ -1536,7 +1538,7 @@ AFTER the game terminal broadcast — i.e., the call is
 explicitly NOT terminated. Named `voice call survives game
 terminal (state-smith GAP-23-follow)`. One test, not three.
 
-### GAP-24 (P3, NEW — Machine 8): No time-warp harness for call alarms
+### GAP-24 (P3, CLOSED): Time-warp harness for call alarms
 **Where:** `POST /_debug/call-tick` or equivalent on the `GameDO`
 (local-only, matching the `x-debug-local` gate the other debug
 endpoints use).
@@ -1554,7 +1556,7 @@ untested).
 the DO alarm once. Guarded by `x-debug-local` header. Mirrors
 `debugExpireGrace` at `src/worker.ts:1358`.
 
-### GAP-25 (P1 — Machine 8, promoted from P4-recommendation to shipped-spec 2026-08-06; UI revised 2026-08-07): Muted is per-participant and broadcast, but no longer rendered for the peer
+### GAP-25 (P1, CLOSED — UI revised 2026-08-07): Mute is local media state and no longer rendered for the peer
 **Where:** the `CallSession` record shape and the client mute
 toggle. `session.muted: {[userId]: boolean}` carried on the
 session, broadcast on every mutation via the existing snapshot
@@ -1590,7 +1592,7 @@ field, not a UI control channel. The local peer never reads their own
 key back from the server, and the remote peer no longer gets a visible
 indicator.
 
-### GAP-26 (P1, NEW — Machine 8 revision 2026-08-06): Post-game transport continuity
+### GAP-26 (P1, CLOSED — Machine 8 revision 2026-08-06): Post-game transport continuity
 **Where:** the game WebSocket after `game.status` moves off
 `"active"`. Machine 6's per-player connection state, and any
 close paths in `webSocketClose(ws)` or client-side game-screen
@@ -1622,7 +1624,7 @@ work. Add a dedicated adversity case: initiate + accept call,
 reach `connected`, resign, wait 25s (or `debugExpireGrace`),
 assert socket is still open AND call is still `connected`.
 
-### GAP-27 (P1, NEW — Machine 8 revision 2026-08-06; UI revised 2026-08-07): Voice slot must remain reachable after game terminal
+### GAP-27 (P1, CLOSED — UI revised 2026-08-07): Voice slot remains reachable after game terminal
 **Where:** `GameScreen` chrome in `src/main.tsx`.
 **What:** the opponent-bar voice slot (idle/requesting/connecting
 phone icon, or connected mic + hangup chip) is part of the
@@ -1647,7 +1649,7 @@ must first hang up the call — either implicitly via a client
 strip. The current client takes the implicit path without rendering
 a separate "Ending call..." strip.
 
-### GAP-28 (P1, NEW — Machine 8 revision 2026-08-06): Not-foreground push gate for the incoming pill
+### GAP-28 (P1, CLOSED 2026-09-03): Not-foreground push gate for the incoming pill
 **Where:** the `call-initiate` handler and the client's
 "am I foreground on this game" signal.
 **What:** Tejas's decision (2026-08-06) is: no audible ring,
@@ -1665,8 +1667,8 @@ never knows they were called and looks flaky.
 **Fix:** three-part invariant the implementer must satisfy.
 (a) The client heartbeats "I am foreground on game X" via the
 existing presence heartbeat, extended with a `foregroundGameId`
-field. (b) `AppDO.presence[userId]` gains
-`foregroundGameId?: string`, updated on heartbeat. (c) The
+field. (b) the D1 presence lease stores `foreground_game_id` with independent
+30-second freshness. (c) The
 `call-initiate` handler consults it: if the recipient's
 `foregroundGameId === gameId` AND their heartbeat is within
 the presence 30s window, DO NOT enqueue a push. The inline
@@ -1675,7 +1677,7 @@ enqueue exactly one push. The 30s window matches the presence
 threshold documented in "Non-machines" — reuse, don't
 duplicate.
 
-### GAP-29 (P2, NEW — Machine 8 revision 2026-08-06): DO hibernation semantics for calls that outlive both sockets
+### GAP-29 (P2, CLOSED): DO hibernation semantics for calls that outlive both sockets
 **Where:** the case where both players have a live call, both
 close their tabs, and one returns 5 minutes later.
 **What:** when the last socket closes, the DO can hibernate.
@@ -1702,45 +1704,16 @@ returning peer's reconnect must land on that.
 
 ## What's next
 
-TIER A (GAP-1 through GAP-7 + GAP-14/15) and TIER B (GAP-8 through
-GAP-13 + GAP-16) are closed. Every named machine now has: single
-writer, reachable states, exits from every non-terminal, projections
-on every surface where the entity is user-relevant, and durable
-storage that survives DO hibernation.
+TIER A (GAP-1 through GAP-7 + GAP-14/15), TIER B (GAP-8 through
+GAP-13 + GAP-16/17), and the implemented Machine 8 invariants are closed by
+named end-to-end/adversity checks. Every named machine has one transition
+boundary, reachable states, exits from non-terminals, user-facing projections,
+and durable recovery where the state crosses a Worker/DO boundary.
 
-Remaining open across the seven implemented machines: GAP-17
-(recurring-schedule multi-tick regression via the time-warp harness),
-P4 — the harness exists, the missing test is small, and the
-underlying code is already reviewed to be correct.
-
-**TIER C — Machine 8 (voice call).** Documented here before code;
-GAP-18 through GAP-29 file the hazards the model exposes.
-
-Revised 2026-08-06 (Tejas): call lifecycle decouples from game;
-no ring; no Ignore action; GAP-18 deferred. Void: GAP-19 and
-GAP-23 (game→call cascade no longer exists). New: GAP-26 through
-GAP-29, covering the invariants the decoupling introduces
-(transport survives game terminal, voice slot stays reachable,
-push fires only when not-foreground, hibernation preserves
-call state).
-
-The active ranking on Machine 8 for implementation planning:
-
-- P1 (block a first-class ship): GAP-20 requesting-mic UX,
-  GAP-25 muted projection protocol (promoted from P4 by Tejas
-  2026-08-06; peer indicator removed from UI 2026-08-07),
-  GAP-26 post-game transport, GAP-27 persistent voice slot,
-  GAP-28 not-foreground push gate.
-- P2: GAP-21 ICE-restart signalling, GAP-22 paired-machine
-  handoff, GAP-29 hibernation adversity.
-- P3: GAP-24 time-warp harness for the call machine.
-- Deferred: GAP-18.
-- Void: GAP-19, GAP-23 (replaced by GAP-23-follow inverse
-  assertion — see entry).
-
-The invariants and defaults in Machine 8 are the handoff
-artifact — the code should read as a translation, not a
-re-derivation.
+GAP-18 remains deliberately deferred pending observed iOS silence. GAP-19 and
+GAP-23 remain void because the call lifecycle intentionally outlives the game.
+Those are the only non-closed entries; their detailed records stay above so a
+future symptom or product change has its original rationale.
 
 The `stateful-shapes` skill in this workspace is the complementary
 read for anyone adding a new machine from here.

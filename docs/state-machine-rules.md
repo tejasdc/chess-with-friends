@@ -22,14 +22,17 @@ named yet.
 ### 2. One writer per machine
 
 Exactly one place in the codebase mutates a machine's state. On this
-codebase the writer is `AppDO` (for account-scoped entities: friendships,
-requests, challenges, schedules, game metadata, sessions, push
-subscriptions) or `GameDO` (for per-game state). The client never writes
-authoritative state — it dispatches events by calling the writer's API.
+codebase the writer is a D1 route transition (for account, social, schedule,
+presence-lease, push, and game-directory state), `SchedulerDO` (only for its
+alarm), or `GameDO` (for per-game state). D1 state transitions use schema
+constraints plus conditional DML and affected-row checks so concurrency cannot
+create an illegal transition. The client never writes authoritative state; it
+dispatches events through the owning API.
 
 If a review comment asks "what if two clients do X at once?" and the
-answer isn't obviously "the DO serializes them", the design is wrong. Add
-the guard, don't add locking.
+answer isn't obviously "the owning DO serializes it" or "D1's constraint and
+conditional mutation admit one winner", the design is wrong. Add the guard,
+don't add an in-process lock.
 
 ### 3. Server is the authority; the client renders a projection
 
@@ -51,8 +54,8 @@ no-op that returns the current state.
 - `accept-*`, `cancel-*`, `decline-*`, `withdraw-*`: guarded on the
   current status; a second call from the terminal state is a success
   returning the current state, not an error.
-- `use-invite-link`: idempotent by design (`requestByInvite`,
-  `src/worker.ts:702-750` — cite it as the reference implementation).
+- `use-invite-link`: idempotent by its D1 pair uniqueness and existing-friend
+  result; a replay mutates nothing.
 
 Idempotency is what makes retries safe and what defends against the
 double-tap.
@@ -145,7 +148,8 @@ line is blank, the feature is not ready.
    guard?
 3. **Transitions.** For each `(state, event)` pair, what's the next
    state? Draw the mermaid diagram in `docs/state-machines.md`.
-4. **Writer.** Which DO owns writes? Cite the specific handler.
+4. **Writer.** Which D1 transition or DO owns writes? Cite the specific handler
+   and its database constraint or actor boundary.
 5. **Idempotency.** For every write event, what does the second call do?
    Show the guard in the handler.
 6. **Representation.** For every state, on every surface where the entity
@@ -196,11 +200,18 @@ line is blank, the feature is not ready.
 
 ## Cloudflare-specific notes
 
-Durable Objects serialize per-DO requests. That gives you the single
-writer for free within a DO's boundary. It does not survive across DO
-boundaries — the AppDO's copy of a game's status is a projection of the
-GameDO's authoritative status, and needs a reconciliation strategy
-(retry, resync, or accept the lag).
+Durable Objects serialize per-DO requests. That gives `GameDO` and
+`SchedulerDO` one writer inside their own boundaries. It does not extend to D1
+or another actor: D1's copy of a game's status is a projection of the
+authoritative `GameDO` state. Terminal projection uses monotonic conditional
+DML plus retry, so an older actor response cannot replace a newer projection.
+
+D1 does not provide a general JavaScript callback transaction. Predetermined
+multi-statement units use `batch()`, uniqueness lives in the schema, and each
+lifecycle mutation guards its expected current status in SQL. External effects
+such as `GameDO` initialization and Web Push happen only after their stable
+intent has been persisted, with a durable completion marker where recovery is
+required.
 
 DOs hibernate. Any state that lives in an instance field (`private
 foo: X`) is lost on hibernation. Persist state via `ctx.storage.put`, or
@@ -266,7 +277,7 @@ Three named patterns in this codebase to imitate.
 
 ### 1. Idempotent handshake with named terminals
 
-`use-invite-link` (`src/worker.ts:requestByInvite`). Five cases —
+`use-invite-link` (the `/api/friends/invite` D1 route). Five cases —
 self-link, already-friends, pending in either direction, no
 relationship, signed-out completion — all resolve to a friendship or a
 named error. Same call twice returns `already-friends` and mutates

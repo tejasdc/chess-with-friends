@@ -9,6 +9,18 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { isoBase64URL } from "@simplewebauthn/server/helpers";
+import {
+  SchedulerDO,
+  currentD1User,
+  enqueueCallInvitePush,
+  ensureD1GameInitialized,
+  handleD1AppRequest,
+  projectGameStatus,
+  type D1AppEnv,
+  type GameRow,
+} from "./d1-app";
+
+export { SchedulerDO };
 
 type PushType = "friend_request" | "challenge" | "challenge_accepted" | "scheduled_start" | "call_invite";
 type TimeControl = "10|0" | "5|0";
@@ -30,13 +42,12 @@ type CallEndReason = `hung-up-by-${string}` | "peer-gone-timeout" | "no-answer-t
 // this tells them the game is ready).
 const PUSH_TYPES: PushType[] = ["friend_request", "challenge", "challenge_accepted", "scheduled_start", "call_invite"];
 const COOKIE = "cwf_session";
-const APP_DO_NAME = "app";
 const PRESENCE_WINDOW_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const CALL_GRACE_MS = 20_000;
 const PUSH_PENDING_TTL_MS = 5 * 60 * 1000;
 
-interface Env {
+interface Env extends D1AppEnv {
   APP_NAME: string;
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY?: string;
@@ -45,6 +56,8 @@ interface Env {
   ASSETS: Fetcher;
   APP_DO: DurableObjectNamespace<AppDO>;
   GAME_DO: DurableObjectNamespace<GameDO>;
+  SCHEDULER_DO: DurableObjectNamespace<SchedulerDO>;
+  DB: D1Database;
 }
 
 interface CredentialRecord {
@@ -194,6 +207,15 @@ interface CallSession {
   endedAt?: number;
   endReason?: CallEndReason;
   muted: Record<string, boolean>;
+}
+
+interface CallInviteEffect {
+  gameId: string;
+  callSessionId: string;
+  initiatorId: string;
+  recipientId: string;
+  attempts: number;
+  retryAt: number;
 }
 
 interface StoredOpResult {
@@ -718,20 +740,9 @@ function friendshipId(a: string, b: string) {
   return [a, b].sort().join(":");
 }
 
-function appStub(env: Env) {
-  return env.APP_DO.get(env.APP_DO.idFromName(APP_DO_NAME));
-}
-
-async function currentUser(request: Request, env: Env) {
-  const response = await appStub(env).fetch(new Request(new URL("/_auth/session", request.url), {
-    headers: { cookie: request.headers.get("cookie") || "" },
-  }));
-  if (!response.ok) return null;
-  return (await response.json()) as Pick<User, "id" | "handle">;
-}
-
 async function requestForDo(request: Request, url = request.url) {
   const headers = new Headers(request.headers);
+  headers.delete("x-internal");
   const init: RequestInit = { method: request.method, headers };
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.text();
@@ -1976,16 +1987,26 @@ export class GameDO extends DurableObject<Env> {
     }
     if (graceChanged) await this.ctx.storage.put("graceExpiresAt", graces);
     const sweptCall = await this.sweepCallAlarms(game, now);
+    await this.resumeCallInviteEffect();
     if (sweptCall) await this.broadcastFrom(game, sweptCall);
     else if (graceChanged || game.status !== "active") await this.broadcast();
     await this.setNextAlarm(game);
   }
 
   private async init(request: Request) {
-    if (request.headers.get("x-internal") !== "app") throw new Error("Internal route.");
+    if (!["d1", "app"].includes(request.headers.get("x-internal") || "")) throw new Error("Internal route.");
     const existing = await this.game();
-    if (existing) return json({ ok: true });
     const body = await readJson<Pick<GameState, "id" | "whiteId" | "blackId" | "whiteHandle" | "blackHandle" | "timeControl">>(request);
+    if (existing) {
+      const immutableMatches = existing.id === body.id
+        && existing.whiteId === body.whiteId
+        && existing.blackId === body.blackId
+        && existing.whiteHandle === body.whiteHandle
+        && existing.blackHandle === body.blackHandle
+        && existing.timeControl === body.timeControl;
+      if (!immutableMatches) throw new Error("Game initialization does not match the existing game.");
+      return json({ ok: true, existing: true });
+    }
     const ms = timeControlMs(body.timeControl);
     const game: GameState = {
       ...body,
@@ -2273,9 +2294,19 @@ export class GameDO extends DurableObject<Env> {
       startedAt: Date.now(),
       muted: {},
     };
-    await this.mutateCallSession(game, next, { broadcast: true });
     const recipientId = this.otherPlayerId(game, userId);
-    this.ctx.waitUntil(this.enqueueCallInvite(game.id, userId, recipientId));
+    const effect: CallInviteEffect = {
+      gameId: game.id,
+      callSessionId: next.id,
+      initiatorId: userId,
+      recipientId,
+      attempts: 0,
+      retryAt: Date.now(),
+    };
+    await this.ctx.storage.put({ callSession: next, callInviteEffect: effect });
+    await this.setNextAlarm(game, next);
+    await this.broadcastFrom(game, next);
+    this.ctx.waitUntil(this.resumeCallInviteEffect());
   }
 
   private async callAccept(userId: string, callSessionId: string) {
@@ -2399,14 +2430,27 @@ export class GameDO extends DurableObject<Env> {
     return userId === game.whiteId ? game.blackId : game.whiteId;
   }
 
-  private async enqueueCallInvite(gameId: string, initiatorId: string, recipientId: string) {
-    const app = appStub(this.env);
-    const res = await app.fetch("https://app.local/_internal/call-invite", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-internal": "game" },
-      body: JSON.stringify({ gameId, initiatorId, recipientId }),
-    });
-    if (!res.ok) console.warn(`[GameDO ${gameId}] call invite failed: ${res.status}`);
+  private async resumeCallInviteEffect() {
+    const effect = await this.ctx.storage.get<CallInviteEffect>("callInviteEffect");
+    if (!effect || effect.retryAt > Date.now()) return;
+    const session = await this.getCallSession();
+    if (!session || session.id !== effect.callSessionId || session.state !== "requesting"
+      || Date.now() >= session.startedAt + REQUEST_TIMEOUT_MS) {
+      await this.ctx.storage.delete("callInviteEffect");
+      return;
+    }
+    try {
+      await enqueueCallInvitePush(this.env, effect);
+      const current = await this.ctx.storage.get<CallInviteEffect>("callInviteEffect");
+      if (current?.callSessionId === effect.callSessionId) await this.ctx.storage.delete("callInviteEffect");
+    } catch (error) {
+      const attempts = effect.attempts + 1;
+      const retryAt = Date.now() + Math.min(5_000, 250 * 2 ** Math.min(attempts - 1, 5));
+      await this.ctx.storage.put("callInviteEffect", { ...effect, attempts, retryAt });
+      const game = await this.game();
+      if (game) await this.setNextAlarm(game, session);
+      console.warn(`[GameDO ${effect.gameId}] call invite attempt ${attempts} failed:`, error);
+    }
   }
 
   private async disconnect(socket: WebSocket) {
@@ -2557,29 +2601,19 @@ export class GameDO extends DurableObject<Env> {
     const session = callSession === undefined ? await this.getCallSession() : callSession;
     if (session?.state === "requesting") wakes.push(Math.max(now + 100, session.startedAt + REQUEST_TIMEOUT_MS));
     if (session?.state === "reconnecting" && session.graceExpiresAt) wakes.push(Math.max(now + 100, session.graceExpiresAt));
+    const callInviteEffect = await this.ctx.storage.get<CallInviteEffect>("callInviteEffect");
+    if (callInviteEffect) wakes.push(Math.max(now + 100, callInviteEffect.retryAt));
     if (!wakes.length) return;
     await this.ctx.storage.setAlarm(Math.min(...wakes));
   }
 
-  // reportStatus wraps AppDO update with retry (state-smith GAP-10).
-  // The AppDO write is idempotent (setting the same status twice is a
-  // no-op), so retry is safe. Backoff caps at ~5 attempts / ~5s so a
-  // transient failure doesn't strand the AppDO's `games[id].status`
-  // projection as "active" after the game has ended. Runs in the
-  // background via ctx.waitUntil so the caller isn't blocked; the DO
-  // stays warm for the full retry window.
+  // The game actor is authoritative. D1 only receives a monotonic terminal
+  // projection, so retries and later snapshot repair cannot move it backward.
   private async reportStatus(game: GameState) {
     const env = this.env;
-    const payload = JSON.stringify({ id: game.id, status: game.status, result: game.result });
     const attempt = async (n: number): Promise<void> => {
       try {
-        const app = appStub(env);
-        const res = await app.fetch("https://app.local/_internal/game-status", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-internal": "game" },
-          body: payload,
-        });
-        if (!res.ok) throw new Error(`AppDO returned ${res.status}`);
+        await projectGameStatus(env, { id: game.id, status: game.status, result: game.result, updatedAt: game.updatedAt });
       } catch (error) {
         if (n >= 5) {
           console.warn(`[GameDO ${game.id}] reportStatus giving up after ${n} attempts:`, error);
@@ -2627,14 +2661,28 @@ async function gameRequest(request: Request, env: Env, path: string) {
   if (!match) return json({ error: "Game route not found" }, { status: 404 });
   const [, gameId, action] = match;
   const isLocal = ["127.0.0.1", "localhost"].includes(new URL(request.url).hostname);
-  if (action.startsWith("debug/") && !isLocal) return json({ error: "Debug endpoint is local only." }, { status: 404 });
-  const user = await currentUser(request, env);
+  const publicActions = new Set(["socket", "state", "move", "resign"]);
+  const isDebugAction = action.startsWith("debug/");
+  if (!publicActions.has(action) && !(isDebugAction && isLocal)) return json({ error: "Game route not found" }, { status: 404 });
+  if (isDebugAction && !isLocal) return json({ error: "Debug endpoint is local only." }, { status: 404 });
+  const user = await currentD1User(request, env);
   if (!user) return json({ error: "Sign in first." }, { status: 401 });
+  const game = await env.DB.prepare(`
+    SELECT * FROM games
+    WHERE id = ? AND (white_id = ? OR black_id = ?)
+  `).bind(gameId, user.id, user.id).first<GameRow>();
+  if (!game) return json({ error: "Game not found" }, { status: 404 });
+  try {
+    await ensureD1GameInitialized(env, game);
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : "Game initialization failed." }, { status: 503 });
+  }
   const target = new URL(`https://game.local/${action}`);
   const headers = new Headers(request.headers);
+  headers.delete("x-internal");
   headers.set("x-user-id", user.id);
   headers.set("x-handle", user.handle);
-  if (action.startsWith("debug/") && isLocal) {
+  if (isDebugAction && isLocal) {
     headers.set("x-debug-local", "true");
   }
   const stub = env.GAME_DO.get(env.GAME_DO.idFromName(gameId));
@@ -2642,16 +2690,18 @@ async function gameRequest(request: Request, env: Env, path: string) {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, execution: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/games/")) return gameRequest(request, env, url.pathname);
     if (url.pathname === "/api/debug/push-log" || url.pathname === "/api/debug/client-errors" || url.pathname === "/api/debug/db-stats" || url.pathname === "/_debug/tick" || url.pathname === "/_debug/reset-app") {
       if (!["127.0.0.1", "localhost"].includes(url.hostname)) return json({ error: "Not found" }, { status: 404 });
       const headers = new Headers(request.headers);
       headers.set("x-debug-local", "true");
-      return appStub(env).fetch(await requestForDo(new Request(request, { headers })));
+      return handleD1AppRequest(await requestForDo(new Request(request, { headers })), env, execution);
     }
-    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/_auth/")) return appStub(env).fetch(await requestForDo(request));
+    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/_auth/")) {
+      return handleD1AppRequest(await requestForDo(request), env, execution);
+    }
 
     const asset = await env.ASSETS.fetch(request);
     if (asset.status !== 404) return withCacheHeaders(asset, url.pathname);

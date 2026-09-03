@@ -500,6 +500,15 @@ body[data-screen="landing"] .auth-bottom .landing-copy {
   /* Copy at the top of the bottom group, one breath above the auth row. */
   margin: 0 0 4px;
 }
+body[data-screen="landing"] .account-reset-note {
+  max-width: 48ch;
+  margin: -4px 0 0;
+  color: var(--stone);
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+}
 body[data-screen="landing"] .auth-bottom > .made-by {
   /* Footer sits directly beneath the auth row inside the bottom group —
      drop the pattern-global margin-top:auto (which would push it away
@@ -557,6 +566,9 @@ body[data-screen="landing"] .landing-copy {
   body[data-screen="landing"] .auth-bottom .landing-copy {
     text-align: left;
     margin: 0;
+  }
+  body[data-screen="landing"] .account-reset-note {
+    text-align: left;
   }
   body[data-screen="landing"] .auth-bottom .auth-form {
     align-self: stretch;

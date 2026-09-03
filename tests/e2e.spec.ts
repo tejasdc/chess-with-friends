@@ -14,7 +14,8 @@ type PendingPushPayload = {
 
 test.describe.configure({ mode: "serial" });
 
-test("notification prompt disappears after permission is granted and sign-out preserves the browser subscription", async ({ browser }) => {
+test("notification prompt disappears after permission is granted and sign-out preserves the browser subscription", async ({ browser, browserName }) => {
+  test.skip(browserName === "webkit", "Playwright exposes virtual WebAuthn only through Chromium CDP.");
   mkdirSync(screenDir, { recursive: true });
   const suffix = Date.now().toString(36).slice(-6);
   const context = await browser.newContext();
@@ -328,16 +329,201 @@ test("sign out returns to the auth screen", async ({ browser }) => {
   await page.goto("/");
   const handle = `signout_${Date.now().toString(36).slice(-6)}`;
   await register(page, handle);
-  await expect(page.getByText(`@${handle}`)).toBeVisible();
 
   // Sign out lives inside the universal ⋯ menu now (one menu pattern,
   // one position — team-lead's spec). Open the menu, then click Sign out.
   await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(page.getByText(`@${handle}`)).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByPlaceholder("your_handle")).toBeVisible();
   await expect(page.getByText(`@${handle}`)).toBeHidden();
 
   await context.close();
+});
+
+test("D1 cutover keeps sessions revocable, presence lease-scoped, schedules idempotent, and game init private", async ({ browser }) => {
+  const suffix = Date.now().toString(36).slice(-6);
+  const alice = await client(browser, `d1a_${suffix}`);
+  const bob = await client(browser, `d1b_${suffix}`);
+  const charlie = await client(browser, `d1c_${suffix}`);
+  try {
+    const health = await alice.page.request.get("/api/health");
+    expect(health.status()).toBe(200);
+    await expect(health.json()).resolves.toMatchObject({ ok: true, storage: "d1" });
+    expect((await alice.page.request.get("/api/me")).status()).toBe(401);
+
+    await register(alice.page, alice.handle);
+    await register(bob.page, bob.handle);
+
+    const inviteToken = await alice.page.evaluate(async () => {
+      const home = await (await fetch("/api/me", { credentials: "include" })).json() as { user: { inviteToken: string } };
+      return home.user.inviteToken;
+    });
+    await bob.page.evaluate(async (token) => {
+      const response = await fetch("/api/friends/invite", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "x-client-op-id": `friend:${token}` },
+        body: JSON.stringify({ token }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+    }, inviteToken);
+
+    const beforePresence = await alice.page.evaluate(async () => {
+      const response = await fetch("/api/debug/db-stats", { credentials: "include" });
+      return await response.json() as { counts: Record<string, number> };
+    });
+    for (const leaseId of ["tab-a", "tab-b", undefined, undefined]) {
+      await bob.page.evaluate(async (lease) => {
+        const response = await fetch("/api/presence/heartbeat", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(lease ? { leaseId: lease, foregroundGameId: null } : {}),
+        });
+        if (!response.ok) throw new Error(await response.text());
+      }, leaseId);
+    }
+    const afterPresence = await alice.page.evaluate(async () => {
+      const response = await fetch("/api/debug/db-stats", { credentials: "include" });
+      return await response.json() as { counts: Record<string, number> };
+    });
+    expect(afterPresence.counts.presence_leases - beforePresence.counts.presence_leases).toBe(3);
+    const aliceHome = await alice.page.evaluate(async () => (
+      await (await fetch("/api/me", { credentials: "include" })).json()
+    ) as { friends: Array<{ handle: string; online: boolean }> });
+    expect(aliceHome.friends.find((friend) => friend.handle === bob.handle)?.online).toBe(true);
+
+    const bobId = await bob.page.evaluate(async () => {
+      const home = await (await fetch("/api/me", { credentials: "include" })).json() as { user: { id: string } };
+      return home.user.id;
+    });
+    const scheduleOpId = `schedule:${suffix}`;
+    const scheduleRequest = { friendId: bobId, timeControl: "10|0", startAt: Date.now() + 30_000, recurrence: { kind: "once" } };
+    const createSchedule = () => alice.page.evaluate(async ({ body, opId }) => {
+      const response = await fetch("/api/schedules", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "x-client-op-id": opId },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json() as { schedule: { id: string } };
+    }, { body: scheduleRequest, opId: scheduleOpId });
+    const firstSchedule = await createSchedule();
+    const replayedSchedule = await createSchedule();
+    expect(replayedSchedule.schedule.id).toBe(firstSchedule.schedule.id);
+
+    await bob.page.evaluate(async (scheduleId) => {
+      const response = await fetch(`/api/schedules/${scheduleId}/accept`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "x-client-op-id": `accept:${scheduleId}` },
+        body: "{}",
+      });
+      if (!response.ok) throw new Error(await response.text());
+    }, firstSchedule.schedule.id);
+    const tick = () => alice.page.evaluate(async (now) => {
+      const response = await fetch("/_debug/tick", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ now }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+    }, scheduleRequest.startAt + 1);
+    await tick();
+    await tick();
+
+    const fired = await alice.page.evaluate(async (scheduleId) => {
+      const home = await (await fetch("/api/me", { credentials: "include" })).json() as {
+        schedules: Array<{ id: string; status: string; gameId?: string }>;
+      };
+      return home.schedules.find((schedule) => schedule.id === scheduleId);
+    }, firstSchedule.schedule.id);
+    expect(fired).toMatchObject({ status: "fired" });
+    expect(fired?.gameId).toMatch(/^gam_/);
+
+    const beforeRecurring = await alice.page.evaluate(async () => (
+      await (await fetch("/api/debug/db-stats", { credentials: "include" })).json()
+    ) as { counts: Record<string, number> });
+    const recurringStart = Date.now() + 30_000;
+    const recurring = await alice.page.evaluate(async ({ friendId, startAt }) => {
+      const response = await fetch("/api/schedules", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "x-client-op-id": `recurring:${startAt}` },
+        body: JSON.stringify({ friendId, timeControl: "10|0", startAt, recurrence: { kind: "daily" } }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json() as { schedule: { id: string } };
+    }, { friendId: bobId, startAt: recurringStart });
+    await bob.page.evaluate(async (scheduleId) => {
+      const response = await fetch(`/api/schedules/${scheduleId}/accept`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "x-client-op-id": `accept:${scheduleId}` },
+        body: "{}",
+      });
+      if (!response.ok) throw new Error(await response.text());
+    }, recurring.schedule.id);
+    const recurrenceTickStartedAt = Date.now();
+    await alice.page.evaluate(async ({ now, scheduleId }) => {
+      const response = await fetch("/_debug/tick", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ now, scheduleId }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+    }, { now: recurringStart + 8 * 24 * 60 * 60 * 1000, scheduleId: recurring.schedule.id });
+    const afterRecurring = await alice.page.evaluate(async (scheduleId) => {
+      const [home, stats] = await Promise.all([
+        fetch("/api/me", { credentials: "include" }).then((response) => response.json()) as Promise<{
+          schedules: Array<{ id: string; status: string; nextFireAt: number; lastGameId?: string }>;
+        }>,
+        fetch("/api/debug/db-stats", { credentials: "include" }).then((response) => response.json()) as Promise<{
+          counts: Record<string, number>;
+        }>,
+      ]);
+      return { schedule: home.schedules.find((item) => item.id === scheduleId), counts: stats.counts };
+    }, recurring.schedule.id);
+    expect(afterRecurring.schedule).toMatchObject({ status: "accepted" });
+    expect(afterRecurring.schedule?.lastGameId).toMatch(/^gam_/);
+    expect(afterRecurring.schedule!.nextFireAt).toBeGreaterThan(recurrenceTickStartedAt + 23 * 60 * 60 * 1000);
+    expect(afterRecurring.schedule!.nextFireAt).toBeLessThan(recurrenceTickStartedAt + 25 * 60 * 60 * 1000);
+    expect(afterRecurring.counts.games - beforeRecurring.counts.games).toBe(1);
+    expect(afterRecurring.counts.schedule_occurrences - beforeRecurring.counts.schedule_occurrences).toBe(1);
+
+    const privateInit = await alice.page.evaluate(async (gameId) => {
+      const response = await fetch(`/api/games/${gameId}/init`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json", "x-internal": "d1" },
+        body: "{}",
+      });
+      return response.status;
+    }, fired!.gameId!);
+    expect(privateInit).toBe(404);
+
+    await register(charlie.page, charlie.handle);
+    expect(await charlie.page.evaluate(async (gameId) => (
+      await fetch(`/api/games/${gameId}/state`, { credentials: "include" })
+    ).status, fired!.gameId!)).toBe(404);
+
+    const staleCookie = (await bob.context.cookies()).find((cookie) => cookie.name === "cwf_session");
+    expect(staleCookie?.value).toMatch(/^ses_/);
+    await bob.page.evaluate(async () => {
+      const response = await fetch("/api/auth/logout", { method: "POST", credentials: "include", body: "{}" });
+      if (!response.ok) throw new Error(await response.text());
+    });
+    await bob.context.addCookies([{ name: "cwf_session", value: staleCookie!.value, url: bob.page.url() }]);
+    expect(await bob.page.evaluate(async () => (await fetch("/api/me", { credentials: "include" })).status)).toBe(401);
+  } finally {
+    await alice.context.close();
+    await bob.context.close();
+    await charlie.context.close();
+  }
 });
 
 // WebAuthn cancel taxonomy — team-lead's explicit matrix. NEVER surface raw
@@ -577,7 +763,14 @@ async function register(page: Page, handle: string) {
   // The 500ms wait above lets the probe land. Click by role+regex covers all
   // morph states without coupling the test to a specific label.
   await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
-  await expect(page.locator(".topbar .handle", { hasText: `@${handle}` })).toBeVisible();
+  await expect
+    .poll(async () => {
+      const response = await page.request.get("/api/me");
+      if (!response.ok()) return null;
+      const data = (await response.json()) as { user?: { handle?: string } };
+      return data.user?.handle || null;
+    })
+    .toBe(handle.toLowerCase());
 }
 
 async function fakePushSubscribe(page: Page, endpointOverride?: string) {

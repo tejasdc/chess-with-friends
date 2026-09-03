@@ -1613,6 +1613,7 @@ interface GameState {
   whiteMs: number;
   blackMs: number;
   lastTickAt: number;
+  updatedAt: number;
   turn: "w" | "b";
   status: GameStatus;
   result?: string;
@@ -1744,6 +1745,10 @@ function App() {
   const gameMatch = path.match(/^\/game\/([^/]+)/);
   const inviteMatch = path.match(/^\/invite\/([^/]+)/);
   const waitingMatch = path.match(/^\/waiting\/([^/]+)/);
+  const presenceLeaseId = useMemo(
+    () => crypto.randomUUID?.() || `${Date.now()}:${Math.random()}`,
+    [],
+  );
 
   const refresh = React.useCallback(async () => {
     try {
@@ -1759,17 +1764,69 @@ function App() {
   useEffect(() => {
     installClientErrorHooks();
     void refresh();
-    const timer = window.setInterval(() => {
-      const match = window.location.pathname.match(/^\/game\/([^/]+)/);
-      void api<HomeData>("/api/presence/heartbeat", {
-        method: "POST",
-        body: JSON.stringify(match ? { foregroundGameId: match[1] } : {}),
-      })
-        .then(setHome)
-        .catch(() => undefined);
-    }, 10000);
-    return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!home?.user.id) return;
+    let active = true;
+    let timer: number | null = null;
+    const heartbeat = (foreground: string | null, updateHome: boolean, keepalive = false) => {
+      const body = JSON.stringify({ leaseId: presenceLeaseId, foregroundGameId: foreground });
+      if (keepalive) {
+        void fetch("/api/presence/heartbeat", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body,
+          keepalive: true,
+        }).catch(() => undefined);
+        return;
+      }
+      void api<HomeData>("/api/presence/heartbeat", { method: "POST", body })
+        .then((data) => { if (active && updateHome) setHome(data); })
+        .catch(() => undefined);
+    };
+    const stop = () => {
+      if (timer !== null) window.clearInterval(timer);
+      timer = null;
+    };
+    const start = (sendImmediately: boolean) => {
+      stop();
+      if (document.visibilityState !== "visible") return;
+      const currentForeground = () => window.location.pathname.match(/^\/game\/([^/]+)/)?.[1] || null;
+      if (sendImmediately) heartbeat(currentForeground(), true);
+      timer = window.setInterval(() => heartbeat(currentForeground(), true), 30_000);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") start(true);
+      else {
+        stop();
+        heartbeat(null, false, true);
+      }
+    };
+    const onPageHide = () => heartbeat(null, false, true);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    start(false);
+    return () => {
+      active = false;
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      heartbeat(null, false, true);
+    };
+  }, [home?.user.id, presenceLeaseId]);
+
+  useEffect(() => {
+    if (!home?.user.id || document.visibilityState !== "visible") return;
+    let active = true;
+    const foregroundGameId = path.match(/^\/game\/([^/]+)/)?.[1] || null;
+    void api<HomeData>("/api/presence/heartbeat", {
+      method: "POST",
+      body: JSON.stringify({ leaseId: presenceLeaseId, foregroundGameId }),
+    }).then((data) => { if (active) setHome(data); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [home?.user.id, path, presenceLeaseId]);
 
   useEffect(() => {
     window.__cwfUserId = home?.user.id;
@@ -2842,6 +2899,9 @@ function AuthScreen({
             left column is the puzzle-shelf. */}
         <div className="auth-bottom">
           <p className="landing-copy">{LANDING_COPY}</p>
+          <p className="account-reset-note">
+            Accounts were reset for a storage upgrade. Register your handle again if an old passkey no longer signs in.
+          </p>
           <form
             className="auth-form"
             onSubmit={(event) => {
@@ -4096,6 +4156,15 @@ function GameScreen({
   const liveSocketRef = React.useRef<(() => boolean) | null>(null);
   const voice = useVoiceCall({ game, selfId: home.user.id, sendRef: sendVoiceRef, setMessage });
 
+  const acceptSnapshot = React.useCallback((incoming: GameState) => {
+    setGame((current) => {
+      if (!current || current.id !== incoming.id) return incoming;
+      if (incoming.updatedAt < current.updatedAt) return current;
+      if (incoming.moves.length < current.moves.length) return current;
+      return incoming;
+    });
+  }, []);
+
   useEffect(() => {
     activeGameStore.set(game?.status === "active");
     return () => activeGameStore.set(false);
@@ -4107,7 +4176,7 @@ function GameScreen({
       try {
         const data = await api<GameState>(`/api/games/${gameId}/state`);
         if (!cancelled) {
-          setGame(data);
+          acceptSnapshot(data);
           setLoadError(null);
         }
       } catch (error) {
@@ -4119,21 +4188,21 @@ function GameScreen({
     return () => {
       cancelled = true;
     };
-  }, [gameId, loadAttempt]);
+  }, [acceptSnapshot, gameId, loadAttempt]);
 
   // Resilient realtime channel. Reconnects on close/error with backoff,
   // resyncs (via REST snapshot) on every reconnect, wakes on visibility
   // return, and treats a silent socket as half-open via ping/pong heartbeat.
   useRealtimeGame(gameId, {
     onGame: (next) => {
-      setGame(next);
+      acceptSnapshot(next);
       setLoadError(null);
     },
     onSignal: voice.handleSignal,
     onResync: async () => {
       try {
         const data = await api<GameState>(`/api/games/${gameId}/state`);
-        setGame(data);
+        acceptSnapshot(data);
         setLoadError(null);
       } catch {
         // Silent — REST resync failure just means we wait for the next
@@ -4148,11 +4217,6 @@ function GameScreen({
     },
     enabled: !!game,
   });
-
-  useEffect(() => {
-    void api<HomeData>("/api/presence/heartbeat", { method: "POST", body: JSON.stringify({ foregroundGameId: gameId }) })
-      .catch(() => undefined);
-  }, [gameId]);
 
   const hasActiveCall = !!voice.session && voice.session.state !== "ended";
   const leaveGame = React.useCallback(() => {
@@ -4211,7 +4275,7 @@ function GameScreen({
         method: "POST",
         body: JSON.stringify({ from, to, promotion: promotion || undefined }),
       });
-      setGame(next);
+      acceptSnapshot(next);
       setSelected(null);
       setPendingPromotion(null);
     } catch (error) {
@@ -4286,7 +4350,7 @@ function GameScreen({
 
   async function resign() {
     const next = await api<GameState>(`/api/games/${gameId}/resign`, { method: "POST", body: "{}" });
-    setGame(next);
+    acceptSnapshot(next);
     setConfirmResign(false);
   }
 

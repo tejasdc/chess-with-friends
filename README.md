@@ -41,12 +41,16 @@ Worth reading the source for, if any of these catch you:
   iCloud Keychain and Google Password Manager handle multi-device
   sync and recovery for free. A cookie keeps day-to-day use
   frictionless; the passkey is the anchor when the session is gone.
-  See `AppDO.registerVerify` / `loginVerify` in `src/worker.ts`.
-- **A Durable Object per game.** `GameDO` (Cloudflare Durable Object,
-  SQLite-backed) owns each game's clock, move history, and connected
-  sockets. `AppDO` owns the singleton graph — users, friendships,
-  challenges, schedules, push subscriptions. Both classes are declared
-  in a single `v1` SQLite migration in `wrangler.jsonc`.
+  The Worker stores only a SHA-256 digest of each bearer session in D1;
+  the raw token exists only in the secure cookie.
+- **D1 for application state, a Durable Object per game.** Stateless
+  Worker handlers own accounts, social state, schedules, presence leases,
+  and notifications in normalized D1 tables. `GameDO` (SQLite-backed)
+  remains the single writer for a game's clock, moves, sockets, and WebRTC
+  signaling. A narrow singleton `SchedulerDO` owns only scheduled alarms
+  and resumes durable D1 occurrence effects after interruption. The legacy
+  `AppDO` binding is retained for rollback data but receives no normal
+  public or internal traffic.
 - **Hibernatable WebSockets.** Sockets use
   `ctx.acceptWebSocket` so the DO can go cold between moves without
   losing connections. Grace-period countdowns are driven by DO alarms,
@@ -73,15 +77,16 @@ Worth reading the source for, if any of these catch you:
 ## Stack
 
 TypeScript, React 19, Vite, `chess.js`, Three.js (landing-page board
-animation), `@simplewebauthn/{browser,server}`, Cloudflare Workers +
-Durable Objects with the SQLite storage backend, Wrangler, Playwright
-for end-to-end tests.
+animation), `@simplewebauthn/{browser,server}`, Cloudflare Workers + D1 +
+Durable Objects with the SQLite storage backend, Wrangler, Playwright for
+end-to-end tests.
 
 ## Run it locally
 
 ```
 npm install
-npm run worker:dev     # builds and runs wrangler dev --local on :8787
+npm run db:migrate:local # initialize or advance the local D1 database
+npm run worker:dev       # builds, migrates, and runs wrangler dev on :8787
 ```
 
 `npm run dev` runs Vite on its own (useful for the landing / UI without
@@ -93,6 +98,9 @@ vapid:generate`, put the public key in `wrangler.jsonc` under
 `vars.VAPID_PUBLIC_KEY`, and put the private key in a
 `.dev.vars` file as `VAPID_PRIVATE_KEY=…` (gitignored). In production
 the private key is a Wrangler secret.
+
+See `docs/d1-operations.md` for ownership, zero-migration cutover, local
+state, production configuration, rollback, and scheduler recovery.
 
 ## Status
 

@@ -32,8 +32,9 @@ POST to `/api/_client_error` with:
 { "url": "...", "message": "...", "stack": "...", "userAgent": "...", "userId": "usr_..." }
 ```
 
-`AppDO` stores a bounded ring buffer of the last 500 records. The local-only
-debug endpoint is:
+D1 stores a bounded set of the last 500 records. Bounded cleanup is part of
+the write path, so diagnostics cannot grow without limit. The local-only debug
+endpoint is:
 
 ```sh
 curl -s http://127.0.0.1:8787/api/debug/client-errors | jq .
@@ -45,12 +46,24 @@ non-local hosts.
 
 ## Push delivery
 
-Push delivery attempts log to the AppDO push log and server mutation logs.
+Push delivery attempts log to the bounded D1 delivery log and server mutation
+logs. A stable delivery id identifies a retryable effect. Terminal 404/410
+responses remove endpoint ownership and its stale pending payloads atomically.
 For local inspection:
 
 ```sh
 curl -s http://127.0.0.1:8787/api/debug/push-log | jq .
 ```
 
-Queued notifications are peeked by the service worker and removed only after
-`showNotification()` succeeds and the worker POSTs an ack.
+The service worker consumes pending notifications on read. The acknowledgement
+endpoint remains compatible with installed clients and records completion, but
+it is not the destructive boundary. Payloads also expire, and all diagnostic
+and transient tables use bounded cleanup.
+
+## D1 presence write budget
+
+Each successful heartbeat logs D1 `rows_read` and `rows_written` metadata as a
+structured `presence.heartbeat` event. One visible tab refreshes its lease every
+30 seconds; online state uses a 75-second window and call-foreground suppression
+uses a separate 30-second window. Compare those fields with D1 dashboard usage
+after a real deployment before changing the presence storage primitive.

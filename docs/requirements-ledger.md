@@ -140,7 +140,7 @@ issues new orders.
       actor, entity: { kind, id }, outcome, latency_ms, error? }` at write
       sites, readable in Cloudflare Workers observability.
 - [ ] Client error reporting: `window.onerror` and unhandled promise rejection
-      post to `/api/_client_error`; AppDO keeps the last 500 records, readable
+      post to `/api/_client_error`; D1 keeps the last 500 records, readable
       only from the local debug endpoint.
 - [ ] Full test gate green: mechanics + adversity (+ webkit project where runnable).
 - [ ] Every deploy verified live: health, beacon, asset hashes, and the specific
