@@ -2,13 +2,13 @@
 
 Status: **Reviewed plan for approval — planning only. No runtime code or deployment is included.**
 
-Independent review outcome: the first pass returned `NO-SHIP` on four bounded gaps. This version incorporates all four corrections—scheduler recovery, quiet-window reset safety, presence compatibility, and complete AppDO seam removal—and the focused re-review returned **`SHIP` with no remaining plan blockers**. Runtime correctness still has to be demonstrated by the implementation checks in this document after approval.
+Independent review outcome: the first pass returned `NO-SHIP` on four bounded gaps. The reviewed version incorporated scheduler recovery, reset safety, presence compatibility, and complete AppDO seam removal, then received **`SHIP` with no remaining plan blockers**. The owner subsequently confirmed that nobody is using the app and explicitly accepted abandoning all current sessions and activity, so the reviewed quiet-window preflight is unnecessary: its safety condition is already known to be true. Runtime correctness still has to be demonstrated by the implementation checks in this document.
 
 ## Recommendation
 
 Keep the current one-`GameDO`-per-game design and the existing WebRTC call path. Replace the singleton `AppDO` as the normal application database with stateless Worker endpoints backed by D1. Preserve global presence as short-lived D1 leases, and retain one small Durable Object only as the exact-time alarm coordinator for scheduled games.
 
-For the current operating profile—two users and no irreplaceable production history—the recommended cutover is **zero migration during a coordinated quiet window**: confirm that no game/call is active and no accepted schedule is imminently due, start D1 empty, ask both users to register again, and leave the legacy Durable Object data untouched for rollback. This avoids building a privileged snapshot/export/import path whose complexity would exceed the value of the data being preserved.
+For the current operating profile—no active users and no irreplaceable production history—the approved cutover is **zero migration**: start D1 empty, let prior accounts register again when they return, and leave the legacy Durable Object data untouched for rollback. Existing sessions and any unnoticed activity may be abandoned by design. This avoids building a privileged snapshot/export/import path whose complexity would exceed the value of the data being preserved.
 
 ## Operating profile
 
@@ -27,7 +27,7 @@ The approved implementation must satisfy all of these as one coherent change:
 3. Durable application records live in D1 with explicit constraints, indexes, and transactional mutations.
 4. Global presence still answers “is this friend recently active?” and preserves `foregroundGameId` for suppressing redundant call pushes. Presence never grants authorization or changes game correctness.
 5. Scheduled games can still fire close to their due time even when no request is arriving.
-6. Existing API paths and response shapes remain compatible for already-open clients. Because zero migration invalidates sessions, the cutover occurs only when there is no active game/call to finish; an inactive old client receives the normal logged-out/registration flow.
+6. Existing API paths and response shapes remain compatible for old installed clients. Zero migration intentionally invalidates every old session; a returning client receives the normal logged-out/registration flow. Continuity for an unnoticed active game/call is explicitly not required.
 7. The app keeps the same origin, WebAuthn relying-party identity, cookie contract, manifest start URL, and VAPID key. An installed PWA updates normally and does not require deletion or reinstallation.
 8. No Queue, cache tier, read replica, per-user actor, or dual-write migration is introduced.
 9. Legacy `AppDO` data is not deleted during cutover.
@@ -146,9 +146,9 @@ No Cloudflare Queue is required for this operating profile. If the exact-time sc
 
 ## Data cutover choices
 
-### A. Zero migration — recommended
+### A. Zero migration — approved
 
-During a coordinated quiet window, deploy the D1-backed architecture with an empty database. Both current users register again. Old accounts, sessions, friendships, games, schedules, and pushes remain in the unreachable legacy `AppDO` for rollback but are not imported.
+Deploy the D1-backed architecture with an empty database. Prior users register again when they return. Old accounts, sessions, friendships, games, schedules, and pushes remain in the unreachable legacy `AppDO` for rollback but are not imported.
 
 Benefits:
 
@@ -160,11 +160,11 @@ Benefits:
 User-visible cost:
 
 - Both users are logged out and must register again, recreate friendships/challenges/schedules, and accept that old games are not in the new history.
-- Before cutover, both users must confirm that no game/call is active and no accepted schedule is imminently due. Otherwise that live activity is deliberately abandoned. Both users reclaim their handles before the app is publicized, avoiding a handle-squatting window.
+- The owner has confirmed that nobody is using the app and accepts abandoning any unnoticed active game, call, or accepted schedule. There is no quiet-window check or temporary maintenance system.
 - Existing passkeys for the old account may remain in the device credential picker as orphaned entries. Registration creates a new credential; the UI should give the two users a short heads-up rather than adding passkey-recovery machinery.
 - Push subscriptions are associated again after login through the existing client subscription sync.
 
-This option does **not** require uninstalling the PWA. It is a coordinated backend account reset inside the same installed app. If finishing an active game across deployment becomes a requirement, choose accounts-only import with stable user IDs and sessions instead.
+This option does **not** require uninstalling the PWA. It is a backend account reset inside the same installed app. A returning user registers again. If preserving current sessions or live-game continuity becomes a requirement before deployment, stop and revisit accounts-only import instead.
 
 ### B. Accounts-only import — not recommended by default
 
@@ -185,16 +185,15 @@ This is an implementation order inside one approved delivery, not a phased produ
 1. Add the D1 schema, repositories, stateless route handlers, presence lease behavior, and narrowly scoped `SchedulerDO`.
 2. Preserve all existing public route paths and response shapes needed by the current client.
 3. Make D1 the only durable app-state write path and remove the singleton `AppDO` from authentication and game-request authorization.
-4. Enter a short coordinated quiet window and verify no game/call is active and no accepted schedule is imminently due. If the check fails, postpone the reset or explicitly abandon that activity; do not silently strand it.
-5. Deploy with empty D1 application tables. Keep the legacy Durable Object binding and stored data intact but remove it from public and normal internal routing.
-6. Ask both users to reopen the installed app, register again, and reclaim their handles before public use resumes. The service worker fetches the normal update; no reinstall is requested.
-7. Run the real-environment acceptance checks below. Do not delete the legacy namespace in this change.
+4. Deploy with empty D1 application tables. Keep the legacy Durable Object binding and stored data intact but remove it from public and normal internal routing.
+5. Returning users reopen the installed app and register again. The service worker fetches the normal update; no reinstall is requested.
+6. Run the real-environment acceptance checks below. Do not delete the legacy namespace in this change.
 
 ## PWA and old-client compatibility
 
 - Keep the same hostname/origin, WebAuthn RP identity, authentication cookie name and semantics, manifest identity/start URL, and push VAPID key.
 - Keep the current service-worker activation policy: download updates, but do not force activation while the user is in an active game. Retain the current no-cache behavior for HTML and non-hashed runtime assets.
-- Preserve the external API contract across the cutover. An old inactive tab may hold previous JavaScript and receives an ordinary unauthenticated response/registration flow. The quiet-window precondition means there is no old active game client that needs the invalidated session to finish.
+- Preserve the external API contract across the cutover. An old tab may hold previous JavaScript and receives an ordinary unauthenticated response/registration flow after its session is invalidated. Preserving an unnoticed active game is explicitly outside the approved reset contract.
 - A reset session should receive the ordinary unauthenticated response and registration flow, not an opaque server error.
 - After re-registration, the client re-sends its existing browser push subscription to associate it with the new user. The VAPID identity does not change.
 - Do not bundle Worker asset-routing/cost optimization into this migration. `run_worker_first` can be measured separately after the state cutover; changing fetch routing at the same time adds PWA cache risk without solving the singleton.
@@ -216,7 +215,7 @@ Targeted checks during implementation:
 - Presence: multiple leases for one user, a legacy no-lease-ID client, 75-second online versus 30-second foreground freshness, immediate route/visibility changes, expiry cleanup, and fail-open call push on D1 failure.
 - Schedules: pre-commit earlier-deadline wake, post-commit canonicalization failure, pending-schedule expiry wake, concurrent/duplicate alarms, watchdog recovery past provider retries, unfinished occurrence recovery, bounded batch continuation, recurrence advancement, game initialization mismatch, and push retry.
 - Projection: completed `GameDO` state reaches D1 idempotently and a missed projection can be repaired without overwriting newer actor state.
-- PWA: the actual built production update hook proves that a previously installed app updates without reinstall; an old inactive tab gets a compatible logged-out response; the quiet-window guard prevents active-game reset; push subscription re-associates after registration.
+- PWA: the actual built production update hook proves that a previously installed app updates without reinstall; an old tab gets a compatible logged-out response after the intentional reset; push subscription re-associates after registration.
 
 End-of-change gates:
 
@@ -228,11 +227,11 @@ End-of-change gates:
 
 | Decision/blocker | Why it must be decided | Proposed resolution |
 | --- | --- | --- |
-| Existing data treatment | It changes implementation scope and the identity/passkey experience | Approve **A: zero migration**; notify two users and leave legacy data intact |
+| Existing data treatment | It changes implementation scope and the identity/passkey experience | **Resolved: zero migration approved**; returning users register again and legacy data stays intact |
 | Exact scheduled wake-ups | D1 cannot wake a stateless Worker, and commit-then-rearm can lose an earlier deadline | Approve alarm-only `SchedulerDO`, pre-commit `wakeNoLaterThan`, occurrence effect state, and watchdog recovery |
 | Cross-boundary retries | D1 cannot atomically include `GameDO` initialization or push delivery | Approve durable unfinished-effect records + stable IDs + idempotent retry/repair invariants |
 | Presence compatibility and write budget | Old clients have no lease ID; online and call-foreground freshness differ | Approve optional legacy lease fallback, 30-second visible heartbeat, 75-second online TTL, and 30-second call-foreground window |
-| Old PWA clients and reset sessions | Active games may keep old JavaScript while zero migration removes their session | Approve a coordinated no-active-game/call/imminent-schedule quiet window |
+| Old PWA clients and reset sessions | Zero migration removes their session | **Resolved: continuity intentionally abandoned**; return the normal logged-out/registration flow without requiring reinstall |
 | Rollback after new writes | There is intentionally no dual-write reconciliation | Accept reset-style rollback for this two-user cutover; keep legacy data untouched |
 
 ## Explicit non-goals
@@ -246,12 +245,12 @@ End-of-change gates:
 
 ## Approval requested
 
-Approve or change these five choices before implementation:
+Approved implementation choices:
 
-1. **Data:** A (zero migration, recommended), B (accounts only), or C (full durable-state import).
+1. **Data:** A (zero migration). Accounts-only and full import are rejected for the current empty-use profile.
 2. **Presence:** 30-second visible-only heartbeat, 75-second online lease, separate 30-second call-foreground window, and legacy no-lease-ID compatibility in D1.
 3. **Schedules:** retain one alarm-only `SchedulerDO`, plus durable occurrence/effect records and a watchdog, with D1 as the schedule source of truth.
 4. **PWA scope:** preserve current API/cache/update contracts and defer asset-routing optimization.
-5. **Cutover:** use a coordinated quiet window with no active game/call or imminently due accepted schedule; both users re-register before public use.
+5. **Cutover:** deploy the empty D1 state directly. Do not build a quiet-window check or temporary maintenance subsystem; returning users register again.
 
-No implementation should begin until these choices and any independent-review blockers are accepted.
+These choices are approved for implementation. Any newly discovered security or correctness blocker still stops deployment until resolved.
