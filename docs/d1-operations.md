@@ -62,12 +62,25 @@ preferable to a lost deadline. The canonical alarm is the earliest accepted occu
 pending-proposal expiry, unfinished occurrence effect retry, or pending push
 retry.
 
+The persisted handoff set carries a monotonic generation. Canonicalization
+snapshots that generation, queries D1, then re-reads the generation before it
+changes the alarm. If a concurrent request added or removed a handoff during
+the D1 await, canonicalization retries from a fresh snapshot. Once the second
+storage read succeeds, the generation check and following alarm write remain
+inside the Durable Object storage input gate.
+
 An alarm atomically claims a stable `(schedule_id, scheduled_for)` occurrence
 and records a stable game id before initializing `GameDO` or sending pushes.
 Separate completion markers make both effects retryable. Duplicate delivery,
 alarm replacement, actor restart, or a crash between effects resumes the same
 record instead of creating a second game. A watchdog alarm remains armed while
 unfinished effects exist.
+
+`GameDO` initialization parses and validates the complete request before it
+enters the actor storage sequence. The remaining get, immutable-value compare,
+and create operations contain no non-storage await: the first initialization
+wins, an identical concurrent retry is a no-op, and a mismatch is rejected
+without replacing actor state.
 
 A call invite uses the same ordering at the game boundary: `GameDO` atomically
 stores the requesting call session and a stable actor-local notification effect,

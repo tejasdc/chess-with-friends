@@ -6,10 +6,14 @@
   session, social, schedule, presence-lease, and push state in D1.
 - One `GameDO` per game is authoritative for chess state, clocks, hibernatable
   sockets, connection grace, and WebRTC signaling. D1's game row is a
-  monotonic directory projection, never the live-game writer.
+  monotonic directory projection, never the live-game writer. Initialization
+  parses and validates the request before its storage-only compare-or-create
+  sequence, so the first immutable value wins under concurrent delivery.
 - The singleton `SchedulerDO` owns only the next Durable Object alarm. D1
   remains the schedule source of truth and stores occurrence claims and every
-  unfinished external effect so alarm delivery is safely repeatable.
+  unfinished external effect so alarm delivery is safely repeatable. Alarm
+  canonicalization revalidates a persisted handoff generation after D1 I/O
+  before changing the alarm.
 - `AppDO` and its binding are rollback-only. Do not route a normal public or
   internal request through it, write new application state to it, or delete its
   namespace/data as part of ordinary work.

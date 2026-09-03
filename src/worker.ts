@@ -292,6 +292,11 @@ interface GameState {
   updatedAt: number;
 }
 
+type GameInitialization = Pick<
+  GameState,
+  "id" | "whiteId" | "blackId" | "whiteHandle" | "blackHandle" | "timeControl"
+>;
+
 interface GameClient {
   socket: WebSocket;
   userId: string;
@@ -716,6 +721,19 @@ function rpInfo(request: Request) {
 
 function timeControlMs(control: TimeControl) {
   return control === "5|0" ? 5 * 60 * 1000 : 10 * 60 * 1000;
+}
+
+function gameInitialization(value: unknown): GameInitialization {
+  if (!value || typeof value !== "object") throw new Error("Invalid game initialization.");
+  const input = value as Partial<Record<keyof GameInitialization, unknown>>;
+  const strings = [input.id, input.whiteId, input.blackId, input.whiteHandle, input.blackHandle];
+  if (strings.some((field) => typeof field !== "string" || field.length === 0)) {
+    throw new Error("Invalid game initialization.");
+  }
+  if (input.whiteId === input.blackId || (input.timeControl !== "5|0" && input.timeControl !== "10|0")) {
+    throw new Error("Invalid game initialization.");
+  }
+  return input as GameInitialization;
 }
 
 function validTimeControl(value: unknown): TimeControl {
@@ -1941,6 +1959,7 @@ export class GameDO extends DurableObject<Env> {
       if (url.pathname === "/debug/expire" && request.method === "POST") return await this.debugExpire(request);
       if (url.pathname === "/debug/expire-grace" && request.method === "POST") return await this.debugExpireGrace(request);
       if (url.pathname === "/debug/call-expire" && request.method === "POST") return await this.debugCallExpire(request);
+      if (url.pathname === "/debug/raw-state" && request.method === "GET") return await this.debugRawState(request);
       return json({ error: "Not found" }, { status: 404 });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : "Game request failed" }, { status: 400 });
@@ -1995,8 +2014,8 @@ export class GameDO extends DurableObject<Env> {
 
   private async init(request: Request) {
     if (!["d1", "app"].includes(request.headers.get("x-internal") || "")) throw new Error("Internal route.");
+    const body = gameInitialization(await readJson<unknown>(request));
     const existing = await this.game();
-    const body = await readJson<Pick<GameState, "id" | "whiteId" | "blackId" | "whiteHandle" | "blackHandle" | "timeControl">>(request);
     if (existing) {
       const immutableMatches = existing.id === body.id
         && existing.whiteId === body.whiteId
@@ -2023,6 +2042,11 @@ export class GameDO extends DurableObject<Env> {
     await this.putGame(game);
     await this.setNextAlarm(game);
     return json({ ok: true });
+  }
+
+  private async debugRawState(request: Request) {
+    if (request.headers.get("x-debug-local") !== "true") throw new Error("Debug endpoint is local only.");
+    return json(await this.game());
   }
 
   private async socket(request: Request) {
@@ -2689,12 +2713,89 @@ async function gameRequest(request: Request, env: Env, path: string) {
   return stub.fetch(await requestForDo(new Request(request, { headers }), target.toString()));
 }
 
+function delayedJsonRequest(
+  payload: GameInitialization,
+  onPull: () => void,
+  release: Promise<void>,
+) {
+  let sent = false;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (sent) return;
+      sent = true;
+      onPull();
+      await release;
+      controller.enqueue(new TextEncoder().encode(JSON.stringify(payload)));
+      controller.close();
+    },
+  });
+  return new Request("https://game.local/init", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-internal": "d1" },
+    body,
+  });
+}
+
+async function debugGameInitializationRace(request: Request, env: Env) {
+  const input = await readJson<{ gameId?: string; mode?: "identical" | "mismatch" }>(request);
+  if (!input.gameId || !/^gam_debug_[A-Za-z0-9_-]+$/.test(input.gameId) || !["identical", "mismatch"].includes(input.mode || "")) {
+    return json({ error: "Invalid game initialization race." }, { status: 400 });
+  }
+  const firstInitialization: GameInitialization = {
+    id: input.gameId,
+    whiteId: `usr_white_${input.gameId}`,
+    blackId: `usr_black_${input.gameId}`,
+    whiteHandle: "race_white",
+    blackHandle: "race_black",
+    timeControl: "10|0",
+  };
+  const secondInitialization = input.mode === "identical"
+    ? firstInitialization
+    : { ...firstInitialization, blackHandle: "race_intruder" };
+  let markFirstBodyPulled: () => void = () => {};
+  let markSecondBodyPulled: () => void = () => {};
+  let releaseSecondBody: () => void = () => {};
+  const firstBodyPulled = new Promise<void>((resolve) => { markFirstBodyPulled = resolve; });
+  const secondBodyPulled = new Promise<void>((resolve) => { markSecondBodyPulled = resolve; });
+  const secondBodyReleased = new Promise<void>((resolve) => { releaseSecondBody = resolve; });
+  const stub = env.GAME_DO.get(env.GAME_DO.idFromName(input.gameId));
+  const firstResponsePromise = stub.fetch(delayedJsonRequest(firstInitialization, markFirstBodyPulled, secondBodyPulled));
+  await firstBodyPulled;
+  const secondResponsePromise = stub.fetch(delayedJsonRequest(secondInitialization, markSecondBodyPulled, secondBodyReleased));
+  await secondBodyPulled;
+  const firstResponse = await firstResponsePromise;
+  const firstBody = await firstResponse.json();
+  const beforeResponse = await stub.fetch("https://game.local/debug/raw-state", {
+    headers: { "x-debug-local": "true" },
+  });
+  const before = await beforeResponse.json();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  releaseSecondBody();
+  const secondResponse = await secondResponsePromise;
+  const secondBody = await secondResponse.json();
+  const afterResponse = await stub.fetch("https://game.local/debug/raw-state", {
+    headers: { "x-debug-local": "true" },
+  });
+  const after = await afterResponse.json();
+  return json({
+    first: { status: firstResponse.status, body: firstBody },
+    second: { status: secondResponse.status, body: secondBody },
+    before,
+    after,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, execution: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const isLocal = ["127.0.0.1", "localhost"].includes(url.hostname);
+    if (url.pathname === "/_debug/game-init-race" && request.method === "POST") {
+      if (!isLocal) return json({ error: "Not found" }, { status: 404 });
+      return await debugGameInitializationRace(request, env);
+    }
     if (url.pathname.startsWith("/api/games/")) return gameRequest(request, env, url.pathname);
-    if (url.pathname === "/api/debug/push-log" || url.pathname === "/api/debug/client-errors" || url.pathname === "/api/debug/db-stats" || url.pathname === "/_debug/tick" || url.pathname === "/_debug/reset-app") {
-      if (!["127.0.0.1", "localhost"].includes(url.hostname)) return json({ error: "Not found" }, { status: 404 });
+    if (url.pathname === "/api/debug/push-log" || url.pathname === "/api/debug/client-errors" || url.pathname === "/api/debug/db-stats" || url.pathname === "/_debug/tick" || url.pathname === "/_debug/reset-app" || url.pathname === "/_debug/scheduler") {
+      if (!isLocal) return json({ error: "Not found" }, { status: 404 });
       const headers = new Headers(request.headers);
       headers.set("x-debug-local", "true");
       return handleD1AppRequest(await requestForDo(new Request(request, { headers })), env, execution);

@@ -170,6 +170,11 @@ export interface ScheduleOccurrenceRow {
   to_handle: string;
 }
 
+interface SchedulerWakeState {
+  generation: number;
+  handoffs: Record<string, { candidate: number; expiresAt: number }>;
+}
+
 const COOKIE = "cwf_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const AUTH_CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -503,6 +508,7 @@ class D1Application {
       if (url.pathname === "/api/auth/logout" && request.method === "POST") return await this.logout(request);
       if (url.pathname === "/_auth/session" && request.method === "GET") return await this.session(request);
       if (url.pathname === "/_debug/reset-app" && request.method === "POST") return await this.debugReset(request);
+      if (url.pathname === "/_debug/scheduler" && request.method === "POST") return await this.debugScheduler(request);
 
       const { user, tokenHash } = await requireUserRow(request, this.env);
       actorId = user.id;
@@ -1450,6 +1456,29 @@ class D1Application {
     return json({ ok: true });
   }
 
+  private async debugScheduler(request: Request) {
+    this.assertDebug(request);
+    const body = await readJson<{ action?: string; payload?: unknown }>(request);
+    const paths: Record<string, string> = {
+      prepare: "/debug/prepare-canonicalize-race",
+      canonicalize: "/canonicalize",
+      state: "/debug/canonicalize-state",
+      wake: "/wake-no-later",
+      release: "/debug/release-canonicalize-race",
+    };
+    const path = body.action ? paths[body.action] : undefined;
+    if (!path) throw new HttpError("Unknown scheduler debug action.", 400);
+    return await schedulerStub(this.env).fetch(`https://scheduler.local${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-debug-local": "true",
+        "x-internal": "worker",
+      },
+      body: JSON.stringify(body.payload || {}),
+    });
+  }
+
   private async debugTick(request: Request) {
     this.assertDebug(request);
     const body = await readJson<{ now?: number; scheduleId?: string }>(request)
@@ -1835,6 +1864,8 @@ async function retryScheduledPushes(env: D1AppEnv, now: number) {
 }
 
 export class SchedulerDO extends DurableObject<D1AppEnv> {
+  private canonicalizeBarrier?: { paused: boolean; release: () => void; released: Promise<void> };
+
   constructor(ctx: DurableObjectState, env: D1AppEnv) {
     super(ctx, env);
   }
@@ -1847,13 +1878,19 @@ export class SchedulerDO extends DurableObject<D1AppEnv> {
       if (!Number.isFinite(body.candidate) || !body.handoffId || !/^wake_[A-Za-z0-9_-]+$/.test(body.handoffId)) {
         return json({ error: "Invalid wake handoff." }, { status: 400 });
       }
-      const handoffs = await this.handoffs();
+      const wakeState = await this.wakeState();
       const now = Date.now();
-      handoffs[body.handoffId] = {
-        candidate: Number(body.candidate),
-        expiresAt: Math.max(now, Number(body.candidate)) + 2 * SCHEDULER_WATCHDOG_MS,
+      const nextWakeState: SchedulerWakeState = {
+        generation: wakeState.generation + 1,
+        handoffs: {
+          ...wakeState.handoffs,
+          [body.handoffId]: {
+            candidate: Number(body.candidate),
+            expiresAt: Math.max(now, Number(body.candidate)) + 2 * SCHEDULER_WATCHDOG_MS,
+          },
+        },
       };
-      await this.ctx.storage.put("wakeHandoffs", handoffs);
+      await this.ctx.storage.put("wakeState", nextWakeState);
       const current = await this.ctx.storage.getAlarm();
       const candidate = Math.max(now, Number(body.candidate));
       if (current === null || candidate < current) await this.ctx.storage.setAlarm(candidate);
@@ -1862,21 +1899,52 @@ export class SchedulerDO extends DurableObject<D1AppEnv> {
     if (url.pathname === "/canonicalize" && request.method === "POST") {
       const body = await readJson<{ handoffId?: string }>(request).catch(() => ({} as { handoffId?: string }));
       if (body.handoffId) {
-        const handoffs = await this.handoffs();
-        delete handoffs[body.handoffId];
-        if (Object.keys(handoffs).length) await this.ctx.storage.put("wakeHandoffs", handoffs);
-        else await this.ctx.storage.delete("wakeHandoffs");
+        const wakeState = await this.wakeState();
+        if (body.handoffId in wakeState.handoffs) {
+          const handoffs = { ...wakeState.handoffs };
+          delete handoffs[body.handoffId];
+          await this.ctx.storage.put("wakeState", {
+            generation: wakeState.generation + 1,
+            handoffs,
+          } satisfies SchedulerWakeState);
+        }
       }
-      await this.canonicalize();
-      return json({ ok: true });
+      const attempts = await this.canonicalize();
+      return json({ ok: true, attempts });
     }
     if (url.pathname === "/reset" && request.method === "POST") {
+      const wakeState = await this.wakeState();
+      await this.ctx.storage.put("wakeState", {
+        generation: wakeState.generation + 1,
+        handoffs: {},
+      } satisfies SchedulerWakeState);
       await this.ctx.storage.deleteAlarm();
-      await this.ctx.storage.delete("wakeHandoffs");
+      this.canonicalizeBarrier?.release();
+      this.canonicalizeBarrier = undefined;
       return json({ ok: true });
     }
     if (url.pathname === "/debug-run" && request.method === "POST") {
       await this.alarm();
+      return json({ ok: true });
+    }
+    if (url.pathname === "/debug/prepare-canonicalize-race" && request.method === "POST") {
+      if (request.headers.get("x-debug-local") !== "true") return json({ error: "Not found" }, { status: 404 });
+      let release: () => void = () => {};
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      this.canonicalizeBarrier = { paused: false, release, released };
+      return json({ ok: true });
+    }
+    if (url.pathname === "/debug/canonicalize-state" && request.method === "POST") {
+      if (request.headers.get("x-debug-local") !== "true") return json({ error: "Not found" }, { status: 404 });
+      return json({
+        wakeState: await this.wakeState(),
+        alarm: await this.ctx.storage.getAlarm(),
+        paused: this.canonicalizeBarrier?.paused === true,
+      });
+    }
+    if (url.pathname === "/debug/release-canonicalize-race" && request.method === "POST") {
+      if (request.headers.get("x-debug-local") !== "true") return json({ error: "Not found" }, { status: 404 });
+      this.canonicalizeBarrier?.release();
       return json({ ok: true });
     }
     return json({ error: "Not found" }, { status: 404 });
@@ -1896,34 +1964,48 @@ export class SchedulerDO extends DurableObject<D1AppEnv> {
     await this.canonicalize();
   }
 
-  private async handoffs() {
-    return (await this.ctx.storage.get<Record<string, { candidate: number; expiresAt: number }>>("wakeHandoffs")) || {};
+  private async wakeState(): Promise<SchedulerWakeState> {
+    return (await this.ctx.storage.get<SchedulerWakeState>("wakeState")) || { generation: 0, handoffs: {} };
   }
 
   private async canonicalize() {
-    const handoffs = await this.handoffs();
-    const now = Date.now();
-    let pruned = false;
-    for (const [id, handoff] of Object.entries(handoffs)) {
-      if (handoff.expiresAt <= now) {
-        delete handoffs[id];
-        pruned = true;
+    let attempts = 0;
+    while (true) {
+      attempts += 1;
+      let wakeState = await this.wakeState();
+      const now = Date.now();
+      const handoffs = Object.fromEntries(
+        Object.entries(wakeState.handoffs).filter(([, handoff]) => handoff.expiresAt > now),
+      );
+      if (Object.keys(handoffs).length !== Object.keys(wakeState.handoffs).length) {
+        wakeState = { generation: wakeState.generation + 1, handoffs };
+        await this.ctx.storage.put("wakeState", wakeState);
       }
+      await this.pauseCanonicalizationAfterSnapshot();
+      const databaseDeadline = await canonicalSchedulerDeadline(this.env.DB);
+      const currentWakeState = await this.wakeState();
+      if (currentWakeState.generation !== wakeState.generation) continue;
+      const handoffDeadline = Object.values(wakeState.handoffs).reduce<number | null>((minimum, handoff) => {
+        const candidate = handoff.candidate <= now ? now + SCHEDULER_WATCHDOG_MS : handoff.candidate;
+        return minimum === null ? candidate : Math.min(minimum, candidate);
+      }, null);
+      const deadline = databaseDeadline === null
+        ? handoffDeadline
+        : handoffDeadline === null ? databaseDeadline : Math.min(databaseDeadline, handoffDeadline);
+      if (deadline === null) {
+        await this.ctx.storage.deleteAlarm();
+        return attempts;
+      }
+      await this.ctx.storage.setAlarm(Math.max(Date.now() + 250, deadline));
+      return attempts;
     }
-    if (pruned && Object.keys(handoffs).length) await this.ctx.storage.put("wakeHandoffs", handoffs);
-    else if (pruned) await this.ctx.storage.delete("wakeHandoffs");
-    const databaseDeadline = await canonicalSchedulerDeadline(this.env.DB);
-    const handoffDeadline = Object.values(handoffs).reduce<number | null>((minimum, handoff) => {
-      const candidate = handoff.candidate <= now ? now + SCHEDULER_WATCHDOG_MS : handoff.candidate;
-      return minimum === null ? candidate : Math.min(minimum, candidate);
-    }, null);
-    const deadline = databaseDeadline === null
-      ? handoffDeadline
-      : handoffDeadline === null ? databaseDeadline : Math.min(databaseDeadline, handoffDeadline);
-    if (deadline === null) {
-      await this.ctx.storage.deleteAlarm();
-      return;
-    }
-    await this.ctx.storage.setAlarm(Math.max(Date.now() + 250, deadline));
+  }
+
+  private async pauseCanonicalizationAfterSnapshot() {
+    const barrier = this.canonicalizeBarrier;
+    if (!barrier || barrier.paused) return;
+    barrier.paused = true;
+    await barrier.released;
+    if (this.canonicalizeBarrier === barrier) this.canonicalizeBarrier = undefined;
   }
 }

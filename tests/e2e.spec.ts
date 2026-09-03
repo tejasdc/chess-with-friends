@@ -341,6 +341,70 @@ test("sign out returns to the auth screen", async ({ browser }) => {
   await context.close();
 });
 
+test("scheduler canonicalization re-queries when an earlier handoff arrives during D1 I/O", async ({ request }) => {
+  type SchedulerState = {
+    wakeState: {
+      generation: number;
+      handoffs: Record<string, { candidate: number; expiresAt: number }>;
+    };
+    alarm: number | null;
+    paused: boolean;
+  };
+  const scheduler = async (action: string, payload: unknown = {}) => {
+    const response = await request.post("/_debug/scheduler", { data: { action, payload } });
+    expect(response.status()).toBe(200);
+    return await response.json();
+  };
+  await request.post("/_debug/reset-app", { data: {} });
+  await scheduler("prepare");
+  const canonicalization = scheduler("canonicalize");
+  try {
+    await expect.poll(async () => (await scheduler("state") as SchedulerState).paused).toBe(true);
+    const candidate = Date.now() + 60_000;
+    const handoffId = `wake_race_${Date.now().toString(36)}`;
+    await scheduler("wake", { candidate, handoffId });
+    const prearmed = await scheduler("state") as SchedulerState;
+    expect(prearmed.wakeState.handoffs[handoffId]?.candidate).toBe(candidate);
+    expect(prearmed.alarm).toBe(candidate);
+    await scheduler("release");
+    const completed = await canonicalization as { attempts: number };
+    expect(completed.attempts).toBeGreaterThanOrEqual(2);
+    const final = await scheduler("state") as SchedulerState;
+    expect(final.wakeState.handoffs[handoffId]?.candidate).toBe(candidate);
+    expect(final.alarm).toBe(candidate);
+  } finally {
+    await scheduler("release").catch(() => undefined);
+    await request.post("/_debug/reset-app", { data: {} });
+  }
+});
+
+test("concurrent first GameDO initialization preserves the first immutable value", async ({ request }) => {
+  type RaceResult = {
+    first: { status: number; body: { ok?: boolean } };
+    second: { status: number; body: { existing?: boolean; error?: string } };
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+  };
+  const runRace = async (mode: "identical" | "mismatch") => {
+    const gameId = `gam_debug_${mode}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+    const response = await request.post("/_debug/game-init-race", { data: { gameId, mode } });
+    expect(response.status()).toBe(200);
+    return await response.json() as RaceResult;
+  };
+
+  const identical = await runRace("identical");
+  expect(identical.first).toMatchObject({ status: 200, body: { ok: true } });
+  expect(identical.second).toMatchObject({ status: 200, body: { existing: true } });
+  expect(identical.after).toEqual(identical.before);
+
+  const mismatch = await runRace("mismatch");
+  expect(mismatch.first).toMatchObject({ status: 200, body: { ok: true } });
+  expect(mismatch.second.status).toBe(400);
+  expect(mismatch.second.body.error).toContain("does not match");
+  expect(mismatch.after).toEqual(mismatch.before);
+  expect(mismatch.after.blackHandle).toBe("race_black");
+});
+
 test("D1 cutover keeps sessions revocable, presence lease-scoped, schedules idempotent, and game init private", async ({ browser }) => {
   const suffix = Date.now().toString(36).slice(-6);
   const alice = await client(browser, `d1a_${suffix}`);

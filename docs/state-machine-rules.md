@@ -206,6 +206,14 @@ or another actor: D1's copy of a game's status is a projection of the
 authoritative `GameDO` state. Terminal projection uses monotonic conditional
 DML plus retry, so an older actor response cannot replace a newer projection.
 
+Serialization does not mean an event holds the actor across arbitrary network
+I/O. An event may interleave while another event awaits D1 or an unread request
+body. `SchedulerDO` therefore persists a monotonic handoff generation and
+revalidates it after each D1 deadline query before changing its alarm.
+`GameDO.init` consumes and validates its request body before the storage-only
+get/compare/create sequence. These are optimistic-version and parse-before-
+critical-section invariants, not timing assumptions.
+
 D1 does not provide a general JavaScript callback transaction. Predetermined
 multi-statement units use `batch()`, uniqueness lives in the schema, and each
 lifecycle mutation guards its expected current status in SQL. External effects

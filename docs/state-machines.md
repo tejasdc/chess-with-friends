@@ -478,7 +478,10 @@ event. More states, more gaps.
   markers are sent before mutations that could introduce an earlier wake and
   cleared during canonicalization afterward. If an alarm beats its D1 commit,
   the marker retains watchdog rechecks; a crash may cause an early wake but
-  cannot lose the new deadline.
+  cannot lose the new deadline. The persisted handoff set has a monotonic
+  generation. Canonicalization snapshots it before querying D1 and rechecks it
+  afterward; a changed generation forces a fresh query instead of allowing a
+  stale alarm decision to replace a concurrent earlier pre-arm.
 
 ### Transitions
 
@@ -556,7 +559,10 @@ clear guards, single writer is enforced by the per-game Durable Object.
   then POSTs `/init` with a worker-only header. Initialization is idempotent
   only when every immutable player/handle/time-control value matches; a
   mismatch is rejected. The public game proxy never exposes `/init` and strips
-  client-supplied internal headers.
+  client-supplied internal headers. The actor parses and validates the request
+  before its storage-only get/compare/create sequence, so concurrent first
+  delivery has one winner: an identical retry observes that value and a
+  mismatch cannot overwrite it.
 - `move` — `POST /move`. Guards: game is `active`, it is this user's turn,
   the move is legal per `chess.js`. Applies clock, applies move, checks
   checkmate/draw, rearms alarm if still active, and reports a terminal D1
