@@ -2030,12 +2030,13 @@ function InspirationsPage() {
           </p>
           <p className="insp-body">
             The design and the icon come from Alexander Rodchenko's Workers'
-            Club, 1925. The Workers' Club reconceived leisure as active and
-            collective rather than passive and solitary, and chess was part of
-            it.
+            Club, 1925. The Workers' Club <strong>reconceived leisure</strong> as{" "}
+            <strong>active and collective</strong> rather than passive and
+            solitary, and chess was part of it.
           </p>
           <p className="insp-body">
-            The palette comes from Virgilio Villalba's Untitled, 1955:
+            The palette comes from Virgilio Villalba's{" "}
+            <a className="insp-link" href="https://www.moma.org/collection/works/206007" target="_blank" rel="noreferrer">Untitled, 1955</a>:
             celadon, cream, teak, navy.
           </p>
           <p className="insp-body">
