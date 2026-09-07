@@ -2030,9 +2030,9 @@ function InspirationsPage() {
           </p>
           <p className="insp-body">
             The design and the icon come from Alexander Rodchenko's Workers'
-            Club, 1925. The Workers' Club <strong>reconceived leisure</strong> as{" "}
-            <strong>active and collective</strong> rather than passive and
-            solitary, and chess was part of it.
+            Club, 1925. The Workers' Club reconceived leisure as{" "}
+            <strong>active and collective</strong> rather than{" "}
+            <strong>passive and solitary</strong>, and chess was part of it.
           </p>
           <p className="insp-body">
             The palette comes from Virgilio Villalba's{" "}
