@@ -23,6 +23,16 @@ export default defineConfig({
     video: "off",
   },
   projects: [
+    ...[
+      { name: "replay-desktop-chromium", device: "Desktop Chrome" },
+      { name: "replay-mobile-chromium", device: "Pixel 7" },
+      { name: "replay-desktop-webkit", device: "Desktop Safari" },
+      { name: "replay-mobile-webkit", device: "iPhone 14" },
+    ].filter((project) => webkitRunnable || !project.name.endsWith("webkit")).map((project) => ({
+      name: project.name,
+      testMatch: /opponent-replay\.spec\.ts$/,
+      use: { ...devices[project.device] },
+    })),
     {
       name: "chromium",
       testMatch: /e2e\.spec\.ts$/,

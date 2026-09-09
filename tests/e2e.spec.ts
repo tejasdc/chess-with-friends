@@ -461,6 +461,15 @@ test("two simulated clients exercise v1 mechanics", async ({ browser }) => {
   await expect(bob.page.locator('[data-square="f3"] .piece')).toBeVisible({ timeout: 5000 });
   await move(bob.page, "e7", "e5");
   await expect(alice.page.locator('[data-square="e5"] .piece')).toBeVisible({ timeout: 5000 });
+  const readReplayPosition = () => alice.page.evaluate(async (id) => {
+    const state = await (await fetch(`/api/games/${id}/state`)).json() as { fen: string; moves: unknown[]; turn: string };
+    return { fen: state.fen, moves: state.moves, turn: state.turn };
+  }, mateGame);
+  const beforeReplay = await readReplayPosition();
+  await alice.page.getByRole("button", { name: "Replay opponent's last move" }).click();
+  await expect(alice.page.getByRole("grid", { name: "Chess board" })).toHaveAttribute("aria-busy", "true");
+  await expect(alice.page.getByRole("grid", { name: "Chess board" })).not.toHaveAttribute("aria-busy", "true");
+  expect(await readReplayPosition()).toEqual(beforeReplay);
   await move(alice.page, "g2", "g4");
   await expect(bob.page.locator('[data-square="g4"] .piece')).toBeVisible({ timeout: 5000 });
   await move(bob.page, "d8", "h4");

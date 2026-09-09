@@ -52,3 +52,5 @@ tmp/reviews/screens-r2/*
 !tmp/reviews/screens-r2/fix2-dashboard-with-chevrons.png
 !tmp/reviews/screens-r2/fix2-game-strips-reserved.png
 .DS_Store
+
+/.worktree-env
