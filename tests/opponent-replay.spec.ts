@@ -114,9 +114,11 @@ for (const color of ["w", "b"] as const) {
     expect(Math.abs(moverBox!.y - sourceBox!.y)).toBeLessThan(1);
     await page.clock.runFor(380);
     await expect(board).toHaveAttribute("data-replay-phase", "moving");
+    await expect.poll(async () => {
+      const travelingBox = await mover.boundingBox();
+      return Math.hypot(travelingBox!.x - moverBox!.x, travelingBox!.y - moverBox!.y);
+    }, { message: "The replay piece travels away from its source square" }).toBeGreaterThan(1);
     await page.screenshot({ path: `tmp/replay/${testInfo.project.name}-${color}-moving.png` });
-    const travelingBox = await mover.boundingBox();
-    expect(Math.hypot(travelingBox!.x - moverBox!.x, travelingBox!.y - moverBox!.y)).toBeGreaterThan(1);
     await page.clock.runFor(250);
     await expect(board).toHaveAttribute("data-replay-phase", "after");
     await expectPosition(page, lastOpponent.fen);
