@@ -586,7 +586,9 @@ async function register(page: Page, handle: string) {
   // The 500ms wait above lets the probe land. Click by role+regex covers all
   // morph states without coupling the test to a specific label.
   await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
-  await expect(page.locator(".topbar .handle", { hasText: `@${handle}` })).toBeVisible();
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(page.getByRole("dialog", { name: "App menu" }).getByText(`@${handle}`, { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
 }
 
 async function fakePushSubscribe(page: Page, endpointOverride?: string) {
