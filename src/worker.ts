@@ -1322,9 +1322,10 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async pendingPush(request: Request, user: User) {
+    // Body reads can yield to other mutations; take the database snapshot afterward.
+    const body = await readJson<{ endpoint?: string; ackId?: string }>(request).catch(() => ({} as { endpoint?: string; ackId?: string }));
     const db = await this.db();
     db.pendingPushesByEndpoint ||= {};
-    const body = await readJson<{ endpoint?: string; ackId?: string }>(request).catch(() => ({} as { endpoint?: string; ackId?: string }));
     const endpoint = body.endpoint || "";
     const ownsEndpoint = endpoint && (db.pushSubscriptions[user.id] || []).some((subscription) => subscription.endpoint === endpoint);
     prunePendingPushQueues(db);

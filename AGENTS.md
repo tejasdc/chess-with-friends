@@ -26,6 +26,12 @@ copies only session cookies; its own notification storage survives sign-out and
 reauthentication. Keep permission, subscription, sign-out and rebinding assertions
 in the target engine. CDP setup does not establish WebKit passkey support.
 
+Pending-push polling reads its request body before loading the mutable AppDO
+snapshot. Awaiting the body after loading state allowed an empty poll to overwrite
+a concurrently created challenge and its notification. Keep the read/consume/save
+sequence free of intervening non-storage I/O; the push-copy integration test covers
+challenge creation while the recipient polls.
+
 ## Portrait-only mobile use
 
 `public/manifest.webmanifest` requests portrait orientation. Keep VitePWA's
