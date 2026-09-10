@@ -2341,32 +2341,27 @@ body[data-screen="landing"] .landing-copy {
   transition: background-color 200ms var(--ease), color 200ms var(--ease), border-color 200ms var(--ease);
 }
 .clock-strip.top    { border-top-color: transparent; }
-.opponent-replay-actions {
-  display: flex;
-  justify-content: flex-end;
-  flex: 0 0 auto;
-  padding: 0 12px;
-}
 .quick-replay {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 36px;
-  padding: 4px 8px;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 0;
   background: transparent;
-  color: var(--ink);
+  color: inherit;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1;
 }
 .quick-replay:disabled { opacity: 0.4; cursor: default; }
-.quick-replay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.quick-replay:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 @media (hover: hover) and (pointer: fine) {
-  .quick-replay:hover:not(:disabled) { background: var(--paper-2); }
+  .quick-replay:hover:not(:disabled) { background: color-mix(in srgb, currentColor 12%, transparent); }
 }
-.quick-replay:active:not(:disabled) { background: var(--paper-2); }
+.quick-replay:active:not(:disabled) { background: color-mix(in srgb, currentColor 12%, transparent); }
 .clock-strip.bottom {
   border-top-color: var(--hair);
   border-bottom-color: transparent;

@@ -98,8 +98,25 @@ for (const color of ["w", "b"] as const) {
     const board = page.getByRole("grid");
     const initialBox = await board.boundingBox();
     const buttonBox = await replayButton.boundingBox();
-    const barBox = await page.locator(".clock-strip.top").boundingBox();
-    expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(barBox!.y);
+    const opponentBar = page.locator(".clock-strip.top");
+    await expect(opponentBar.getByRole("button", { name: replayName })).toBeVisible();
+    const barBox = await opponentBar.boundingBox();
+    const controlsBox = await opponentBar.locator(".who").boundingBox();
+    const clockBox = await opponentBar.locator("time").boundingBox();
+    expect(buttonBox!.y).toBeGreaterThanOrEqual(barBox!.y);
+    expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(barBox!.y + barBox!.height);
+    expect(buttonBox!.x).toBeGreaterThanOrEqual(controlsBox!.x + controlsBox!.width);
+    expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(clockBox!.x);
+    expect(Math.abs(buttonBox!.y + buttonBox!.height / 2 - clockBox!.y - clockBox!.height / 2)).toBeLessThan(1);
+    expect(await page.locator(".board-column").evaluate((column) => column.firstElementChild?.classList.contains("clock-strip"))).toBe(true);
+    const originalBarHeight = await opponentBar.evaluate((bar) => {
+      const button = bar.querySelector<HTMLElement>(".quick-replay")!;
+      button.style.display = "none";
+      const height = bar.getBoundingClientRect().height;
+      button.style.removeProperty("display");
+      return height;
+    });
+    expect(barBox!.height).toBe(originalBarHeight);
     expect(buttonBox!.height).toBeGreaterThanOrEqual(32);
     expect(Math.abs(initialBox!.width - initialBox!.height)).toBeLessThan(1);
     await page.screenshot({ path: `tmp/replay/${testInfo.project.name}-${color}-live.png` });

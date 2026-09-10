@@ -4372,25 +4372,6 @@ function GameScreen({
     <Shell home={home} message={message} messageKind={messageKind} setMessage={setMessage} menuExtras={gameMenuExtras} onNavigateHome={leaveGame}>
       <section className="game game-fixed">
         <div className="board-column">
-          <div className="opponent-replay-actions">
-            <span className="sr-only" role="status">
-              {replay ? `Replaying @${opponentHandle}'s move: ${replay.move.san}, ${replay.move.from} to ${replay.move.to}` : "Live board"}
-            </span>
-            <button
-              type="button"
-              className="quick-replay"
-              aria-label="Replay opponent's last move"
-              title={lastOpponentMove ? `Replay ${lastOpponentMove.san}` : "Your opponent hasn't moved yet"}
-              disabled={!lastOpponentMove || !!replay || !!pendingPromotion}
-              onClick={() => { setSelected(null); startReplay(); }}
-            >
-              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 8a7 7 0 1 1 1 7M3 3v5h5" />
-                <path d="m9 7 4 3-4 3Z" fill="currentColor" stroke="none" />
-              </svg>
-              Replay
-            </button>
-          </div>
           {/* active-turn class paints the strip DEEP-INK (Villalba
               incision made large). Cream text on the ink band. */}
           <div
@@ -4418,6 +4399,22 @@ function GameScreen({
                 />
               ) : null}
             </div>
+            <span className="sr-only" role="status">
+              {replay ? `Replaying @${opponentHandle}'s move: ${replay.move.san}, ${replay.move.from} to ${replay.move.to}` : "Live board"}
+            </span>
+            <button
+              type="button"
+              className="quick-replay"
+              aria-label="Replay opponent's last move"
+              title={lastOpponentMove ? `Replay ${lastOpponentMove.san}` : "Your opponent hasn't moved yet"}
+              disabled={!lastOpponentMove || !!replay || !!pendingPromotion}
+              onClick={() => { setSelected(null); startReplay(); }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 8a7 7 0 1 1 1 7M3 3v5h5" />
+                <path d="m9 7 4 3-4 3Z" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>
 
