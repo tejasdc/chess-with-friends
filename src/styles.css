@@ -2129,6 +2129,7 @@ body[data-screen="landing"] .landing-copy {
 }
 .insp-figure img {
   display: block;
+  align-self: flex-start;
   max-width: 100%;
   /* svh so the image cap accounts for mobile Safari's URL bar. Coefficient
      tuned against the iPhone 17 Pro simulator (real WebKit, real chrome):
