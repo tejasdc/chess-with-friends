@@ -131,6 +131,10 @@ issues new orders.
       1976, NOT Rodchenko.
 
 ## Infra
+- [ ] Portrait-only mobile use (Tejas 2026-09-10): request portrait lock and block
+      landscape interaction when unavailable; preserve the mounted app on rotation,
+      allow portrait keyboard input, and keep desktop usable. Evidence:
+      `tests/orientation.spec.ts` in Chromium and WebKit on Linux.
 - [ ] twochairs.club is the single canonical domain. chess.tejas.nyc and
       www.chess.tejas.nyc redirect with 301 to the matching twochairs.club
       path + query; no duplicate app origin.

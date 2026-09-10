@@ -3,7 +3,10 @@ import { Chess, type Color } from "chess.js";
 
 const replayName = "Replay opponent's last move";
 
-function gameFromMoves(moves: string[]) {
+// Keep routed fixtures authoritative; the real service worker has its own suite.
+test.use({ serviceWorkers: "block" });
+
+function gameFromMoves(moves: string[], lastTickAt: number) {
   const chess = new Chess();
   const history = moves.map((san, index) => {
     const move = chess.move(san);
@@ -14,13 +17,16 @@ function gameFromMoves(moves: string[]) {
     whiteHandle: "alice", blackHandle: "bob", timeControl: "10|0",
     fen: chess.fen(), moves: history, turn: chess.turn(),
     status: chess.isCheckmate() ? "checkmate" : "active",
-    whiteMs: 600_000, blackMs: 600_000, lastTickAt: Date.now(),
+    whiteMs: 600_000, blackMs: 600_000, lastTickAt,
     connectionState: { white: "connected", black: "connected" }, callSession: null,
   };
 }
 
-async function openFixture(page: Page, moves: string[], color: Color = "w") {
-  let game = gameFromMoves(moves);
+async function openFixture(page: Page, moves: string[], color: Color = "w", delayedResync?: { requested: () => void; response: Promise<void> }) {
+  const replayTime = new Date("2026-09-10T12:00:00Z");
+  let game = gameFromMoves(moves, replayTime.getTime());
+  // Freeze before the app starts so setup never races a running clock.
+  await page.clock.pauseAt(replayTime);
   const writes: string[] = [];
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -38,20 +44,24 @@ async function openFixture(page: Page, moves: string[], color: Color = "w") {
     user: { id: color === "w" ? "white" : "black", handle: color === "w" ? "alice" : "bob", inviteToken: "test" },
     inviteUrl: "/", friends: [], requests: [], sentRequests: [], challenges: [], sentChallenges: [], schedules: [], games: [], pushTypes: [], pushPublicKey: "",
   };
+  let stateReads = 0;
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.startsWith("/api/games/") && route.request().method() !== "GET") writes.push(path);
-    await route.fulfill({ json: path.endsWith("/state") ? game : home });
+    const response = path.endsWith("/state") ? game : home;
+    if (path.endsWith("/state") && ++stateReads === 2 && delayedResync) {
+      delayedResync.requested();
+      await delayedResync.response;
+    }
+    await route.fulfill({ json: response });
   });
   await page.goto("/game/replay-game");
   await expect(page.getByRole("grid", { name: "Chess board" })).toBeVisible();
   await expect(page.getByRole("status", { name: "opponent connected" })).toBeVisible();
-  await page.clock.install();
-  await page.clock.pauseAt(new Date());
   return {
     get game() { return game; }, writes, errors,
     async publish(nextMoves: string[], status?: string) {
-      game = gameFromMoves(nextMoves);
+      game = gameFromMoves(nextMoves, await page.evaluate(() => Date.now()));
       if (status) game.status = status;
       sockets.forEach((socket) => socket.send(JSON.stringify({ game })));
       await expect(page.getByRole("grid")).not.toHaveAttribute("aria-busy", "true");
@@ -86,6 +96,68 @@ test("replay waits for an opponent move, including the white opening viewed by b
 test("own opening does not enable opponent replay", async ({ page }) => {
   await openFixture(page, ["e4"]);
   await expect(page.getByRole("button", { name: replayName })).toBeDisabled();
+});
+
+test("a delayed HTTP resync cannot rewind a move already received over the socket", async ({ page }) => {
+  let requested!: () => void;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { requested = resolve; });
+  const response = new Promise<void>((resolve) => { release = resolve; });
+  const fixture = await openFixture(page, [], "b", { requested, response });
+  await pending;
+  await fixture.publish(["e4"]);
+  await expectPosition(page, fixture.game.fen);
+  const received = page.waitForResponse("**/api/games/replay-game/state");
+  release();
+  await (await received).finished();
+  await page.clock.runFor(100);
+  await expectPosition(page, fixture.game.fen);
+  await expect(page.getByRole("button", { name: replayName })).toBeEnabled();
+});
+
+test("a socket stuck closing is replaced and its late close cannot disrupt recovery", async ({ page }) => {
+  await page.route("**/game/replay-game", async (route) => {
+    const response = await route.fetch();
+    // Run after Playwright installs its routed WebSocket and before the app loads.
+    const tracker = `<script>
+      const OriginalSocket = window.WebSocket;
+      window.recoverySockets = [];
+      window.WebSocket = class extends OriginalSocket {
+        constructor(url, protocols) {
+          super(url, protocols);
+          window.recoverySockets.push(this);
+        }
+      };
+    </script>`;
+    await route.fulfill({ response, body: (await response.text()).replace("<head>", `<head>${tracker}`) });
+  });
+  const fixture = await openFixture(page, ["e4", "e5"], "b");
+  await page.evaluate(() => {
+    const socket = (window as unknown as { recoverySockets: WebSocket[] }).recoverySockets[0];
+    // Model a close handshake that never finishes; no close event arrives yet.
+    Object.defineProperties(socket, {
+      readyState: { get: () => WebSocket.CLOSING },
+      close: { value: () => undefined },
+    });
+  });
+  Object.assign(fixture.game, gameFromMoves(["e4", "e5", "Nf3"], await page.evaluate(() => Date.now())));
+  await page.clock.runFor(5500);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { recoverySockets: WebSocket[] }).recoverySockets.map((socket) => socket.readyState),
+  )).toEqual([2, 1]);
+  await expectPosition(page, fixture.game.fen);
+
+  await page.evaluate(() => {
+    const old = (window as unknown as { recoverySockets: WebSocket[] }).recoverySockets[0];
+    old.dispatchEvent(new CloseEvent("close"));
+  });
+  await page.clock.runFor(1000);
+  expect(await page.evaluate(() =>
+    (window as unknown as { recoverySockets: WebSocket[] }).recoverySockets.map((socket) => socket.readyState),
+  )).toEqual([2, 1]);
+  await expectPosition(page, fixture.game.fen);
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
 });
 
 for (const color of ["w", "b"] as const) {

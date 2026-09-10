@@ -9,6 +9,8 @@ export default defineConfig({
     // as soon as a new SW is available, which bypasses the active-game hold in
     // `usePwaUpdateHandling()` and can reload a player mid-move.
     VitePWA({
+      // Keep public/manifest.webmanifest authoritative, including portrait orientation.
+      manifest: false,
       strategies: "injectManifest",
       srcDir: "src",
       filename: "sw.js",

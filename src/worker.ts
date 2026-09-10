@@ -781,11 +781,23 @@ async function sendWebPush(subscription: StoredSubscription, env: Env) {
 }
 
 export class AppDO extends DurableObject<Env> {
+  private stateTail: Promise<unknown> = Promise.resolve();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
   }
 
-  async fetch(request: Request): Promise<Response> {
+  private withState<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.stateTail.then(operation);
+    this.stateTail = result.catch(() => undefined);
+    return result;
+  }
+
+  fetch(request: Request): Promise<Response> {
+    return this.withState(() => this.handleRequest(request));
+  }
+
+  private async handleRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     try {
       if (url.pathname === "/_auth/session") return await this.session(request);
@@ -865,7 +877,11 @@ export class AppDO extends DurableObject<Env> {
     }
   }
 
-  async alarm() {
+  alarm() {
+    return this.withState(() => this.runAlarm());
+  }
+
+  private async runAlarm() {
     const db = await this.db();
     const now = Date.now();
     const pushIntents: PushDeliveryIntent[] = [];
@@ -1322,9 +1338,10 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async pendingPush(request: Request, user: User) {
+    // Body reads can yield to other mutations; take the database snapshot afterward.
+    const body = await readJson<{ endpoint?: string; ackId?: string }>(request).catch(() => ({} as { endpoint?: string; ackId?: string }));
     const db = await this.db();
     db.pendingPushesByEndpoint ||= {};
-    const body = await readJson<{ endpoint?: string; ackId?: string }>(request).catch(() => ({} as { endpoint?: string; ackId?: string }));
     const endpoint = body.endpoint || "";
     const ownsEndpoint = endpoint && (db.pushSubscriptions[user.id] || []).some((subscription) => subscription.endpoint === endpoint);
     prunePendingPushQueues(db);
@@ -1747,7 +1764,7 @@ export class AppDO extends DurableObject<Env> {
   }
 
   private async deliverPush(intent: PushDeliveryIntent) {
-    const snapshot = await this.db();
+    const snapshot = await this.withState(() => this.db());
     const subscriptions = snapshot.pushSubscriptions[intent.userId] || [];
     const dead = new Set<string>();
     const logs: Array<{ type: PushType; userId: string; createdAt: number; delivered: boolean; status?: number }> = [];
@@ -1762,13 +1779,15 @@ export class AppDO extends DurableObject<Env> {
       const type = snapshot.pendingPushes[intent.userId]?.find((pending) => pending.id === intent.pushId)?.type;
       if (type) logs.push({ type, userId: intent.userId, createdAt: Date.now(), delivered: false });
     }
-    const db = await this.db();
-    if (dead.size) {
-      db.pushSubscriptions[intent.userId] = subscriptions.filter((s) => !dead.has(s.endpoint));
-      for (const endpoint of dead) delete db.pendingPushesByEndpoint[endpoint];
-    }
-    db.pushLog = [...db.pushLog, ...logs].slice(-100);
-    await this.save(db);
+    await this.withState(async () => {
+      const db = await this.db();
+      if (dead.size) {
+        db.pushSubscriptions[intent.userId] = (db.pushSubscriptions[intent.userId] || []).filter((s) => !dead.has(s.endpoint));
+        for (const endpoint of dead) delete db.pendingPushesByEndpoint[endpoint];
+      }
+      db.pushLog = [...db.pushLog, ...logs].slice(-100);
+      await this.save(db);
+    });
   }
 
   private async callInvite(request: Request) {
@@ -1894,7 +1913,7 @@ export class AppDO extends DurableObject<Env> {
       }
     }
     await this.save(db);
-    await this.alarm();
+    await this.runAlarm();
     return json({ tick: target, moved: Object.keys(originals).length });
   }
 

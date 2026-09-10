@@ -3,8 +3,8 @@
 // sockets die, the tab hides, the CPU is throttled, moves come in
 // bursts. A round is not shippable unless this suite is green.
 //
-// All tests use serial mode within the file (one browser at a time
-// on a memory-constrained machine). Each test spins up two clients,
+// The config's single worker runs one test at a time without skipping
+// later tests after a failure. Each test spins up its own clients,
 // registers them, gets them into a game, then does something horrible
 // and asserts the game recovers without user intervention.
 
@@ -12,7 +12,6 @@ import { expect, test, type Browser, type CDPSession, type Page } from "@playwri
 import { readFileSync } from "node:fs";
 import { Chess } from "chess.js";
 
-test.describe.configure({ mode: "serial" });
 test.use({
   launchOptions: {
     args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
@@ -142,7 +141,8 @@ async function register(page: Page, handle: string) {
   // See tests/e2e.spec.ts register() for morph-label rationale.
   await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
   await page.getByRole("button", { name: "Open menu" }).click();
-  await expect(page.getByRole("dialog", { name: "App menu" }).getByText(`@${handle}`, { exact: true })).toBeVisible();
+  const accountHandle = handle.trim().toLowerCase().replace(/^@/, "");
+  await expect(page.getByRole("dialog", { name: "App menu" }).getByText(`@${accountHandle}`, { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
 }
 
@@ -388,7 +388,7 @@ async function installVoiceMocks(page: Page) {
       async createAnswer() { return { type: "answer", sdp: "fake-answer" } as RTCSessionDescriptionInit; }
       async setLocalDescription(desc: RTCSessionDescriptionInit) {
         this.localDescription = desc;
-        window.setTimeout(() => this.setIce("connected"), 0);
+        // Tests explicitly send peer-ice-connected after inspecting the connecting UI.
       }
       async setRemoteDescription(desc: RTCSessionDescriptionInit) { this.remoteDescription = desc; }
       async addIceCandidate() { /* trickle ICE mocked */ }
@@ -1659,7 +1659,9 @@ test("landing puzzle solve walks to a new caption and position without chrome re
   await expect(page.locator(`.landing-square[data-square="${first.solution.to}"] .legal-dot, .landing-square[data-square="${first.solution.to}"] .legal-capture`)).toBeVisible();
   await page.locator(`.landing-square[data-square="${first.solution.to}"]`).click();
 
-  await expect(shelf).toHaveAttribute("data-animating", "true", { timeout: 1200 });
+  // The solved king topples during a 1.6s hold before the next puzzle starts walking.
+  await expect(page.locator(".landing-piece.toppled")).toBeVisible();
+  await expect(shelf).toHaveAttribute("data-animating", "true");
   await expect(page.locator(".puzzle-caption")).not.toHaveText(firstCaption);
   await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 8000 });
 
@@ -1768,8 +1770,9 @@ test("landing replay animates a capture — captured piece walks to tray during 
 
   await solveLandingPuzzle(page, positions[targetIndex - 1]);
   await expect(shelf).toHaveAttribute("data-puzzle-id", target.id, { timeout: 40000 });
-  // Lichess entries carry side-to-move only (credit lives on /inspirations).
-  await expect(page.locator(".puzzle-caption")).toHaveText(`${target.sideToMove === "w" ? "WHITE" : "BLACK"} TO MOVE`);
+  await expect(page.locator(".puzzle-cta-headline")).toHaveText("Your move ↑");
+  await expect(page.locator(".puzzle-cta-reference")).toHaveText(target.credit);
+  await expect(shelf).toHaveAttribute("data-orientation", target.sideToMove);
 
   await page.waitForFunction(
     () => {
@@ -1784,6 +1787,7 @@ test("landing replay animates a capture — captured piece walks to tray during 
       const centerY = pieceBox.top + pieceBox.height / 2;
       return centerY > boardBox.bottom + pieceBox.height * 0.08 || centerY < boardBox.top - pieceBox.height * 0.08;
     },
+    undefined,
     { timeout: 40000, polling: "raf" },
   );
 
@@ -2163,17 +2167,9 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
   const dashboardSurface = {
     label: "dashboard",
     setup: async (page: Page) => {
-      const cdp = await page.context().newCDPSession(page);
-      await cdp.send("WebAuthn.enable");
-      await cdp.send("WebAuthn.addVirtualAuthenticator", {
-        options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true },
-      });
+      await addAuthenticator(page);
       const h = "layout_" + Date.now().toString(36).slice(-5);
-      await page.goto("/");
-      await page.getByPlaceholder("your_handle").fill(h);
-      await page.waitForTimeout(400);
-      await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
-      await page.getByText(`@${h}`).waitFor({ timeout: 15000 });
+      await register(page, h);
     },
     contentSelector: ".dashboard",
     mustNotScroll: false,
