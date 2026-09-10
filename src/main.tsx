@@ -87,6 +87,7 @@ import type {
 import shelfPositions from "./data/positions.json";
 import { activeGameStore } from "./activeGameStore";
 import { usePwaUpdateHandling } from "./pwaUpdateHandling";
+import { PortraitOnly } from "./PortraitOnly";
 import "./styles.css";
 
 type ShelfPosition = {
@@ -4774,4 +4775,4 @@ function navigate(path: string, after?: () => void) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(<PortraitOnly><App /></PortraitOnly>);

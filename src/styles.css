@@ -95,6 +95,26 @@
 
 * { box-sizing: border-box; }
 
+.portrait-notice {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  color: var(--ink);
+  background: var(--ground);
+  font-size: 16px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.portrait-notice[hidden] { display: none; }
+.portrait-notice h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+.portrait-notice p { margin: 0; font-size: 16px; line-height: 1.5; }
+
 html {
   min-width: 320px;
   background: var(--ground);

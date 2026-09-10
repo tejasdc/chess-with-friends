@@ -34,6 +34,16 @@ export default defineConfig({
       use: { ...devices[project.device] },
     })),
     {
+      name: "orientation-chromium",
+      testMatch: /orientation\.spec\.ts$/,
+      use: { browserName: "chromium" },
+    },
+    {
+      name: "orientation-webkit",
+      testMatch: /orientation\.spec\.ts$/,
+      use: { browserName: "webkit" },
+    },
+    {
       name: "chromium",
       testMatch: /e2e\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
