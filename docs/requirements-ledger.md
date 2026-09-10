@@ -142,37 +142,30 @@ issues new orders.
 - [ ] Client error reporting: `window.onerror` and unhandled promise rejection
       post to `/api/_client_error`; AppDO keeps the last 500 records, readable
       only from the local debug endpoint.
-- [ ] Full test gate green: mechanics + adversity (+ webkit project where runnable).
+- [ ] Verification scope follows [AGENTS.md](../AGENTS.md#delivery): focused
+      checks for isolated fixes; mechanics + adversity (+ WebKit where
+      runnable) for changes to shared gameplay or cross-feature behavior.
 - [ ] Every deploy verified live: health, beacon, asset hashes, and the specific
       feature probed on production.
 
 ## Process law
-- [ ] VISUAL MATRIX SHIP GATE (Tejas 2026-08-04, founding incident: schedule
-      form shipped with the Time field crushed under the Repeat dropdown at
-      desktop widths). Before EVERY deploy, run `node scripts/visual-matrix.mjs`
-      and OPEN the contact-sheet HTML for each viewport (390, 430, 1440)
-      AND the iOS Simulator contact sheet. Look at every cell — landing
-      (rest / piece-selected / mid-transition), inspirations, dashboard
-      (rest / add-friend open / schedule open / menu open / notif popover
-      open), waiting room, game (live / selected). Deploy is blocked until
-      every cell has been eyeballed. This is the permanent answer to
-      "why are we shipping things without looking."
-- [ ] SIMULATOR-AS-TRUTH (added 2026-08-04 after Tejas hit an inspirations
-      overflow the headless viewports could not see). Headless viewports
-      report the full 844/932/900 usable height; mobile Safari's URL bar +
-      toolbar consume ~120-190px on device, so `100dvh` math that passes
-      headless overflows on the real phone. The visual matrix's MOBILE
-      cells MUST be captured on the iOS Simulator (real WebKit, browser
-      chrome present) via `xcrun simctl openurl` + `xcrun simctl io
-      screenshot`, in addition to the headless capture. Headless stays
-      for fast programmatic guards (overlap, geometry) and desktop; the
-      simulator is the truth pass for phone surfaces. Any no-scroll
-      surface must be verified with browser chrome present.
+- [ ] VISUAL VERIFICATION: inspect screenshots and measure the affected
+      surfaces before shipping. Use `node scripts/visual-matrix.mjs` for
+      cross-surface changes; isolated fixes follow the focused delivery
+      scope in [AGENTS.md](../AGENTS.md#delivery). The schedule-form
+      overlap incident (2026-08-04) motivates looking at rendered UI,
+      not requiring unrelated matrix cells for every small fix.
+- [ ] BROWSER COVERAGE follows the global host-specific policy (Tejas,
+      2026-09-07): Chromium and WebKit on Linux at mobile and desktop
+      sizes. Include shorter usable heights when viewport fit matters.
+      Native Apple tooling is optional on macOS and is required only
+      when explicitly requested; it is not a Linux release prerequisite.
 - [ ] PROGRAMMATIC OVERLAP GUARD (same incident). The `no element overlap
       across the visual matrix` adversity test walks the same surfaces and
       asserts NO two visible labeled controls (input/select/button/textarea/
-      label) have intersecting bounding boxes at any viewport. Must be green
-      before every deploy. Catches states nobody thought to eyeball.
+      label) have intersecting bounding boxes at any viewport. Run it
+      when changes affect shared control layouts or multiple surfaces;
+      use focused geometry checks for isolated fixes.
 - [ ] DATA-DEPENDENT STATES ARE MATRIX CELLS (Tejas 2026-08-04, founding
       incident: the WaitingRow shipped mangled — "Waiting for @raz"
       wrapped into three centered lines with the arrow orphaned and
