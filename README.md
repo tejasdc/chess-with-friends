@@ -7,6 +7,9 @@ sits down across from you.
 Live at **[twochairs.club](https://twochairs.club)** (installs to the
 home screen). Private, invite-only.
 
+Read the [broader project thesis](docs/thesis.md) for the ideas behind Two
+Chairs, its direction beyond chess, and software shaped around people's intentions.
+
 ## What it is
 
 Most chess apps optimize for infinite opponents and one more game. This
