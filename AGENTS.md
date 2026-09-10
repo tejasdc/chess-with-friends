@@ -46,6 +46,12 @@ must not rewind the board. The replay suite holds an old HTTP response to exerci
 that ordering deterministically. Mock voice tests explicitly advance ICE state
 after checking the connecting UI; the separate real-peer test covers actual ICE.
 
+The realtime hook's current socket exclusively owns its callbacks and timers.
+The liveness check replaces non-open sockets without waiting for a close handshake;
+late events from retired sockets cannot cancel or alter the replacement. Keep the
+stalled-close regression alongside the replay fixtures, and exercise real Worker
+socket recovery and voice lifecycle tests when changing this ownership.
+
 ## Portrait-only mobile use
 
 `public/manifest.webmanifest` requests portrait orientation. Keep VitePWA's

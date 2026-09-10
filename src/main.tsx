@@ -2161,8 +2161,24 @@ function useRealtimeGame(
       reconnectTimer = window.setTimeout(connect, delay);
     }
 
+    function replaceSocket(staleSocket: WebSocket) {
+      if (disposed || socket !== staleSocket) return;
+      socket = null;
+      lastPongAt = 0;
+      if (sendRef) sendRef.current = null;
+      try { staleSocket.close(); } catch { /* already unusable */ }
+      publishConnectionHealth();
+      scheduleReconnect();
+    }
+
     function connect() {
       if (disposed) return;
+      clearTimers();
+      const previous = socket;
+      socket = null;
+      lastPongAt = 0;
+      if (sendRef) sendRef.current = null;
+      try { previous?.close(); } catch { /* already unusable */ }
       try {
         socket = new WebSocket(wsUrl);
       } catch {
@@ -2175,9 +2191,10 @@ function useRealtimeGame(
       publishConnectionHealth();
       const s = socket;
       s.addEventListener("open", () => {
+        if (disposed || socket !== s) return;
         if (sendRef) {
           sendRef.current = (message: VoiceOutboundMessage) => {
-            if (s.readyState !== WebSocket.OPEN) return false;
+            if (disposed || socket !== s || s.readyState !== WebSocket.OPEN) return false;
             s.send(JSON.stringify(message));
             return true;
           };
@@ -2196,17 +2213,17 @@ function useRealtimeGame(
         heartbeatTimer = window.setInterval(() => {
           try { s.send("ping"); } catch { /* will surface via liveness */ }
         }, HEARTBEAT_INTERVAL_MS);
-        // Liveness: if no inbound frame for 25s during an active game,
-        // treat the socket as half-open. Close it (that fires close →
-        // scheduleReconnect).
+        // A closing socket may never emit close. Retire it without waiting
+        // for the handshake; late events must not own the replacement's timers.
         livenessTimer = window.setInterval(() => {
           publishConnectionHealth();
-          if (Date.now() - lastInboundAt > SOCKET_LIVENESS_STALE_MS) {
-            try { s.close(); } catch { /* ignored */ }
+          if (s.readyState !== WebSocket.OPEN || Date.now() - lastInboundAt > SOCKET_LIVENESS_STALE_MS) {
+            replaceSocket(s);
           }
         }, LIVENESS_CHECK_MS);
       });
       s.addEventListener("message", (event) => {
+        if (disposed || socket !== s) return;
         lastInboundAt = Date.now();
         const raw = typeof event.data === "string" ? event.data : "";
         if (!raw) return;
@@ -2221,16 +2238,8 @@ function useRealtimeGame(
           else if (payload && typeof payload.type === "string") onSignalRef.current?.(payload as VoiceSignalMessage);
         } catch { /* non-JSON frame ignored */ }
       });
-      s.addEventListener("close", () => {
-        if (sendRef && sendRef.current) sendRef.current = null;
-        if (socket === s) lastPongAt = 0;
-        publishConnectionHealth();
-        clearTimers();
-        scheduleReconnect();
-      });
-      s.addEventListener("error", () => {
-        try { s.close(); } catch { /* already closing */ }
-      });
+      s.addEventListener("close", () => replaceSocket(s));
+      s.addEventListener("error", () => replaceSocket(s));
     }
 
     function onVisibility() {
@@ -2243,12 +2252,7 @@ function useRealtimeGame(
         void onResyncRef.current();
         return;
       }
-      try { socket?.close(); } catch { /* ignored */ }
       backoffMs = 250;
-      if (reconnectTimer !== null) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
       connect();
     }
 

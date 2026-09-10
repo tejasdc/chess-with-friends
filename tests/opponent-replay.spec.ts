@@ -115,6 +115,51 @@ test("a delayed HTTP resync cannot rewind a move already received over the socke
   await expect(page.getByRole("button", { name: replayName })).toBeEnabled();
 });
 
+test("a socket stuck closing is replaced and its late close cannot disrupt recovery", async ({ page }) => {
+  await page.route("**/game/replay-game", async (route) => {
+    const response = await route.fetch();
+    // Run after Playwright installs its routed WebSocket and before the app loads.
+    const tracker = `<script>
+      const OriginalSocket = window.WebSocket;
+      window.recoverySockets = [];
+      window.WebSocket = class extends OriginalSocket {
+        constructor(url, protocols) {
+          super(url, protocols);
+          window.recoverySockets.push(this);
+        }
+      };
+    </script>`;
+    await route.fulfill({ response, body: (await response.text()).replace("<head>", `<head>${tracker}`) });
+  });
+  const fixture = await openFixture(page, ["e4", "e5"], "b");
+  await page.evaluate(() => {
+    const socket = (window as unknown as { recoverySockets: WebSocket[] }).recoverySockets[0];
+    // Model a close handshake that never finishes; no close event arrives yet.
+    Object.defineProperties(socket, {
+      readyState: { get: () => WebSocket.CLOSING },
+      close: { value: () => undefined },
+    });
+  });
+  Object.assign(fixture.game, gameFromMoves(["e4", "e5", "Nf3"], await page.evaluate(() => Date.now())));
+  await page.clock.runFor(5500);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { recoverySockets: WebSocket[] }).recoverySockets.map((socket) => socket.readyState),
+  )).toEqual([2, 1]);
+  await expectPosition(page, fixture.game.fen);
+
+  await page.evaluate(() => {
+    const old = (window as unknown as { recoverySockets: WebSocket[] }).recoverySockets[0];
+    old.dispatchEvent(new CloseEvent("close"));
+  });
+  await page.clock.runFor(1000);
+  expect(await page.evaluate(() =>
+    (window as unknown as { recoverySockets: WebSocket[] }).recoverySockets.map((socket) => socket.readyState),
+  )).toEqual([2, 1]);
+  await expectPosition(page, fixture.game.fen);
+  expect(fixture.writes).toEqual([]);
+  expect(fixture.errors).toEqual([]);
+});
+
 for (const color of ["w", "b"] as const) {
   test(`replay restores the live position after replying, ${color} orientation`, async ({ page }, testInfo) => {
     const moves = color === "w" ? ["e4", "e5", "Nf3"] : ["e4", "e5", "Nf3", "Nc6"];
