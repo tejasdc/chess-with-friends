@@ -141,7 +141,8 @@ async function register(page: Page, handle: string) {
   // See tests/e2e.spec.ts register() for morph-label rationale.
   await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
   await page.getByRole("button", { name: "Open menu" }).click();
-  await expect(page.getByRole("dialog", { name: "App menu" }).getByText(`@${handle}`, { exact: true })).toBeVisible();
+  const accountHandle = handle.trim().toLowerCase().replace(/^@/, "");
+  await expect(page.getByRole("dialog", { name: "App menu" }).getByText(`@${accountHandle}`, { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
 }
 
@@ -1658,7 +1659,9 @@ test("landing puzzle solve walks to a new caption and position without chrome re
   await expect(page.locator(`.landing-square[data-square="${first.solution.to}"] .legal-dot, .landing-square[data-square="${first.solution.to}"] .legal-capture`)).toBeVisible();
   await page.locator(`.landing-square[data-square="${first.solution.to}"]`).click();
 
-  await expect(shelf).toHaveAttribute("data-animating", "true", { timeout: 1200 });
+  // The solved king topples during a 1.6s hold before the next puzzle starts walking.
+  await expect(page.locator(".landing-piece.toppled")).toBeVisible();
+  await expect(shelf).toHaveAttribute("data-animating", "true");
   await expect(page.locator(".puzzle-caption")).not.toHaveText(firstCaption);
   await expect(shelf).toHaveAttribute("data-animating", "false", { timeout: 8000 });
 
@@ -1767,8 +1770,9 @@ test("landing replay animates a capture — captured piece walks to tray during 
 
   await solveLandingPuzzle(page, positions[targetIndex - 1]);
   await expect(shelf).toHaveAttribute("data-puzzle-id", target.id, { timeout: 40000 });
-  // Lichess entries carry side-to-move only (credit lives on /inspirations).
-  await expect(page.locator(".puzzle-caption")).toHaveText(`${target.sideToMove === "w" ? "WHITE" : "BLACK"} TO MOVE`);
+  await expect(page.locator(".puzzle-cta-headline")).toHaveText("Your move ↑");
+  await expect(page.locator(".puzzle-cta-reference")).toHaveText(target.credit);
+  await expect(shelf).toHaveAttribute("data-orientation", target.sideToMove);
 
   await page.waitForFunction(
     () => {
@@ -1783,6 +1787,7 @@ test("landing replay animates a capture — captured piece walks to tray during 
       const centerY = pieceBox.top + pieceBox.height / 2;
       return centerY > boardBox.bottom + pieceBox.height * 0.08 || centerY < boardBox.top - pieceBox.height * 0.08;
     },
+    undefined,
     { timeout: 40000, polling: "raf" },
   );
 
