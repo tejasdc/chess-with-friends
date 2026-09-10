@@ -29,11 +29,16 @@ copies only session cookies; its own notification storage survives sign-out and
 reauthentication. Keep permission, subscription, sign-out and rebinding assertions
 in the target engine. CDP setup does not establish WebKit passkey support.
 
-Pending-push polling reads its request body before loading the mutable AppDO
-snapshot. Awaiting the body after loading state allowed an empty poll to overwrite
-a concurrently created challenge and its notification. Keep the read/consume/save
-sequence free of intervening non-storage I/O; the push-copy integration test covers
-challenge creation while the recipient polls.
+AppDO owns one shared database snapshot. Its requests, alarms, and background
+push write-backs enter `withState` so asynchronous work cannot save stale state
+over a newer mutation. Push network delivery runs outside the queue; its final
+write reloads current state inside it. Call `runAlarm` directly from an already
+queued handler such as the local debug tick, never enqueue recursively. GameDO
+initialization does not call back into AppDO; preserve that when awaiting it from
+a queued handler. `npm run test:state` exercises suspended requests, concurrent
+challenge/push writes, alarm persistence, consume-once reads, and error recovery
+against the real AppDO class with an isolated storage host. Real Worker mechanics
+and adversity tests remain the integration gate.
 
 ## Portrait-only mobile use
 
