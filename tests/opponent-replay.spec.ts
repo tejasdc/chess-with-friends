@@ -22,7 +22,7 @@ function gameFromMoves(moves: string[], lastTickAt: number) {
   };
 }
 
-async function openFixture(page: Page, moves: string[], color: Color = "w") {
+async function openFixture(page: Page, moves: string[], color: Color = "w", delayedResync?: { requested: () => void; response: Promise<void> }) {
   const replayTime = new Date("2026-09-10T12:00:00Z");
   let game = gameFromMoves(moves, replayTime.getTime());
   // Freeze before the app starts so setup never races a running clock.
@@ -44,10 +44,16 @@ async function openFixture(page: Page, moves: string[], color: Color = "w") {
     user: { id: color === "w" ? "white" : "black", handle: color === "w" ? "alice" : "bob", inviteToken: "test" },
     inviteUrl: "/", friends: [], requests: [], sentRequests: [], challenges: [], sentChallenges: [], schedules: [], games: [], pushTypes: [], pushPublicKey: "",
   };
+  let stateReads = 0;
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.startsWith("/api/games/") && route.request().method() !== "GET") writes.push(path);
-    await route.fulfill({ json: path.endsWith("/state") ? game : home });
+    const response = path.endsWith("/state") ? game : home;
+    if (path.endsWith("/state") && ++stateReads === 2 && delayedResync) {
+      delayedResync.requested();
+      await delayedResync.response;
+    }
+    await route.fulfill({ json: response });
   });
   await page.goto("/game/replay-game");
   await expect(page.getByRole("grid", { name: "Chess board" })).toBeVisible();
@@ -90,6 +96,23 @@ test("replay waits for an opponent move, including the white opening viewed by b
 test("own opening does not enable opponent replay", async ({ page }) => {
   await openFixture(page, ["e4"]);
   await expect(page.getByRole("button", { name: replayName })).toBeDisabled();
+});
+
+test("a delayed HTTP resync cannot rewind a move already received over the socket", async ({ page }) => {
+  let requested!: () => void;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { requested = resolve; });
+  const response = new Promise<void>((resolve) => { release = resolve; });
+  const fixture = await openFixture(page, [], "b", { requested, response });
+  await pending;
+  await fixture.publish(["e4"]);
+  await expectPosition(page, fixture.game.fen);
+  const received = page.waitForResponse("**/api/games/replay-game/state");
+  release();
+  await (await received).finished();
+  await page.clock.runFor(100);
+  await expectPosition(page, fixture.game.fen);
+  await expect(page.getByRole("button", { name: replayName })).toBeEnabled();
 });
 
 for (const color of ["w", "b"] as const) {

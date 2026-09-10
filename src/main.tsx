@@ -4084,6 +4084,10 @@ function GameScreen({
   setMessage: SetMessage;
 }) {
   const [game, setGame] = useState<GameState | null>(null);
+  const receiveGame = React.useCallback((next: GameState) => {
+    // Move history only grows. An older HTTP response can arrive after a socket update.
+    setGame((current) => current?.id === next.id && current.moves.length > next.moves.length ? current : next);
+  }, []);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [selected, setSelected] = useState<Square | null>(null);
@@ -4111,7 +4115,7 @@ function GameScreen({
       try {
         const data = await api<GameState>(`/api/games/${gameId}/state`);
         if (!cancelled) {
-          setGame(data);
+          receiveGame(data);
           setLoadError(null);
         }
       } catch (error) {
@@ -4123,21 +4127,21 @@ function GameScreen({
     return () => {
       cancelled = true;
     };
-  }, [gameId, loadAttempt]);
+  }, [gameId, loadAttempt, receiveGame]);
 
   // Resilient realtime channel. Reconnects on close/error with backoff,
   // resyncs (via REST snapshot) on every reconnect, wakes on visibility
   // return, and treats a silent socket as half-open via ping/pong heartbeat.
   useRealtimeGame(gameId, {
     onGame: (next) => {
-      setGame(next);
+      receiveGame(next);
       setLoadError(null);
     },
     onSignal: voice.handleSignal,
     onResync: async () => {
       try {
         const data = await api<GameState>(`/api/games/${gameId}/state`);
-        setGame(data);
+        receiveGame(data);
         setLoadError(null);
       } catch {
         // Silent — REST resync failure just means we wait for the next
@@ -4215,7 +4219,7 @@ function GameScreen({
         method: "POST",
         body: JSON.stringify({ from, to, promotion: promotion || undefined }),
       });
-      setGame(next);
+      receiveGame(next);
       setSelected(null);
       setPendingPromotion(null);
     } catch (error) {
@@ -4290,7 +4294,7 @@ function GameScreen({
 
   async function resign() {
     const next = await api<GameState>(`/api/games/${gameId}/resign`, { method: "POST", body: "{}" });
-    setGame(next);
+    receiveGame(next);
     setConfirmResign(false);
   }
 

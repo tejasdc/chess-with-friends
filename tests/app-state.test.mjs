@@ -55,6 +55,7 @@ function fixture(env = {}) {
   });
   return {
     app,
+    storage,
     state: () => structuredClone(db),
     async settled() {
       while (background.length) await Promise.all(background.splice(0));
@@ -147,6 +148,18 @@ test("a rejected request does not poison later mutations", async () => {
   assert.equal(rejected.status, 400);
   const accepted = await f.app.fetch(request("/api/challenges", { friendId: "bob" }));
   assert.equal(accepted.status, 200);
+  await f.settled();
+  assert.equal(Object.keys(f.state().challenges).length, 1);
+});
+
+test("an alarm storage failure releases state ownership for later requests", async () => {
+  const f = fixture();
+  const read = f.storage.get;
+  f.storage.get = async () => { throw new Error("Storage unavailable"); };
+  await assert.rejects(f.app.alarm(), /Storage unavailable/);
+  f.storage.get = read;
+  const response = await f.app.fetch(request("/api/challenges", { friendId: "bob" }));
+  assert.equal(response.status, 200);
   await f.settled();
   assert.equal(Object.keys(f.state().challenges).length, 1);
 });

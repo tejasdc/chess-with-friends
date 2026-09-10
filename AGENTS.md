@@ -40,6 +40,12 @@ challenge/push writes, alarm persistence, consume-once reads, and error recovery
 against the real AppDO class with an isolated storage host. Real Worker mechanics
 and adversity tests remain the integration gate.
 
+GameScreen accepts snapshots from HTTP and the socket through `receiveGame`.
+Move history is append-only: an HTTP resync arriving after a newer socket move
+must not rewind the board. The replay suite holds an old HTTP response to exercise
+that ordering deterministically. Mock voice tests explicitly advance ICE state
+after checking the connecting UI; the separate real-peer test covers actual ICE.
+
 ## Portrait-only mobile use
 
 `public/manifest.webmanifest` requests portrait orientation. Keep VitePWA's

@@ -387,7 +387,7 @@ async function installVoiceMocks(page: Page) {
       async createAnswer() { return { type: "answer", sdp: "fake-answer" } as RTCSessionDescriptionInit; }
       async setLocalDescription(desc: RTCSessionDescriptionInit) {
         this.localDescription = desc;
-        window.setTimeout(() => this.setIce("connected"), 0);
+        // Tests explicitly send peer-ice-connected after inspecting the connecting UI.
       }
       async setRemoteDescription(desc: RTCSessionDescriptionInit) { this.remoteDescription = desc; }
       async addIceCandidate() { /* trickle ICE mocked */ }
