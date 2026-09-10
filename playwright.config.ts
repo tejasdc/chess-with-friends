@@ -3,12 +3,13 @@ import { release } from "node:os";
 
 const webkitRunnable = !(process.platform === "darwin" && release().startsWith("25."));
 const port = process.env.PLAYWRIGHT_PORT || "8787";
+const fixturePort = process.env.PLAYWRIGHT_FIXTURE_PORT || String(Number(port) + 1);
+const fixtureURL = `http://localhost:${fixturePort}`;
 
-// Two projects: chromium runs the full v1 mechanics suite. mobile-webkit
-// runs the mobile-viewport layout tests to catch iOS-Safari-specific
-// behavior (this app's primary surface). Playwright's WebKit binary
-// currently segfaults on Darwin 25 pre-release (upstream); when that's
-// resolved the mobile-webkit project runs automatically.
+// Routed client fixtures use the production preview. Integrated mechanics,
+// adversity and notifications use the local Worker; PWA updates have their own fixture.
+// Playwright's WebKit binary currently segfaults on Darwin 25 pre-release;
+// the existing mobile/replay WebKit projects run when the host supports them.
 export default defineConfig({
   testDir: "tests",
   workers: 1,
@@ -31,17 +32,17 @@ export default defineConfig({
     ].filter((project) => webkitRunnable || !project.name.endsWith("webkit")).map((project) => ({
       name: project.name,
       testMatch: /opponent-replay\.spec\.ts$/,
-      use: { ...devices[project.device] },
+      use: { ...devices[project.device], baseURL: fixtureURL },
     })),
     {
       name: "orientation-chromium",
       testMatch: /orientation\.spec\.ts$/,
-      use: { browserName: "chromium" },
+      use: { browserName: "chromium", baseURL: fixtureURL },
     },
     {
       name: "orientation-webkit",
       testMatch: /orientation\.spec\.ts$/,
-      use: { browserName: "webkit" },
+      use: { browserName: "webkit", baseURL: fixtureURL },
     },
     {
       name: "chromium",
@@ -70,10 +71,17 @@ export default defineConfig({
       use: { ...devices["iPhone 13"] },
     }] : []),
   ],
-  webServer: {
+  webServer: [{
+    name: "Worker",
     command: `npm run build && wrangler dev --local --persist-to=.wrangler/state-${port} --port ${port}`,
     url: `http://localhost:${port}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
-  },
+  }, {
+    name: "Fixtures",
+    command: `vite preview --host localhost --port ${fixturePort} --strictPort`,
+    url: fixtureURL,
+    reuseExistingServer: false,
+    timeout: 60_000,
+  }],
 });

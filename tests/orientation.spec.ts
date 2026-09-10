@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
+// Keep routed fixtures authoritative; the real service worker has its own suite.
+test.use({ serviceWorkers: "block" });
+
 type OrientationSource = "modern" | "legacy" | "dimensions";
 declare global {
   interface Window {

@@ -3,7 +3,10 @@ import { Chess, type Color } from "chess.js";
 
 const replayName = "Replay opponent's last move";
 
-function gameFromMoves(moves: string[]) {
+// Keep routed fixtures authoritative; the real service worker has its own suite.
+test.use({ serviceWorkers: "block" });
+
+function gameFromMoves(moves: string[], lastTickAt: number) {
   const chess = new Chess();
   const history = moves.map((san, index) => {
     const move = chess.move(san);
@@ -14,13 +17,16 @@ function gameFromMoves(moves: string[]) {
     whiteHandle: "alice", blackHandle: "bob", timeControl: "10|0",
     fen: chess.fen(), moves: history, turn: chess.turn(),
     status: chess.isCheckmate() ? "checkmate" : "active",
-    whiteMs: 600_000, blackMs: 600_000, lastTickAt: Date.now(),
+    whiteMs: 600_000, blackMs: 600_000, lastTickAt,
     connectionState: { white: "connected", black: "connected" }, callSession: null,
   };
 }
 
 async function openFixture(page: Page, moves: string[], color: Color = "w") {
-  let game = gameFromMoves(moves);
+  const replayTime = new Date("2026-09-10T12:00:00Z");
+  let game = gameFromMoves(moves, replayTime.getTime());
+  // Freeze before the app starts so setup never races a running clock.
+  await page.clock.pauseAt(replayTime);
   const writes: string[] = [];
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -46,12 +52,10 @@ async function openFixture(page: Page, moves: string[], color: Color = "w") {
   await page.goto("/game/replay-game");
   await expect(page.getByRole("grid", { name: "Chess board" })).toBeVisible();
   await expect(page.getByRole("status", { name: "opponent connected" })).toBeVisible();
-  await page.clock.install();
-  await page.clock.pauseAt(new Date());
   return {
     get game() { return game; }, writes, errors,
     async publish(nextMoves: string[], status?: string) {
-      game = gameFromMoves(nextMoves);
+      game = gameFromMoves(nextMoves, await page.evaluate(() => Date.now()));
       if (status) game.status = status;
       sockets.forEach((socket) => socket.send(JSON.stringify({ game })));
       await expect(page.getByRole("grid")).not.toHaveAttribute("aria-busy", "true");
