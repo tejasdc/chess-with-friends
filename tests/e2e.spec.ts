@@ -347,11 +347,11 @@ test("sign out returns to the auth screen", async ({ browser }) => {
   await page.goto("/");
   const handle = `signout_${Date.now().toString(36).slice(-6)}`;
   await register(page, handle);
-  await expect(page.getByText(`@${handle}`)).toBeVisible();
 
   // Sign out lives inside the universal ⋯ menu now (one menu pattern,
   // one position — team-lead's spec). Open the menu, then click Sign out.
   await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(page.getByRole("dialog", { name: "App menu" }).getByText(`@${handle}`, { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByPlaceholder("your_handle")).toBeVisible();
   await expect(page.getByText(`@${handle}`)).toBeHidden();

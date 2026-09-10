@@ -2163,17 +2163,9 @@ test("per-surface layout: content columns fill shell width at 390 and 430, no of
   const dashboardSurface = {
     label: "dashboard",
     setup: async (page: Page) => {
-      const cdp = await page.context().newCDPSession(page);
-      await cdp.send("WebAuthn.enable");
-      await cdp.send("WebAuthn.addVirtualAuthenticator", {
-        options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true },
-      });
+      await addAuthenticator(page);
       const h = "layout_" + Date.now().toString(36).slice(-5);
-      await page.goto("/");
-      await page.getByPlaceholder("your_handle").fill(h);
-      await page.waitForTimeout(400);
-      await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
-      await page.getByText(`@${h}`).waitFor({ timeout: 15000 });
+      await register(page, h);
     },
     contentSelector: ".dashboard",
     mustNotScroll: false,
