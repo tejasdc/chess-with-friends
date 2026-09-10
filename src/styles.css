@@ -2341,6 +2341,27 @@ body[data-screen="landing"] .landing-copy {
   transition: background-color 200ms var(--ease), color 200ms var(--ease), border-color 200ms var(--ease);
 }
 .clock-strip.top    { border-top-color: transparent; }
+.quick-replay {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1;
+}
+.quick-replay:disabled { opacity: 0.4; cursor: default; }
+.quick-replay:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .quick-replay:hover:not(:disabled) { background: color-mix(in srgb, currentColor 12%, transparent); }
+}
+.quick-replay:active:not(:disabled) { background: color-mix(in srgb, currentColor 12%, transparent); }
 .clock-strip.bottom {
   border-top-color: var(--hair);
   border-bottom-color: transparent;
@@ -2508,6 +2529,7 @@ body[data-screen="landing"] .landing-copy {
 /* --- Board -------------------------------------------------------------- */
 
 .board {
+  position: relative;
   display: grid;
   /* minmax(0, 1fr) instead of 1fr — the latter reads as minmax(auto,1fr)
      which refuses to shrink below content min-size (piece glyph width).
@@ -2649,6 +2671,20 @@ body[data-screen="landing"] .landing-copy {
 }
 .square.move-arrival .piece {
   animation: last-move-arrival 640ms var(--ease) both;
+}
+.board[aria-busy="true"] .square { opacity: 1; cursor: default; }
+.replay-piece {
+  position: absolute;
+  width: 12.5%;
+  height: 12.5%;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  /* This is a move demonstration: leave time to follow the piece across the board. */
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .replay-piece { transition: none; }
 }
 @keyframes last-move-arrival {
   0%   { transform: translateY(-1px) scale(0.78); }

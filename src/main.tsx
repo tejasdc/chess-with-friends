@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Chess, type Color, type Move as ChessMove, type PieceSymbol, type Square } from "chess.js";
+import { replayPieces, useOpponentReplay, type ReplayFrame } from "./opponentReplay";
 // Voice icons live in-file as custom SVG (not a Phosphor / Iconoir kit).
 // The app has its own drawn hand — chess pieces, board frame, clock strip —
 // so parachuting in a UI-kit set makes the voice controls feel foreign.
@@ -4093,6 +4094,7 @@ function GameScreen({
   const myColor = game?.whiteId === home.user.id ? "w" : "b";
   const opponentId = game ? (game.whiteId === home.user.id ? game.blackId : game.whiteId) : "";
   const opponentRawState = game?.connectionState?.[opponentId] || "gone";
+  const { replay, lastOpponentMove, startReplay } = useOpponentReplay(game, opponentId);
   const sendVoiceRef = React.useRef<((message: VoiceOutboundMessage) => boolean) | null>(null);
   const liveSocketRef = React.useRef<(() => boolean) | null>(null);
   const voice = useVoiceCall({ game, selfId: home.user.id, sendRef: sendVoiceRef, setMessage });
@@ -4223,7 +4225,7 @@ function GameScreen({
   }
 
   async function choose(square: Square) {
-    if (!game || game.status !== "active") return;
+    if (!game || game.status !== "active" || replay) return;
     // Silent-board principle: during play, the BOARD is the only feedback
     // channel. Gameplay taps NEVER produce toasts. Off-turn or illegal
     // taps are silent no-ops so the server-side "Illegal move." / "It is
@@ -4397,6 +4399,22 @@ function GameScreen({
                 />
               ) : null}
             </div>
+            <span className="sr-only" role="status">
+              {replay ? `Replaying @${opponentHandle}'s move: ${replay.move.san}, ${replay.move.from} to ${replay.move.to}` : "Live board"}
+            </span>
+            <button
+              type="button"
+              className="quick-replay"
+              aria-label="Replay opponent's last move"
+              title={lastOpponentMove ? `Replay ${lastOpponentMove.san}` : "Your opponent hasn't moved yet"}
+              disabled={!lastOpponentMove || !!replay || !!pendingPromotion}
+              onClick={() => { setSelected(null); startReplay(); }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 8a7 7 0 1 1 1 7M3 3v5h5" />
+                <path d="m9 7 4 3-4 3Z" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
             <time className="clock">{formatClock(opponentClock)}</time>
           </div>
 
@@ -4406,10 +4424,11 @@ function GameScreen({
             <Board
               fen={game.fen}
               orientation={myColor || "w"}
-              selected={selected}
+              selected={replay ? null : selected}
               onSquare={choose}
-              lastMove={lastMove}
+              lastMove={replay?.move || lastMove}
               lastMoveAnimationKey={lastMoveAnimationKey}
+              replay={replay}
             />
           </div>
 
@@ -4475,6 +4494,7 @@ function Board({
   interactive = true,
   lastMove,
   lastMoveAnimationKey,
+  replay,
 }: {
   fen: string;
   orientation: "w" | "b";
@@ -4483,22 +4503,25 @@ function Board({
   interactive?: boolean;
   lastMove?: { from: string; to: string } | null;
   lastMoveAnimationKey?: string | null;
+  replay?: ReplayFrame | null;
 }) {
-  const chess = useMemo(() => new Chess(fen), [fen]);
+  const displayFen = replay ? (replay.phase === "after" ? replay.move.after : replay.move.before) : fen;
+  const chess = useMemo(() => new Chess(displayFen), [displayFen]);
+  const movingPieces = replay && replay.phase !== "after" ? replayPieces(replay.move) : [];
   const board = chess.board();
   const rankList = orientation === "w" ? ranks : [...ranks].reverse();
   const fileList = orientation === "w" ? files : [...files].reverse();
   const [arrivalSquare, setArrivalSquare] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!interactive || !lastMove || !lastMoveAnimationKey) {
+    if (!interactive || replay || !lastMove || !lastMoveAnimationKey) {
       setArrivalSquare(null);
       return;
     }
     setArrivalSquare(lastMove.to);
     const timer = window.setTimeout(() => setArrivalSquare(null), 720);
     return () => window.clearTimeout(timer);
-  }, [interactive, lastMove?.to, lastMoveAnimationKey]);
+  }, [interactive, !!replay, lastMove?.to, lastMoveAnimationKey]);
 
   // Legal destinations for the currently-selected piece — pulled from
   // chess.js so promotion, castling, and en passant are all included.
@@ -4534,11 +4557,13 @@ function Board({
       className={`board ${interactive ? "" : "board-static"}`}
       role={interactive ? "grid" : "presentation"}
       aria-label={interactive ? "Chess board" : undefined}
+      aria-busy={replay ? true : undefined}
+      data-replay-phase={replay?.phase}
     >
       {rankList.flatMap((rank) =>
         fileList.map((file) => {
           const square = `${file}${rank}` as Square;
-          const piece = board[8 - Number(rank)][files.indexOf(file)];
+          const piece = movingPieces.some((moving) => moving.from === square) ? null : board[8 - Number(rank)][files.indexOf(file)];
           const dark = (files.indexOf(file) + Number(rank)) % 2 === 0;
           const showFile = orientation === "w" ? rank === "1" : rank === "8";
           const showRank = orientation === "w" ? file === "a" : file === "h";
@@ -4575,6 +4600,7 @@ function Board({
               data-square={square}
               key={square}
               onClick={() => void onSquare(square)}
+              disabled={!!replay}
               aria-label={square}
             >
               {showRank ? <span className="coord coord-rank" aria-hidden="true">{rank}</span> : null}
@@ -4586,6 +4612,24 @@ function Board({
           );
         }),
       )}
+      {movingPieces.map((piece) => {
+        const column = fileList.findIndex((file) => file === piece.from[0]);
+        const row = rankList.indexOf(piece.from[1]);
+        const dx = fileList.findIndex((file) => file === piece.to[0]) - column;
+        const dy = rankList.indexOf(piece.to[1]) - row;
+        return (
+          <div
+            className="replay-piece"
+            key={piece.from}
+            data-from={piece.from}
+            data-to={piece.to}
+            aria-hidden="true"
+            style={{ left: `${column * 12.5}%`, top: `${row * 12.5}%`, transform: replay?.phase === "moving" ? `translate(${dx * 100}%, ${dy * 100}%)` : "translate(0, 0)" }}
+          >
+            <PieceGlyph color={replay!.move.color} type={piece.type} />
+          </div>
+        );
+      })}
     </div>
   );
 }

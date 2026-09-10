@@ -141,7 +141,9 @@ async function register(page: Page, handle: string) {
   await page.waitForTimeout(500);
   // See tests/e2e.spec.ts register() for morph-label rationale.
   await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
-  await expect(page.locator(".topbar .handle", { hasText: `@${handle}` })).toBeVisible();
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(page.getByRole("dialog", { name: "App menu" }).getByText(`@${handle}`, { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
 }
 
 // Send a friend request through the Add-a-friend disclosure (collapsed by
