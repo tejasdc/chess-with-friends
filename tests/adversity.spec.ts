@@ -3,8 +3,8 @@
 // sockets die, the tab hides, the CPU is throttled, moves come in
 // bursts. A round is not shippable unless this suite is green.
 //
-// All tests use serial mode within the file (one browser at a time
-// on a memory-constrained machine). Each test spins up two clients,
+// The config's single worker runs one test at a time without skipping
+// later tests after a failure. Each test spins up its own clients,
 // registers them, gets them into a game, then does something horrible
 // and asserts the game recovers without user intervention.
 
@@ -12,7 +12,6 @@ import { expect, test, type Browser, type CDPSession, type Page } from "@playwri
 import { readFileSync } from "node:fs";
 import { Chess } from "chess.js";
 
-test.describe.configure({ mode: "serial" });
 test.use({
   launchOptions: {
     args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],

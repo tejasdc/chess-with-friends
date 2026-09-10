@@ -17,6 +17,9 @@ proxy error; these fully mocked tests do not need the Worker proxy. Mechanics,
 adversity and notifications still run against the real local Worker. The existing
 PWA update fixture keeps service workers enabled. Playwright owns both app servers;
 the Worker server builds the app before the fixture preview starts.
+The single Playwright worker keeps integration tests sequential. Use default
+test mode so a failed case reports a failure without suppressing later independent
+cases; each test creates its own clients and uniquely named accounts.
 
 The `wt` bootstrap runs `npm ci` and writes a stable per-worktree `PLAYWRIGHT_PORT` to ignored `.worktree-env`; `npm run test:e2e` sources it unless the caller supplies a port. Playwright owns its local Wrangler server and uses `.wrangler/state-<port>` for isolated test storage. No credentials or local state are copied by the bootstrap. `npm run typecheck` is the smallest fresh-worktree check. Use explicit ports when manually running simultaneous dev servers.
 

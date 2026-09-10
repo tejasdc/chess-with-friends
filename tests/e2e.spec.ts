@@ -12,8 +12,6 @@ type PendingPushPayload = {
   createdAt?: number;
 };
 
-test.describe.configure({ mode: "serial" });
-
 test("notification prompt disappears after permission is granted and sign-out preserves the browser subscription", async ({ browser, browserName, baseURL }) => {
   mkdirSync(screenDir, { recursive: true });
   const suffix = Date.now().toString(36).slice(-6);
@@ -422,12 +420,13 @@ test("install guidance shows even when push is unsupported", async ({ browser })
   const context = await browser.newContext();
   await context.addInitScript(() => {
     // Simulate a private-browsing / push-unsupported environment: strip PushManager.
-    Object.defineProperty(window, "PushManager", { configurable: true, value: undefined });
+    Reflect.deleteProperty(window, "PushManager");
   });
   const page = await context.newPage();
   await addAuthenticator(page);
   await page.goto("/");
-  const handle = `noPush_${Date.now().toString(36).slice(-6)}`;
+  expect(await page.evaluate(() => "PushManager" in window)).toBe(false);
+  const handle = `nopush_${Date.now().toString(36).slice(-6)}`;
   await register(page, handle);
   await expect(page.getByText("Install to your Home Screen")).toBeVisible();
 
