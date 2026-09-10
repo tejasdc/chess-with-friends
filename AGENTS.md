@@ -8,6 +8,12 @@ Quick replay is local presentation state in `src/opponentReplay.ts`. It finds th
 
 The `wt` bootstrap runs `npm ci` and writes a stable per-worktree `PLAYWRIGHT_PORT` to ignored `.worktree-env`; `npm run test:e2e` sources it unless the caller supplies a port. Playwright owns its local Wrangler server and uses `.wrangler/state-<port>` for isolated test storage. No credentials or local state are copied by the bootstrap. `npm run typecheck` is the smallest fresh-worktree check. Use explicit ports when manually running simultaneous dev servers.
 
+The notification lifecycle test runs in Chromium and WebKit. WebKit obtains its
+real test-account session from a separate Chromium virtual authenticator and
+copies only session cookies; its own notification storage survives sign-out and
+reauthentication. Keep permission, subscription, sign-out and rebinding assertions
+in the target engine. CDP setup does not establish WebKit passkey support.
+
 ## Portrait-only mobile use
 
 `public/manifest.webmanifest` requests portrait orientation. Keep VitePWA's

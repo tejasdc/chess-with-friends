@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { chromium, expect, test, type Browser, type Page } from "@playwright/test";
 import { mkdirSync, readFileSync } from "node:fs";
 
 const screenDir = "tmp/reviews/screens";
@@ -14,83 +14,102 @@ type PendingPushPayload = {
 
 test.describe.configure({ mode: "serial" });
 
-test("notification prompt disappears after permission is granted and sign-out preserves the browser subscription", async ({ browser }) => {
+test("notification prompt disappears after permission is granted and sign-out preserves the browser subscription", async ({ browser, browserName, baseURL }) => {
   mkdirSync(screenDir, { recursive: true });
   const suffix = Date.now().toString(36).slice(-6);
   const context = await browser.newContext();
-  await context.addInitScript(() => {
-    const subscription = {
-      endpoint: "https://push.invalid/ui-notification-test",
-      keys: { p256dh: "test", auth: "test" },
-      toJSON() {
-        return { endpoint: this.endpoint, keys: this.keys };
-      },
-    };
-    class FakeNotification {
-      static get permission() {
-        return window.localStorage.getItem("notificationPermission") || "default";
-      }
+  // WebKit cannot emulate a passkey via CDP. Authenticate in Chromium, then
+  // exercise notification permission, sign-out and rebinding in the target engine.
+  const authBrowser = browserName === "chromium" ? null : await chromium.launch();
+  const authContext = authBrowser ? await authBrowser.newContext({ baseURL, serviceWorkers: "block" }) : context;
+  try {
+    await context.addInitScript(() => {
+      const subscription = {
+        endpoint: "https://push.invalid/ui-notification-test",
+        keys: { p256dh: "test", auth: "test" },
+        toJSON() {
+          return { endpoint: this.endpoint, keys: this.keys };
+        },
+      };
+      class FakeNotification {
+        static get permission() {
+          return window.localStorage.getItem("notificationPermission") || "default";
+        }
 
-      static async requestPermission() {
-        window.localStorage.setItem("notificationPermission", "granted");
-        return "granted";
+        static async requestPermission() {
+          window.localStorage.setItem("notificationPermission", "granted");
+          return "granted";
+        }
       }
-    }
-    const registration = {
-      pushManager: {
-        async getSubscription() {
-          return window.localStorage.getItem("notificationSubscription") ? subscription : null;
+      const registration = {
+        pushManager: {
+          async getSubscription() {
+            return window.localStorage.getItem("notificationSubscription") ? subscription : null;
+          },
+          async subscribe() {
+            window.localStorage.setItem("notificationSubscription", "true");
+            window.localStorage.setItem("notificationSubscribeCount", String(Number(window.localStorage.getItem("notificationSubscribeCount") || "0") + 1));
+            return subscription;
+          },
         },
-        async subscribe() {
-          window.localStorage.setItem("notificationSubscription", "true");
-          window.localStorage.setItem("notificationSubscribeCount", String(Number(window.localStorage.getItem("notificationSubscribeCount") || "0") + 1));
-          return subscription;
+      };
+      (subscription as typeof subscription & { unsubscribe: () => Promise<boolean> }).unsubscribe = async () => {
+        window.localStorage.setItem("notificationUnsubscribed", "true");
+        window.localStorage.removeItem("notificationSubscription");
+        return true;
+      };
+      Object.defineProperty(window, "Notification", { configurable: true, value: FakeNotification });
+      Object.defineProperty(window, "PushManager", { configurable: true, value: function PushManager() {} });
+      Object.defineProperty(navigator, "serviceWorker", {
+        configurable: true,
+        value: {
+          ready: Promise.resolve(registration),
+          register: async () => registration,
         },
-      },
-    };
-    (subscription as typeof subscription & { unsubscribe: () => Promise<boolean> }).unsubscribe = async () => {
-      window.localStorage.setItem("notificationUnsubscribed", "true");
-      window.localStorage.removeItem("notificationSubscription");
-      return true;
-    };
-    Object.defineProperty(window, "Notification", { configurable: true, value: FakeNotification });
-    Object.defineProperty(window, "PushManager", { configurable: true, value: function PushManager() {} });
-    Object.defineProperty(navigator, "serviceWorker", {
-      configurable: true,
-      value: {
-        ready: Promise.resolve(registration),
-        register: async () => registration,
-      },
+      });
     });
-  });
-  const page = await context.newPage();
-  await addAuthenticator(page);
-  await page.goto("/");
-  const handle = `notify_${suffix}`;
-  await register(page, handle);
+    const page = await context.newPage();
+    const authPage = authBrowser ? await authContext.newPage() : page;
+    await addAuthenticator(authPage);
+    const handle = `notify_${suffix}`;
+    const signIn = async () => {
+      await authPage.goto("/");
+      await register(authPage, handle);
+      if (authBrowser) {
+        // Only session cookies cross contexts; the target's push state must survive.
+        await context.addCookies(await authContext.cookies(baseURL));
+        await authPage.goto("about:blank");
+        await page.goto("/");
+        await expectSignedIn(page, handle);
+      }
+    };
+    await signIn();
 
-  await expect(page.getByRole("button", { name: "Enable notifications" })).toBeVisible();
-  await page.getByRole("button", { name: "Enable notifications" }).click();
-  await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
-  await expect(page.getByText("Notifications enabled for friend requests, challenges, and scheduled games.")).toBeVisible();
-  await shot(page, "00-notifications-enabled-prompt-gone");
+    await expect(page.getByRole("button", { name: "Enable notifications" })).toBeVisible();
+    await page.getByRole("button", { name: "Enable notifications" }).click();
+    await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
+    await expect(page.getByText("Notifications enabled for friend requests, challenges, and scheduled games.")).toBeVisible();
+    await shot(page, "00-notifications-enabled-prompt-gone");
 
-  await page.reload();
-  await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
-  await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByPlaceholder("your_handle")).toBeVisible();
-  await expect(page.evaluate(() => Notification.permission)).resolves.toBe("granted");
-  await expect(page.evaluate(async () => Boolean(await navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription())))).resolves.toBe(true);
-  await expect(page.evaluate(() => window.localStorage.getItem("notificationUnsubscribed"))).resolves.toBeNull();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page.getByPlaceholder("your_handle")).toBeVisible();
+    await expect(page.evaluate(() => Notification.permission)).resolves.toBe("granted");
+    await expect(page.evaluate(async () => Boolean(await navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription())))).resolves.toBe(true);
+    await expect(page.evaluate(() => window.localStorage.getItem("notificationUnsubscribed"))).resolves.toBeNull();
 
-  await page.evaluate(() => window.localStorage.removeItem("notificationSubscription"));
-  await register(page, handle);
-  await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
-  await expect(page.evaluate(async () => Boolean(await navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription())))).resolves.toBe(true);
-  await expect(page.evaluate(() => window.localStorage.getItem("notificationSubscribeCount"))).resolves.toBe("2");
-  await shot(page, "00-notifications-enabled-after-reload");
-  await context.close();
+    await page.evaluate(() => window.localStorage.removeItem("notificationSubscription"));
+    await signIn();
+    await expect(page.getByRole("button", { name: "Enable notifications" })).toBeHidden();
+    await expect(page.evaluate(async () => Boolean(await navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription())))).resolves.toBe(true);
+    await expect(page.evaluate(() => window.localStorage.getItem("notificationSubscribeCount"))).resolves.toBe("2");
+    await shot(page, "00-notifications-enabled-after-reload");
+  } finally {
+    await context.close();
+    await authBrowser?.close();
+  }
 });
 
 test("pending push is POST-only, consume-on-read, and ack is idempotent", async ({ browser }) => {
@@ -586,6 +605,10 @@ async function register(page: Page, handle: string) {
   // The 500ms wait above lets the probe land. Click by role+regex covers all
   // morph states without coupling the test to a specific label.
   await page.getByRole("button", { name: /^(Sign in( as @|.*sign up$)|Sign up as @|Working)/ }).click();
+  await expectSignedIn(page, handle);
+}
+
+async function expectSignedIn(page: Page, handle: string) {
   await page.getByRole("button", { name: "Open menu" }).click();
   await expect(page.getByRole("dialog", { name: "App menu" }).getByText(`@${handle}`, { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
