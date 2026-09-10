@@ -10,7 +10,9 @@ The `wt` bootstrap runs `npm ci` and writes a stable per-worktree `PLAYWRIGHT_PO
 
 ## Portrait-only mobile use
 
-`public/manifest.webmanifest` requests portrait orientation. `src/PortraitOnly.tsx`
+`public/manifest.webmanifest` requests portrait orientation. Keep VitePWA's
+`manifest: false` so its generated defaults cannot overwrite that file in builds.
+`src/PortraitOnly.tsx`
 also attempts the browser lock and blocks touch-device landscape interaction with
 a rotate-to-portrait notice when the browser refuses it. Keep the app mounted
 behind the notice so form input, game state, and live connections survive rotation.

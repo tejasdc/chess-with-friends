@@ -53,6 +53,20 @@ async function expectReadablePieces(page: Page) {
 }
 
 const errors = new WeakMap<Page, string[]>();
+
+test("the served install manifest requests portrait and retains the app identity", async ({ page, request }) => {
+  const response = await request.get("/manifest.webmanifest");
+  expect(response.ok()).toBe(true);
+  const manifest = await response.json();
+  expect(manifest.orientation).toBe("portrait");
+  expect(manifest.name).toBe("two chairs");
+  expect(manifest.icons).toEqual(expect.arrayContaining([
+    expect.objectContaining({ src: "/icon-512.png" }),
+  ]));
+  await page.goto("/");
+  await expect(page.locator('link[rel="manifest"]')).toHaveCount(1);
+});
+
 test.beforeEach(async ({ page }) => {
   const pageErrors: string[] = [];
   errors.set(page, pageErrors);
